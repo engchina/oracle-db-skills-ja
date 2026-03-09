@@ -1,8 +1,6 @@
 # Oracle DB Skills
 
-A comprehensive reference library covering every major aspect of working with Oracle Database — from SQL development and PL/SQL best practices to performance tuning, security, migrations, ORDS, and AI-assisted development via the SQLcl MCP server.
-
-**102 reference guides** organized across 14 categories. Each file is a standalone comprehensive guide with explanations, practical examples, best practices, and common mistakes.
+Oracle DB Skills is a curated library of 100+ practical, documentation-backed guides for working with Oracle Database, organized by domain: SQL and PL/SQL development, performance tuning, security, administration, monitoring, architecture, DevOps, migrations, SQLcl, ORDS, and Oracle-specific features. Each guide includes actionable examples, best practices, common pitfalls, sources, and explicit Oracle version compatibility notes for 19c and 26ai.
 
 ## Version Coverage Standard
 
