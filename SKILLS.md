@@ -2,7 +2,7 @@
 
 102 Oracle Database reference guides for AI agents. Each file is a standalone skill covering one topic with examples, best practices, and common mistakes.
 
-**Install:** `npx skills add klrice/oracledb-skills`
+**Install:** `npx skills add krisrice/oracle-db-skills`
 
 ---
 
