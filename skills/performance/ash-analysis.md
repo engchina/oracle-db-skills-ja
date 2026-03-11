@@ -1,91 +1,91 @@
-# ASH Analysis — Active Session History
+# ASH 分析 (Active Session History)
 
-## Overview
+## 概要
 
-Active Session History (ASH) is Oracle's in-memory, sampled session activity repository. Every second, Oracle samples all sessions that are active (not idle) and records a row per active session into a circular in-memory buffer (`V$ACTIVE_SESSION_HISTORY`). The ASH data flushed to disk is stored in `DBA_HIST_ACTIVE_SESS_HISTORY` and retained as part of AWR.
+**Active Session History (ASH)** は、Oracle のインメモリでサンプリングされたセッション・アクティビティ・リポジトリである。Oracle は 1 秒ごとに、アクティブな（アイドル状態ではない）すべてのセッションをサンプリングし、アクティブ・セッションごとに 1 行を循環インメモリ・バッファ (`V$ACTIVE_SESSION_HISTORY`) に記録する。ディスクにフラッシュされた ASH データは `DBA_HIST_ACTIVE_SESS_HISTORY` に保存され、AWR の一部として保持される。
 
-ASH fills the critical gap between AWR (snapshot-level, coarse-grained) and real-time V$ views (current moment only). It enables retrospective, second-by-second analysis without requiring continuous monitoring.
+ASH は、AWR（スナップショット・レベル、粗い粒度）とリアルタイムの V$ ビュー（現時点のみ）の間の重要なギャップを埋めるものである。これにより、継続的な監視を必要とせずに、1 秒ごとの遡及的な分析が可能になる。
 
-**Licensing Note:** ASH is part of the Oracle Diagnostics Pack and requires a separate license beyond the base database license.
+**ライセンスに関する注意:** ASH は Oracle Diagnostics Pack の一部であり、ベースのデータベース・ライセンスとは別にライセンスが必要である。
 
 ---
 
-## Key Concepts
+## 主要な概念
 
-### Sampling Mechanics
+### サンプリング・メカニズム
 
-- Oracle samples all active (non-idle) sessions **once per second**
-- Each sample row captures: session ID, SQL ID, wait event, object accessed, user, module, action, plan hash value, blocking session, and more
-- The in-memory buffer holds approximately **1 hour** of data (older data is flushed to disk)
-- The disk-based `DBA_HIST_ACTIVE_SESS_HISTORY` retains a **1-in-10 subsample** of ASH data (every 10th second) for long-term retention
+- Oracle は、アクティブな（アイドルでない）すべてのセッションを **1 秒に 1 回** サンプリングする。
+- 各サンプル行には、セッション ID、SQL ID、待機イベント、アクセスされたオブジェクト、ユーザー、モジュール、アクション、プラン・ハッシュ値、ブロッキング・セッションなどが記録される。
+- インメモリ・バッファには、約 **1 時間分** のデータが保持される（古いデータはディスクにフラッシュされる）。
+- ディスク・ベースの `DBA_HIST_ACTIVE_SESS_HISTORY` は、長期保存のために ASH データの **10 分の 1 のサブサンプル**（10 秒ごと）を保持する。
 
 ### AAS (Average Active Sessions)
 
-The primary metric derived from ASH. Count the number of ASH rows in a time window and divide by the number of seconds:
+ASH から導出される主要なメトリック。特定の時間枠内の ASH 行数を数え、秒数で割ることで算出される：
 
 ```
-AAS = COUNT(ash_rows) / seconds_in_window
+AAS = COUNT(ash_rows) / 期間の秒数
 ```
 
-AAS above your CPU count means the database is over-saturated. AAS broken down by wait class or event reveals where time is being spent.
+AAS が物理 CPU 数を超えている場合、データベースが過飽和状態であることを意味する。AAS を待機クラスやイベントごとに分解することで、どこに時間が費やされているかが明らかになる。
 
-### Session States
+### セッション状態 (Session States)
 
-Each ASH row has a `SESSION_STATE`:
-- `ON CPU` — the session was consuming CPU at sample time
-- `WAITING` — the session was waiting on a specific event
+各 ASH 行には `SESSION_STATE` がある：
+- `ON CPU` — サンプリング時にセッションが CPU を消費していた。
+- `WAITING` — セッションが特定のイベントを待機していた。
 
-The `WAIT_CLASS` and `EVENT` columns further classify waiting sessions.
+`WAIT_CLASS` 列と `EVENT` 列によって、待機中のセッションがさらに分類される。
 
 ---
 
-## Core Views
+## 主要なビュー
 
-### V$ACTIVE_SESSION_HISTORY (In-Memory, Real-Time)
+### V$ACTIVE_SESSION_HISTORY (インメモリ、リアルタイム)
 
-Approximately the last hour of sampled data. Every row is a sample.
+過去約 1 時間のサンプリング・データ。各行が 1 つのサンプルを表す。
 
 ```sql
--- Schema preview
+-- スキーマの確認
 DESC v$active_session_history
 ```
 
-Key columns:
+主要な列:
 
-| Column | Description |
+| 列名 | 説明 |
 |---|---|
-| `SAMPLE_TIME` | Timestamp of the sample (1-second resolution) |
-| `SESSION_ID` | SID of the sampled session |
-| `SESSION_SERIAL#` | Serial number to uniquely identify session |
-| `USER_ID` | Numeric user ID |
-| `SQL_ID` | SQL being executed at sample time |
-| `SQL_PLAN_HASH_VALUE` | Plan being used |
-| `SESSION_STATE` | `ON CPU` or `WAITING` |
-| `WAIT_CLASS` | Category of wait event |
-| `EVENT` | Specific wait event name |
-| `CURRENT_OBJ#` | Object being accessed |
-| `CURRENT_FILE#` | Datafile number |
-| `CURRENT_BLOCK#` | Block number (for I/O waits) |
-| `BLOCKING_SESSION` | SID of the blocker (for lock waits) |
-| `MODULE` | Application module name |
-| `ACTION` | Application action name |
-| `PROGRAM` | Client program name |
-| `MACHINE` | Client machine name |
-| `PGA_ALLOCATED` | PGA memory at sample time |
-| `TEMP_SPACE_ALLOCATED` | Temp space at sample time |
+| `SAMPLE_TIME` | サンプルのタイムスタンプ（1 秒単位） |
+| `SESSION_ID` | サンプリングされたセッションの SID |
+| `SESSION_SERIAL#` | セッションを一意に識別するためのシリアル番号 |
+| `USER_ID` | ユーザー ID |
+| `SQL_ID` | サンプリング時に実行されていた SQL の ID |
+| `SQL_PLAN_HASH_VALUE` | 使用されていた実行プランのハッシュ値 |
+| `SESSION_STATE` | `ON CPU` または `WAITING` |
+| `WAIT_CLASS` | 待機イベントのカテゴリ |
+| `EVENT` | 具体的な待機イベント名 |
+| `CURRENT_OBJ#` | アクセスされていたオブジェクト |
+| `CURRENT_FILE#` | データファイル番号 |
+| `CURRENT_BLOCK#` | ブロック番号（I/O 待機の場合） |
+| `BLOCKING_SESSION` | ブロッカーの SID（ロック待機の場合） |
+| `MODULE` | アプリケーションのモジュール名 |
+| `ACTION` | アプリケーションのアクション名 |
+| `PROGRAM` | クライアントのプログラム名 |
+| `MACHINE` | クライアントのマシン名 |
+| `PGA_ALLOCATED` | サンプリング時の PGA メモリ割り当て量 |
+| `TEMP_SPACE_ALLOCATED` | サンプリング時のテンポラリ領域割り当て量 |
 
-### DBA_HIST_ACTIVE_SESS_HISTORY (Disk-Based, Historical)
+### DBA_HIST_ACTIVE_SESS_HISTORY (ディスク・ベース、履歴)
 
-Same structure as `V$ACTIVE_SESSION_HISTORY` but with additional columns (`SNAP_ID`, `DBID`, `INSTANCE_NUMBER`) and a 10x reduction in sampling frequency.
+`V$ACTIVE_SESSION_HISTORY` と同じ構造だが、追加の列 (`SNAP_ID`, `DBID`, `INSTANCE_NUMBER`) があり、サンプリング頻度は 10 分の 1 に低下している。
 
 ---
 
-## Real-Time ASH Analysis
+## リアルタイム ASH 分析
 
-### Current Activity Snapshot
+### 現在のアクティビティ・スナップショット
 
 ```sql
--- What is happening right now (last 5 minutes)
+-- 現在（過去 5 分間）何が起きているか
 SELECT event,
        COUNT(*) AS samples,
        ROUND(COUNT(*) / (5*60), 2) AS avg_active_sessions,
@@ -97,7 +97,7 @@ GROUP  BY event
 ORDER  BY samples DESC;
 ```
 
-### Top SQL by ASH (Last 30 Minutes)
+### ASH による Top SQL (過去 30 分間)
 
 ```sql
 SELECT ash.sql_id,
@@ -113,7 +113,7 @@ ORDER  BY samples DESC
 FETCH  FIRST 15 ROWS ONLY;
 ```
 
-### Top SQL by Wait Class (Last Hour)
+### 待機クラス別 Top SQL (過去 1 時間)
 
 ```sql
 SELECT sql_id,
@@ -129,10 +129,10 @@ ORDER  BY samples DESC
 FETCH  FIRST 20 ROWS ONLY;
 ```
 
-### Active Session Trend (Per-Minute Breakdown)
+### アクティブ・セッションの推移 (分単位の分解)
 
 ```sql
--- AAS per minute for the last hour — spot the spike
+-- 過去 1 時間の 1 分あたりの AAS — スパイクの特定
 SELECT TRUNC(sample_time, 'MI')           AS sample_minute,
        COUNT(*)                           AS samples,
        ROUND(COUNT(*) / 60, 2)           AS aas,
@@ -145,10 +145,10 @@ GROUP  BY TRUNC(sample_time, 'MI')
 ORDER  BY sample_minute;
 ```
 
-### Blocking Session Analysis
+### ブロッキング・セッション分析
 
 ```sql
--- Find blocking chains from ASH
+-- ASH からブロッキング・チェーンを特定する
 SELECT sample_time,
        session_id,
        blocking_session,
@@ -161,10 +161,10 @@ WHERE  blocking_session IS NOT NULL
 ORDER  BY sample_time DESC, seconds_in_wait DESC;
 ```
 
-### Per-Session Activity
+### セッションごとのアクティビティ
 
 ```sql
--- What was a specific session doing over the last hour?
+-- 特定のセッションが過去 1 時間に何をしていたか
 SELECT sample_time,
        sql_id,
        session_state,
@@ -180,18 +180,18 @@ ORDER  BY sample_time;
 
 ---
 
-## Historical ASH Analysis
+## 履歴 ASH 分析
 
-For events older than ~1 hour, query `DBA_HIST_ACTIVE_SESS_HISTORY`. Remember that this view has 1/10th the resolution.
+約 1 時間より古いイベントについては、`DBA_HIST_ACTIVE_SESS_HISTORY` をクエリする。このビューの解像度は 10 分の 1 であることに注意が必要である。
 
-### Top Wait Events During a Past Incident
+### 過去のインシデント時の Top 待機イベント
 
 ```sql
--- Analyze an incident window: e.g., 2:00 AM to 3:00 AM yesterday
+-- インシデントの時間枠を分析: 例: 昨日の午前 2:00 から 3:00
 SELECT event,
        wait_class,
        COUNT(*)                              AS samples,
-       ROUND(COUNT(*) * 10 / 3600, 2)       AS approx_aas  -- multiply by 10 for 1-in-10 sample
+       ROUND(COUNT(*) * 10 / 3600, 2)       AS approx_aas  -- 1/10 サンプルのため 10 倍する
 FROM   dba_hist_active_sess_history
 WHERE  sample_time BETWEEN
          TO_TIMESTAMP('2026-03-05 02:00:00', 'YYYY-MM-DD HH24:MI:SS')
@@ -203,11 +203,11 @@ GROUP  BY event, wait_class
 ORDER  BY samples DESC;
 ```
 
-### Historical Top SQL
+### 履歴 Top SQL
 
 ```sql
 SELECT ash.sql_id,
-       COUNT(*) * 10                                   AS approx_seconds,  -- adjust for 1-in-10
+       COUNT(*) * 10                                   AS approx_seconds,  -- 1/10 サンプルの調整
        ROUND(COUNT(*) * 10 / 3600, 2)                 AS aas,
        SUBSTR(sql.sql_text, 1, 100)                   AS sql_text
 FROM   dba_hist_active_sess_history ash
@@ -222,10 +222,10 @@ ORDER  BY approx_seconds DESC
 FETCH  FIRST 20 ROWS ONLY;
 ```
 
-### Per-Object Hot Spot Analysis
+### オブジェクトごとのホットスポット分析
 
 ```sql
--- Which objects (tables/indexes) were causing the most I/O waits?
+-- どのオブジェクト（表/索引）が最も多くの I/O 待機を引き起こしていたか
 SELECT o.owner,
        o.object_name,
        o.object_type,
@@ -240,10 +240,10 @@ ORDER  BY wait_samples DESC
 FETCH  FIRST 15 ROWS ONLY;
 ```
 
-### Time-Series Breakdown by Wait Class
+### 待機クラス別タイムシリーズ分解
 
 ```sql
--- Stacked area chart data: activity breakdown per 5-minute bucket
+-- 積み上げエリアチャート用のデータ: 5 分ごとのアクティビティ分解
 SELECT TRUNC(sample_time, 'HH24') +
          FLOOR(TO_NUMBER(TO_CHAR(sample_time,'MI')) / 5) * 5 / 1440 AS bucket,
        wait_class,
@@ -253,22 +253,22 @@ WHERE  sample_time > SYSDATE - 7
   AND  session_type = 'FOREGROUND'
   AND  wait_class  != 'Idle'
 GROUP  BY TRUNC(sample_time, 'HH24') +
-            FLOOR(TO_NUMBER(TO_CHAR(sample_time,'MI')) / 5) * 5 / 1440,
-          wait_class
+             FLOOR(TO_NUMBER(TO_CHAR(sample_time,'MI')) / 5) * 5 / 1440,
+           wait_class
 ORDER  BY bucket, wait_class;
 ```
 
 ---
 
-## ASH Report Generation
+## ASH レポートの生成
 
-Oracle provides a built-in report script that produces a formatted ASH analysis report similar in style to AWR:
+Oracle には、AWR レポートに似た形式の ASH 分析レポートを生成する組み込みスクリプトが用意されている：
 
 ```sql
--- Interactive script (prompts for time range or snap IDs)
+-- 対話型スクリプト (時間範囲やスナップ ID の入力を求められる)
 @$ORACLE_HOME/rdbms/admin/ashrpt.sql
 
--- Programmatic HTML report
+-- プログラムによる HTML レポート
 SELECT output
 FROM   TABLE(
          DBMS_WORKLOAD_REPOSITORY.ASH_REPORT_HTML(
@@ -279,7 +279,7 @@ FROM   TABLE(
          )
        );
 
--- Programmatic text report
+-- プログラムによるテキスト・レポート
 SELECT output
 FROM   TABLE(
          DBMS_WORKLOAD_REPOSITORY.ASH_REPORT_TEXT(
@@ -291,24 +291,24 @@ FROM   TABLE(
        );
 ```
 
-### ASH Report Key Sections
+### ASH レポートの主要セクション
 
-1. **Top User Events** — events consuming the most sampled time
-2. **Top Background Events** — LGWR, DBWR, CKPT activity
-3. **Top SQL with Top Events** — SQL ID ranked by sampled time, with associated waits
-4. **Top SQL with Top Row Sources** — where in the plan the time was spent
-5. **Top Sessions** — which sessions consumed the most time
-6. **Top Objects/Files/Latches** — object-level hot spots
-7. **Activity Over Time** — time-series view to identify when the problem started/ended
+1. **Top User Events** — 最も多くのサンプル時間を消費したイベント。
+2. **Top Background Events** — LGWR, DBWR, CKPT などのアクティビティ。
+3. **Top SQL with Top Events** — 消費時間順の SQL ID と関連する待機。
+4. **Top SQL with Top Row Sources** — 実行プラン内のどこで時間が消費されたか。
+5. **Top Sessions** — 最も多くの時間を消費したセッション。
+6. **Top Objects/Files/Latches** — オブジェクト・レベルのホットスポット。
+7. **Activity Over Time** — 問題の開始と終了を特定するためのタイムシリーズ・ビュー。
 
 ---
 
-## Identifying Session-Level Bottlenecks
+## セッション・レベルのボトルネックの特定
 
-### Scenario: "User reports query was slow between 9:00 and 9:15 AM"
+### シナリオ: 「午後 9:00 から 9:15 の間にクエリが遅かったという報告」
 
 ```sql
--- Step 1: Confirm activity spike
+-- ステップ 1: アクティビティのスパイクを確認する
 SELECT TRUNC(sample_time, 'MI') AS minute,
        COUNT(*)                 AS samples
 FROM   dba_hist_active_sess_history
@@ -320,7 +320,7 @@ WHERE  sample_time BETWEEN
 GROUP  BY TRUNC(sample_time, 'MI')
 ORDER  BY minute;
 
--- Step 2: Find the top SQL during the incident
+-- ステップ 2: インシデント時の Top SQL を特定する
 SELECT sql_id, COUNT(*) AS samples
 FROM   dba_hist_active_sess_history
 WHERE  sample_time BETWEEN
@@ -332,7 +332,7 @@ GROUP  BY sql_id
 ORDER  BY samples DESC
 FETCH  FIRST 10 ROWS ONLY;
 
--- Step 3: Find the user/session involved
+-- ステップ 3: 該当するユーザー/セッションを特定する
 SELECT session_id, user_id, module, action, program, machine,
        COUNT(*) AS samples
 FROM   dba_hist_active_sess_history
@@ -344,7 +344,7 @@ WHERE  sql_id = :suspect_sql_id
 GROUP  BY session_id, user_id, module, action, program, machine
 ORDER  BY samples DESC;
 
--- Step 4: Determine what the session was waiting on
+-- ステップ 4: セッションが何を待機していたかを確認する
 SELECT event, COUNT(*) AS samples
 FROM   dba_hist_active_sess_history
 WHERE  sql_id = :suspect_sql_id
@@ -356,10 +356,10 @@ GROUP  BY event
 ORDER  BY samples DESC;
 ```
 
-### Scenario: Finding the Root Blocker
+### シナリオ: 根本的なブロッカーの特定
 
 ```sql
--- Reconstruct a blocking chain from ASH
+-- ASH からブロッキング・チェーンを再構成する
 SELECT LPAD(' ', 2*(LEVEL-1)) || session_id AS session_tree,
        blocking_session,
        event,
@@ -377,35 +377,35 @@ ORDER  SIBLINGS BY session_id;
 
 ---
 
-## ASH vs AWR: When to Use Each
+## ASH vs AWR: 使い分け
 
-| Scenario | Use |
+| シナリオ | 推奨ツール |
 |---|---|
-| Incident occurred in the last 60 minutes | `V$ACTIVE_SESSION_HISTORY` |
-| Incident occurred up to 8-30 days ago | `DBA_HIST_ACTIVE_SESS_HISTORY` |
-| Need second-by-second granularity | `V$ACTIVE_SESSION_HISTORY` |
-| Need to understand overall workload trends | AWR report |
-| Need to identify exactly which SQL was slow | ASH (SQL_ID per sample) |
-| Need to prove a regression across releases | AWR compare-period report |
-| Need < 10-second resolution for old data | Not possible; only in-memory ASH has 1s resolution |
+| 過去 60 分以内に発生したインシデント | `V$ACTIVE_SESSION_HISTORY` |
+| 8 〜 30 日前までに発生したインシデント | `DBA_HIST_ACTIVE_SESS_HISTORY` |
+| 秒単位の詳細な粒度が必要な場合 | `V$ACTIVE_SESSION_HISTORY` |
+| ワークロード全体の傾向を把握したい場合 | AWR レポート |
+| どの SQL が遅かったか具体的に特定したい場合 | ASH (サンプルごとの SQL_ID) |
+| リリース間でのパフォーマンス低下を証明したい場合 | AWR 期間比較レポート |
+| 古いデータで 10 秒未満の解像度が必要な場合 | 不可能（インメモリ ASH のみ 1 秒解像度） |
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Annotate incidents with module/action.** When application code sets `DBMS_APPLICATION_INFO.SET_MODULE` and `SET_ACTION`, ASH data becomes vastly more useful for post-incident analysis.
-- **Do not purge ASH data unnecessarily.** Since it samples 1-in-10 for disk storage, every row is precious for historical analysis.
-- **Always filter `session_type = 'FOREGROUND'`** unless you specifically need background process analysis. Background waits often reflect system housekeeping rather than user-visible performance.
-- **Account for the 10x multiplier** when comparing in-memory vs. disk-based ASH. `V$ACTIVE_SESSION_HISTORY` has all samples; `DBA_HIST` has 1/10th.
-- **Combine with SQL execution plans.** Once you identify the top SQL_ID from ASH, use `DBMS_XPLAN.DISPLAY_AWR` (or `DISPLAY_WORKLOAD_REPOSITORY` in 23c+) to pull the historical plan.
+- **モジュール/アクションでインシデントを注釈する。** アプリケーション・コードで `DBMS_APPLICATION_INFO.SET_MODULE` と `SET_ACTION` を設定すると、インシデント後の ASH 分析が非常に容易になる。
+- **必要以上に ASH データを削除しない。** ディスク保存時は 10 分の 1 にサンプリングされるため、履歴分析において各行は非常に貴重である。
+- **常に `session_type = 'FOREGROUND'` でフィルタリングする。** 背景プロセスの分析が特に必要でない限りこれを行う。背景プロセスの待機は、ユーザーに直接見えるパフォーマンスではなく、システムの管理タスクを反映していることが多い。
+- **インメモリとディスク・ベースの ASH を比較する際は 10 倍の乗数を考慮する。** `V$ACTIVE_SESSION_HISTORY` はすべてのサンプルを保持しているが、`DBA_HIST` は 1/10 である。
+- **SQL 実行プランと組み合わせる。** ASH から Top SQL_ID を特定したら、`DBMS_XPLAN.DISPLAY_AWR` (23c 以降は `DISPLAY_WORKLOAD_REPOSITORY`) を使用して履歴プランを取得する。
 
 ```sql
--- Pull a historical execution plan for a SQL found in ASH
--- Note: DISPLAY_AWR is deprecated in Oracle 23c+; use DISPLAY_WORKLOAD_REPOSITORY for new code
+-- ASH で見つかった SQL の履歴実行プランを取得する
+-- 注: DISPLAY_AWR は Oracle 23c+ で非推奨。新しいコードでは DISPLAY_WORKLOAD_REPOSITORY を使用
 SELECT * FROM TABLE(
   DBMS_XPLAN.DISPLAY_AWR(
     sql_id        => 'abc123xyz',
-    plan_hash_value => NULL,  -- NULL = show all plans
+    plan_hash_value => NULL,  -- NULL = すべてのプランを表示
     db_id         => NULL,
     format        => 'TYPICAL'
   )
@@ -414,30 +414,30 @@ SELECT * FROM TABLE(
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Impact | Fix |
+| 間違い | 影響 | 対策 |
 |---|---|---|
-| Forgetting `session_type = 'FOREGROUND'` | Background process waits pollute results | Always add the filter |
-| Not multiplying by 10 for `DBA_HIST` | AAS appears 10x lower than reality | Multiply count by 10 for disk-based data |
-| Querying `DBA_HIST` for the last 5 minutes | Row may not be flushed yet | Use `V$ACTIVE_SESSION_HISTORY` for recent data |
-| Treating every ASH sample as 1 second exactly | Sampling jitter exists (GC pauses, heavy load) | Use time-range aggregation, not per-row timing |
-| Ignoring `CURRENT_OBJ#` for I/O waits | Miss the hot object | Join to `DBA_OBJECTS` to identify hot segments |
-| Confusing `BLOCKING_SESSION` with root cause | Blocker may itself be blocked | Trace the full chain; the root is a session not waiting on another session |
+| `session_type = 'FOREGROUND'` を忘れる | 背景プロセスの待機が結果を汚染する | 常にフィルタを追加する |
+| `DBA_HIST` の解析で 10 倍を忘れる | AAS が現実の 10 分の 1 に見える | ディスク・ベースのデータではカウントを 10 倍する |
+| 過去 5 分間について `DBA_HIST` をクエリする | 行がまだフラッシュされていない可能性がある | 直近のデータには `V$ACTIVE_SESSION_HISTORY` を使用する |
+| すべての ASH サンプルを正確に 1 秒として扱う | サンプリングの揺らぎ（GC 停止、高負荷）が存在する | 行ごとのタイミングではなく、時間範囲の集約を使用する |
+| I/O 待機における `CURRENT_OBJ#` を無視する | 原因となっているオブジェクトを見逃す | `DBA_OBJECTS` と結合してホット・セグメントを特定する |
+| `BLOCKING_SESSION` を根本原因と混同する | ブロッカー自身がブロックされている可能性がある | チェーン全体を追跡する。根本原因は他を待機していないセッションである |
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。混在環境では 19c 互換の代替策を保持すること。
+- 19c と 26ai の両方をサポートする環境では、リリース更新によってデフォルトや非推奨が異なる場合があるため、両方のバージョンで構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c Performance Tuning Guide (TGDBA)](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgdba/)
 - [V$ACTIVE_SESSION_HISTORY — Oracle Database 19c Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-ACTIVE_SESSION_HISTORY.html)
 - [DBA_HIST_ACTIVE_SESS_HISTORY — Oracle Database 19c Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/DBA_HIST_ACTIVE_SESS_HISTORY.html)
 - [DBMS_WORKLOAD_REPOSITORY — Oracle Database 19c PL/SQL Packages and Types Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_WORKLOAD_REPOSITORY.html)
 - [DBMS_XPLAN — Oracle Database 19c PL/SQL Packages and Types Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_XPLAN.html)
+ase/19/arpls/DBMS_XPLAN.html)

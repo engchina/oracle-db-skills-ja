@@ -1,42 +1,42 @@
-# Health Monitor and Database Advisors
+# ヘルス・モニターとデータベース・アドバイザ
 
-## Overview
+## 概要
 
-Oracle's Health Monitor is a framework built into the database kernel that provides automated, on-demand, or scheduled diagnostic checks against the database's structural integrity. It is the proactive counterpart to reactive alert log monitoring—instead of waiting for errors to appear, Health Monitor actively interrogates the database internals to surface problems before they cause data loss or downtime.
+Oracle のヘルス・モニター (Health Monitor) は、データベース・カーネルに組み込まれたフレームワークであり、データベースの構造的な整合性に対して、自動的、オンデマンド、またはスケジュールされた診断チェックを提供する。これは、リアクティブなアラート・ログ監視に対するプロアクティブな対応策である。エラーの発生を待つのではなく、ヘルス・モニターはデータベースの内部を能動的に調査し、データ損失やダウンタイムの原因となる前に問題を表面化させる。
 
-The Health Monitor is accessed through the `DBMS_HM` PL/SQL package and its results are stored in the ADR. Closely related are Oracle's advisory framework components—the SQL Tuning Advisor, Segment Advisor, and Memory Advisor—which provide actionable recommendations for performance and space management rather than structural integrity.
+ヘルス・モニターには `DBMS_HM` PL/SQL パッケージを介してアクセスし、その結果は ADR に保存される。また、Oracle のアドバイザ・フレームワーク・コンポーネント（SQL チューニング・アドバイザ、セグメント・アドバイザ、メモリー・アドバイザなど）とも密接に関連している。これらは構造的な整合性ではなく、パフォーマンスや領域管理に関する実行可能な推奨事項を提供する。
 
 ---
 
-## Health Monitor Architecture
+## ヘルス・モニターのアーキテクチャ
 
-### Components
+### コンポーネント
 
-- **Health Monitor Checks (Runners):** Pre-built diagnostic routines, each targeting a specific layer of the database stack.
-- **Findings:** The output of each check run—structured records describing what was found (healthy, failed, or advisory).
-- **Recommendations:** Actions Oracle suggests based on findings (repair scripts, SQL, RMAN commands).
-- **DBMS_HM:** The PL/SQL API for running checks and retrieving results.
-- **ADR Integration:** All findings and recommendations are stored in the ADR and accessible via `V$HM_*` views and `adrci`.
+- **ヘルス・チェック (Health Monitor Checks):** データベース・スタックの特定の層を対象とした、事前定義済みの診断ルーチン。
+- **検出結果 (Findings):** 各チェックの実行出力。見つかった内容（正常、失敗、またはアドバイザリ）を記述した構造化レコード。
+- **推奨事項 (Recommendations):** 検出結果に基づいて Oracle が提案するアクション（修復スクリプト、SQL、RMAN コマンド）。
+- **DBMS_HM:** チェックを実行し、結果を取得するための PL/SQL API。
+- **ADR 統合:** すべての検出結果と推奨事項は ADR に保存され、`V$HM_*` ビューおよび `adrci` を介してアクセス可能である。
 
-### V$ Views for Health Monitor
+### ヘルス・モニター用 V$ ビュー
 
-| View | Description |
+| ビュー名 | 説明 |
 |------|-------------|
-| `V$HM_CHECK` | All available health checks and their current status |
-| `V$HM_CHECK_PARAM` | Parameters each check accepts |
-| `V$HM_RUN` | Historical check runs with start/end times and status |
-| `V$HM_FINDING` | Findings produced by each check run |
-| `V$HM_RECOMMENDATION` | Recommendations based on findings |
-| `V$HM_INFO` | Additional informational details about findings |
+| `V$HM_CHECK` | 利用可能なすべてのヘルス・チェックとその現在のステータス |
+| `V$HM_CHECK_PARAM` | 各チェックが受け入れるパラメータ |
+| `V$HM_RUN` | 開始/終了時間とステータスを含む、過去のチェック実行履歴 |
+| `V$HM_FINDING` | 各チェック実行によって生成された検出結果 |
+| `V$HM_RECOMMENDATION` | 検出結果に基づく推奨事項 |
+| `V$HM_INFO` | 検出結果に関する追加の情報詳細 |
 
 ---
 
-## Built-in Health Checks
+## 組み込みヘルス・チェック
 
-### Complete List with Descriptions
+### チェック項目のリストと説明
 
 ```sql
--- View all available health checks
+-- 利用可能なすべてのヘルス・チェックを表示する
 SELECT name,
        description,
        internal_check,
@@ -45,60 +45,60 @@ FROM   v$hm_check
 ORDER BY name;
 ```
 
-#### DB Structure Integrity Check
+#### DB 構造整合性チェック (DB Structure Integrity Check)
 
-Validates the consistency of the database's control file, datafile headers, and redo log headers. Checks that all files listed in the control file exist, are accessible, and have consistent SCNs.
+データベースの制御ファイル、データファイル・ヘッダー、および REDO ログ・ヘッダーの整合性を検証する。制御ファイルにリストされているすべてのファイルが存在し、アクセス可能で、一貫した SCN を持っていることを確認する。
 
-- **Use when:** After a crash, after restoring from backup, suspecting control file corruption
-- **Offline capable:** Yes (can run in mount mode)
-- **Run time:** Fast (seconds to minutes)
+- **使用場面:** クラッシュ後、バックアップからのリストア後、制御ファイルの破損が疑われる場合
+- **オフライン実行の可否:** 可 (マウント・モードで実行可能)
+- **実行時間:** 短い (数秒から数分)
 
-#### Data Block Integrity Check
+#### データ・ブロック整合性チェック (Data Block Integrity Check)
 
-Scans data blocks for logical corruption (bad checksums, invalid block types, mismatched object IDs). Does not check every block by default—targeted at blocks already identified as suspect.
+データ・ブロックをスキャンして、論理的な破損（不正なチェックサム、無効なブロック・タイプ、オブジェクト ID の不一致）がないかを確認する。デフォルトですべてのブロックをチェックするわけではなく、疑わしいと特定されたブロックを対象とする。
 
-- **Use when:** After an ORA-01578 (corrupt block), after storage failures
-- **Offline capable:** No (requires open database)
-- **Run time:** Varies by scope
+- **使用場面:** ORA-01578 (ブロック破損) 発生後、ストレージ故障後
+- **オフライン実行の可否:** 否 (データベースがオープンしている必要がある)
+- **実行時間:** 範囲によって異なる
 
-#### Redo Integrity Check
+#### REDO 整合性チェック (Redo Integrity Check)
 
-Validates the redo log files and archived redo logs for completeness and readability. Identifies gaps or unreadable redo that would prevent recovery.
+REDO ログ・ファイルとアーカイブ REDO ログの完全性と読み取り可能性を検証する。リカバリを妨げる可能性のあるギャップや読み取り不能な REDO を特定する。
 
-- **Use when:** Before or after media recovery, investigating redo-related ORA- errors
-- **Offline capable:** Yes
+- **使用場面:** メディア・リカバリの前後、REDO 関連の ORA- エラーの調査時
+- **オフライン実行の可否:** 可
 
-#### Undo Segment Integrity Check
+#### UNDO セグメント整合性チェック (Undo Segment Integrity Check)
 
-Verifies that all undo segments referenced in the system are accessible and consistent. Detects undo corruption that could cause ORA-01578 or ORA-00600 errors related to transaction rollback.
+システムで参照されているすべての UNDO セグメントがアクセス可能で一貫していることを検証する。トランザクションのロールバックに関連する ORA-01578 または ORA-00600 エラーの原因となる UNDO 破損を検出する。
 
-- **Use when:** After unexpected shutdowns, investigating ORA-01555 or rollback errors
-- **Offline capable:** No
+- **使用場面:** 予期しないシャットダウン後、ORA-01555 またはロールバック・エラーの調査時
+- **オフライン実行の可否:** 否
 
-#### Transaction Integrity Check
+#### トランザクション整合性チェック (Transaction Integrity Check)
 
-Examines a specific transaction to verify its undo records are complete and consistent. Useful when a specific transaction is suspected to be corrupt.
+特定のトランザクションを調査して、その UNDO レコードが完全で一貫しているかどうかを検証する。特定のトランザクションに破損の疑いがある場合に役立つ。
 
-- **Use when:** Targeted investigation of a specific transaction ID
-- **Parameters:** Requires `TXN_ID` parameter
-- **Offline capable:** No
+- **使用場面:** 特定のトランザクション ID の重点的な調査
+- **パラメータ:** `TXN_ID` パラメータが必要
+- **オフライン実行の可否:** 否
 
-#### Dictionary Integrity Check
+#### ディクショナリ整合性チェック (Dictionary Integrity Check)
 
-Validates the internal consistency of the Oracle data dictionary—the master catalog of all database objects. A corrupt dictionary can cause cascading failures across all database operations.
+すべてのデータベース・オブジェクトのマスター・カタログである Oracle データ・ディクショナリの内部的な一貫性を検証する。ディクショナリの破損は、すべてのデータベース操作にわたって連鎖的な障害を引き起こす可能性がある。
 
-- **Use when:** After applying patches, after failed DDL operations, after ORA-00600 errors involving dict_ arguments
-- **Offline capable:** No
-- **Run time:** Can be slow on large databases
+- **使用場面:** パッチ適用後、DDL 操作の失敗後、`dict_` 引数を含む ORA-00600 エラーの発生後
+- **オフライン実行の可否:** 否
+- **実行時間:** 大規模なデータベースでは時間がかかる場合がある
 
 ---
 
-## Running Health Checks
+## ヘルス・チェックの実行
 
-### Basic Syntax
+### 基本構文
 
 ```sql
--- Minimum required: check name and run name
+-- 必須項目：チェック名と実行名
 BEGIN
     DBMS_HM.run_check(
         check_name => 'DB Structure Integrity Check',
@@ -108,10 +108,10 @@ END;
 /
 ```
 
-### Running All Key Checks
+### すべての主要なチェックの実行
 
 ```sql
--- DB Structure Integrity
+-- DB 構造整合性チェック
 BEGIN
     DBMS_HM.run_check(
         check_name => 'DB Structure Integrity Check',
@@ -120,7 +120,7 @@ BEGIN
 END;
 /
 
--- Data Block Integrity (targeted at a specific file and block)
+-- データ・ブロック整合性チェック（特定のファイルとブロックを対象）
 BEGIN
     DBMS_HM.run_check(
         check_name => 'Data Block Integrity Check',
@@ -131,7 +131,7 @@ BEGIN
 END;
 /
 
--- Redo Integrity Check
+-- REDO 整合性チェック
 BEGIN
     DBMS_HM.run_check(
         check_name => 'Redo Integrity Check',
@@ -140,7 +140,7 @@ BEGIN
 END;
 /
 
--- Undo Segment Integrity
+-- UNDO セグメント整合性チェック
 BEGIN
     DBMS_HM.run_check(
         check_name => 'Undo Segment Integrity Check',
@@ -149,7 +149,7 @@ BEGIN
 END;
 /
 
--- Dictionary Integrity
+-- ディクショナリ整合性チェック
 BEGIN
     DBMS_HM.run_check(
         check_name => 'Dictionary Integrity Check',
@@ -159,10 +159,10 @@ END;
 /
 ```
 
-### Passing Parameters
+### パラメータの受渡し
 
 ```sql
--- Check parameters available for each check
+-- 各チェックで利用可能なパラメータを確認する
 SELECT c.name AS check_name,
        p.name AS param_name,
        p.description,
@@ -173,12 +173,12 @@ ORDER BY c.name, p.name;
 ```
 
 ```sql
--- Transaction integrity check requires a transaction ID
--- First find the transaction ID you want to investigate
+-- トランザクション整合性チェックにはトランザクション ID が必要
+-- まず調査したいトランザクション ID を探す
 SELECT xid, status
 FROM   v$transaction;
 
--- Run with parameter
+-- パラメータを指定して実行
 BEGIN
     DBMS_HM.run_check(
         check_name   => 'Transaction Integrity Check',
@@ -189,15 +189,15 @@ END;
 /
 ```
 
-### Monitoring a Running Check
+### 実行中のチェックの監視
 
-Health checks run asynchronously by default. Poll for completion:
+ヘルス・チェックはデフォルトで非同期に実行される。完了を確認するにはポーリングを行う：
 
 ```sql
--- Check run status
--- V$HM_RUN column for the run identifier is NAME (not RUN_NAME)
--- STATUS values: INITIAL, EXECUTING, INTERRUPTED, TIMEDOUT, CANCELLED, COMPLETED, ERROR
--- V$HM_RUN does not have a NUM_FINDINGS column; use NUM_INCIDENT instead
+-- 実行ステータスの確認
+-- V$HM_RUN の実行識別子カラムは NAME（RUN_NAME ではない）
+-- STATUS の値：INITIAL, EXECUTING, INTERRUPTED, TIMEDOUT, CANCELLED, COMPLETED, ERROR
+-- V$HM_RUN には NUM_FINDINGS カラムはないため、NUM_INCIDENT を使用する
 SELECT r.name          AS run_name,
        r.check_name,
        r.status,
@@ -212,12 +212,12 @@ FETCH FIRST 20 ROWS ONLY;
 
 ---
 
-## Viewing Findings and Recommendations
+## 検出結果と推奨事項の表示
 
-### Findings
+### 検出結果
 
 ```sql
--- All findings from the most recent runs
+-- 直近の実行によるすべての検出結果
 SELECT r.run_name,
        r.check_name,
        f.type,           -- FAILURE, WARNING, ADVISORY
@@ -230,7 +230,7 @@ ORDER BY r.start_time DESC, f.type;
 ```
 
 ```sql
--- Only failures and warnings (not just advisory)
+-- FAILURE（失敗）と WARNING（警告）のみ（アドバイザリを除く）
 SELECT r.run_name,
        r.check_name,
        f.type,
@@ -243,7 +243,7 @@ ORDER BY r.start_time DESC;
 ```
 
 ```sql
--- Findings with associated recommendations
+-- 検出結果に関連付けられた推奨事項
 SELECT r.run_name,
        f.description AS finding,
        f.type        AS finding_type,
@@ -256,87 +256,87 @@ JOIN   v$hm_recommendation rec ON f.id = rec.finding_id
 ORDER BY r.start_time DESC;
 ```
 
-### Generating an HTML Report
+### HTML レポートの生成
 
-`DBMS_HM` can generate a human-readable HTML report:
+`DBMS_HM` は人間が読みやすい HTML レポートを生成できる：
 
 ```sql
--- Generate report for a specific run
+-- 特定の実行に関するレポートを生成
 DECLARE
     v_report CLOB;
 BEGIN
     v_report := DBMS_HM.get_run_report('MY_STRUCT_CHECK_20260306');
-    -- Write to a file (requires UTL_FILE setup) or display
-    DBMS_OUTPUT.put_line(DBSTR(v_report, 1, 32767));
+    -- ファイルに書き出す (UTL_FILE の設定が必要) か、または表示する
+    DBMS_OUTPUT.put_line(DBMS_LOB.SUBSTR(v_report, 32767, 1));
 END;
 /
 ```
 
-A more practical approach using `adrci`:
+より実用的な `adrci` を使用した手法：
 
 ```bash
-# In adrci, show Health Monitor findings
+# adrci でヘルス・モニターの検出結果を表示
 adrci> SHOW HM_FINDING
 
-# Show findings for a specific run
+# 特定の実行に関する検出結果を表示
 adrci> SHOW HM_FINDING -P "RUN_NAME = 'MY_STRUCT_CHECK_20260306'"
 
-# Show recommendations
+# 推奨事項を表示
 adrci> SHOW HM_RECOMMENDATION
 ```
 
 ---
 
-## Oracle Advisors
+## Oracle アドバイザ
 
-The Oracle advisory framework provides workload-based recommendations distinct from structural Health Monitor checks. The main advisors relevant to monitoring and diagnostics are the SQL Tuning Advisor, Segment Advisor, and Memory Advisor.
+Oracle アドバイザ・フレームワークは、構造的なヘルス・モニター・チェックとは異なる、ワークロードに基づいた推奨事項を提供する。監視と診断に関連する主なアドバイザは、SQL チューニング・アドバイザ、セグメント・アドバイザ、およびメモリー・アドバイザである。
 
-### SQL Tuning Advisor
+### SQL チューニング・アドバイザ
 
-The SQL Tuning Advisor analyzes one or more SQL statements and recommends profile-based tuning, new indexes, statistics collection, or SQL restructuring.
+SQL チューニング・アドバイザは、1 つ以上の SQL ステートメントを分析し、プロファイル・ベースのチューニング、新しい索引、統計情報の収集、または SQL の再構築を推奨する。
 
-#### Running the SQL Tuning Advisor
+#### SQL チューニング・アドバイザの実行
 
 ```sql
--- Create a tuning task for a specific SQL_ID
+-- 特定の SQL_ID に対するチューニング・タスクを作成
 DECLARE
     v_task_name VARCHAR2(100);
 BEGIN
     v_task_name := DBMS_SQLTUNE.create_tuning_task(
         sql_id      => 'abc123def456g',
         scope       => DBMS_SQLTUNE.scope_comprehensive,
-        time_limit  => 300,  -- seconds
+        time_limit  => 300,  -- 秒
         task_name   => 'TUNE_ABC123_20260306',
-        description => 'Tune top CPU query from AWR'
+        description => 'AWR からの top CPU クエリのチューニング'
     );
     DBMS_OUTPUT.put_line('Task created: ' || v_task_name);
 END;
 /
 
--- Execute the task
+-- タスクを実行
 BEGIN
     DBMS_SQLTUNE.execute_tuning_task(task_name => 'TUNE_ABC123_20260306');
 END;
 /
 
--- Check status
+-- ステータスを確認
 SELECT task_name, status, advisor_name
 FROM   dba_advisor_tasks
 WHERE  task_name = 'TUNE_ABC123_20260306';
 
--- View the recommendation report
+-- 推奨レポートを表示
 SELECT DBMS_SQLTUNE.report_tuning_task('TUNE_ABC123_20260306') AS report
 FROM   dual;
 ```
 
-#### Tuning Top AWR SQL Automatically
+#### AWR トップ SQL の自動チューニング
 
 ```sql
--- Create a tuning task from a SQL Tuning Set (STS) of top SQL from AWR
+-- AWR からのトップ SQL セット (STS) に対するチューニング・タスクを作成
 DECLARE
     v_task_name VARCHAR2(100);
 BEGIN
-    -- Create STS from AWR
+    -- STS の作成
     DBMS_SQLTUNE.create_sqlset(sqlset_name => 'TOP_AWR_SQL');
 
     DBMS_SQLTUNE.load_sqlset(
@@ -344,7 +344,7 @@ BEGIN
         populate_cursor => DBMS_SQLTUNE.select_workload_repository(
             begin_snap => 100,
             end_snap   => 120,
-            basic_filter => 'elapsed_time > 10000000',  -- > 10 seconds
+            basic_filter => 'elapsed_time > 10000000',  -- > 10 秒
             ranking_measure1 => 'elapsed_time',
             result_limit => 20
         )
@@ -359,25 +359,25 @@ END;
 /
 ```
 
-#### Accepting SQL Profiles
+#### SQL プロファイルの受入れ
 
 ```sql
--- Accept all recommendations from the tuning task
+-- チューニング・タスクからの推奨事項をすべて受け入れる
 BEGIN
     DBMS_SQLTUNE.accept_sql_profile(
         task_name  => 'TUNE_ABC123_20260306',
-        force_match => TRUE  -- apply even if SQL text differs slightly (bind-insensitive)
+        force_match => TRUE  -- SQL テキストがわずかに異なる場合でも適用（バインド非依存）
     );
 END;
 /
 ```
 
-### Segment Advisor
+### セグメント・アドバイザ
 
-The Segment Advisor identifies segments with reclaimable space—tables and indexes that can be shrunk to reclaim blocks above the high water mark.
+セグメント・アドバイザは、再利用可能な領域があるセグメント（高水位線以上のブロックを再利用するために縮小できる表や索引）を特定する。
 
 ```sql
--- Run Segment Advisor on a specific schema
+-- 特定のスキーマに対してセグメント・アドバイザを実行
 DECLARE
     v_task_name  VARCHAR2(100) := 'SEG_ADV_' || TO_CHAR(SYSDATE, 'YYYYMMDD');
     v_object_id  NUMBER;
@@ -390,7 +390,7 @@ BEGIN
     DBMS_ADVISOR.create_object(
         task_name    => v_task_name,
         object_type  => 'SCHEMA',
-        attr1        => 'SCOTT',  -- schema name
+        attr1        => 'SCOTT',  -- スキーマ名
         object_id    => v_object_id
     );
 
@@ -404,7 +404,7 @@ BEGIN
 END;
 /
 
--- View Segment Advisor findings
+-- セグメント・アドバイザの検出結果を表示
 SELECT o.owner,
        o.object_name,
        o.object_type,
@@ -419,7 +419,7 @@ ORDER BY TO_NUMBER(f.more_info) DESC NULLS LAST;
 ```
 
 ```sql
--- Quick manual check: segments with potential waste (no advisor needed)
+-- クイック手動チェック：無駄な領域がある可能性が高いセグメント（アドバイザを使用しない）
 SELECT owner,
        segment_name,
        segment_type,
@@ -434,14 +434,14 @@ ORDER BY waste_mb DESC NULLS LAST
 FETCH FIRST 30 ROWS ONLY;
 ```
 
-### Memory Advisor
+### メモリー・アドバイザ
 
-The Memory Advisor provides recommendations for SGA and PGA sizing based on current workload.
+メモリー・アドバイザは、現在のワークロードに基づいた SGA および PGA のサイジングに関する推奨事項を提供する。
 
-#### SGA Target Advisor
+#### SGA ターゲット・アドバイザ
 
 ```sql
--- SGA Size Advice: estimated DB time for different SGA sizes
+-- SGA サイズのアドバイス：異なる SGA サイズにおける推定 DB 時間
 SELECT sga_size,
        sga_size_factor,
        estd_db_time,
@@ -452,7 +452,7 @@ ORDER BY sga_size;
 ```
 
 ```sql
--- Shared Pool Advisor: cache hit ratio at different shared pool sizes
+-- 共有プール・アドバイザ：異なる共有プール・サイズにおけるキャッシュ・ヒット率
 SELECT shared_pool_size_for_estimate AS pool_size_mb,
        shared_pool_size_factor,
        estd_lc_size               AS estd_lib_cache_mb,
@@ -464,7 +464,7 @@ ORDER BY shared_pool_size_for_estimate;
 ```
 
 ```sql
--- Buffer Cache Advisor: physical reads at different cache sizes
+-- バッファ・キャッシュ・アドバイザ：異なるキャッシュ・サイズにおける物理読み取り
 SELECT size_for_estimate          AS cache_size_mb,
        size_factor,
        estd_physical_read_factor,
@@ -475,10 +475,10 @@ AND    advice_status = 'ON'
 ORDER BY size_for_estimate;
 ```
 
-#### PGA Target Advisor
+#### PGA ターゲット・アドバイザ
 
 ```sql
--- PGA Target Advice: optimal PGA size based on workload
+-- PGA ターゲット・アドバイス：ワークロードに基づく最適な PGA サイズ
 SELECT pga_target_for_estimate  AS pga_target_mb,
        pga_target_factor,
        estd_pga_cache_hit_percentage,
@@ -488,7 +488,7 @@ ORDER BY pga_target_for_estimate;
 ```
 
 ```sql
--- Current PGA usage by component
+-- コンポーネントごとの現在の PGA 使用状況
 SELECT name,
        ROUND(value/1024/1024, 1) AS mb
 FROM   v$pgastat
@@ -504,12 +504,12 @@ ORDER BY name;
 
 ---
 
-## Automated Health Check Scheduling
+## ヘルス・チェックの自動スケジューリング
 
-### Using DBMS_SCHEDULER
+### DBMS_SCHEDULER の使用
 
 ```sql
--- Schedule DB Structure Integrity Check weekly on Sunday at 2 AM
+-- 毎週日曜日の午前 2 時に DB 構造整合性チェックをスケジュール
 BEGIN
     DBMS_SCHEDULER.create_job(
         job_name        => 'WEEKLY_HM_STRUCT_CHECK',
@@ -525,16 +525,16 @@ BEGIN
         start_date      => TRUNC(NEXT_DAY(SYSDATE, 'SUNDAY')) + INTERVAL '2' HOUR,
         repeat_interval => 'FREQ=WEEKLY; BYDAY=SUN; BYHOUR=2; BYMINUTE=0',
         enabled         => TRUE,
-        comments        => 'Weekly DB Structure Integrity Health Check'
+        comments        => '週次 DB 構造整合性ヘルス・チェック'
     );
 END;
 /
 ```
 
-### Monitoring Health Check Results After Runs
+### 実行後のヘルス・チェック結果の監視
 
 ```sql
--- Alert on any FAILURE findings from recent runs
+-- 最近の実行で発生した FAILURE（失敗）の検出結果に対してアラートを出す
 SELECT r.run_name,
        r.check_name,
        r.start_time,
@@ -542,7 +542,7 @@ SELECT r.run_name,
        f.description,
        f.repair_sql
 FROM   v$hm_run     r
-JOIN   v$hm_finding f ON r.id = f.run_id
+JOIN   f.run_id f ON r.id = f.run_id
 WHERE  r.start_time > SYSDATE - 7
   AND  f.type = 'FAILURE'
 ORDER BY r.start_time DESC;
@@ -550,54 +550,54 @@ ORDER BY r.start_time DESC;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Run Health Monitor checks proactively after every maintenance window.** Patches, imports, manual datafile operations, and storage maintenance can all introduce subtle corruption. A post-maintenance Health Monitor run catches problems before users find them.
+1. **メンテナンス・ウィンドウ後には必ずプロアクティブにヘルス・モニター・チェックを実行すること。** パッチ適用、インポート、手動でのデータファイル操作、およびストレージ・メンテナンスは、すべて微妙な破損を引き起こす可能性がある。メンテナンス後のヘルス・モニター実行により、ユーザーが気づく前に問題を特定できる。
 
-2. **Always run `DB Structure Integrity Check` after storage or hardware changes.** It validates control files, datafile headers, and redo log consistency—the structural foundation everything else depends on.
+2. **ストレージやハードウェアの変更後には必ず `DB Structure Integrity Check` を実行すること。** これにより、制御ファイル、データファイル・ヘッダー、および REDO ログの一貫性（すべてが依存する構造的な基礎）が検証される。
 
-3. **Schedule weekly runs and alert on FAILURE findings.** Automate via `DBMS_SCHEDULER` and query `V$HM_FINDING` for failures as part of your daily DBA health check script.
+3. **週次実行をスケジュールし、FAILURE 検出結果に対してアラートを出すようにすること。** `DBMS_SCHEDULER` を使用して自動化し、日次の DBA ヘルス・チェック・スクリプトの一部として `V$HM_FINDING` の失敗を照会するようにする。
 
-4. **Use Segment Advisor before SHRINK or MOVE operations.** It identifies which segments have the most reclaimable space, helping you prioritize maintenance work and estimate impact.
+4. **SHRINK（縮小）または MOVE（移動）操作の前にセグメント・アドバイザを使用すること。** どのセグメントに最も再利用可能な領域があるかを特定し、メンテナンス作業の優先順位付けと影響の見積もりを行うのに役立つ。
 
-5. **Consult the Buffer Cache and Shared Pool advisors before resizing SGA.** These advisors model the actual workload—they show diminishing returns and help you avoid over-allocating memory that could cause swapping.
+5. **SGA のサイズを変更する前に、バッファ・キャッシュ/共有プールのアドバイザを参照すること。** これらのアドバイザは実際のワークロードをモデル化しており、収穫逓減点を示し、スワッピングを引き起こす可能性のあるメモリーの過剰割り当てを回避するのに役立つ。
 
-6. **Store Health Monitor run names with timestamps.** Consistent naming like `CHECK_TYPE_YYYYMMDD_HH24MISS` makes it easy to query historical runs and detect if check results have changed over time.
+6. **ヘルス・モニターの実行名をタイムスタンプ付きで保存すること。** `CHECK_TYPE_YYYYMMDD_HH24MISS` のような一貫した命名規則により、過去の実行履歴を容易に照会でき、チェック結果が時間の経過とともに変化したかどうかを検出できる。
 
-7. **Integrate advisor findings into your change management workflow.** SQL Tuning Advisor profiles and SQL Plan Baselines should be tested in non-production before being accepted in production—even though Oracle's recommendations are generally reliable.
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Mistake: Running Health Monitor checks during peak hours.**
-Checks like Dictionary Integrity can be resource-intensive, acquiring internal locks and performing extensive reads. Schedule them during maintenance windows or low-traffic periods.
-
-**Mistake: Not reviewing recommendations after a check finds failures.**
-Finding a failure and not following up on the recommendations is worse than not running the check at all—it creates a false sense of security. Always act on FAILURE findings promptly.
-
-**Mistake: Accepting SQL Tuning Advisor profiles without testing.**
-SQL profiles change execution plans. Although the advisor uses comprehensive analysis, always test in a non-production environment first, particularly for complex OLTP queries where plan stability is critical.
-
-**Mistake: Ignoring ADVISORY-type findings.**
-`ADVISORY` findings are not failures, but they often indicate early warning signs—segments approaching threshold sizes, dictionary inconsistencies that have not yet caused errors, etc. Review them during weekly DBA checks.
-
-**Mistake: Running Segment Advisor on SYS/SYSTEM schemas.**
-These schemas contain internal Oracle objects that should not be shrunk or moved without Oracle Support guidance. Filter them out of Segment Advisor tasks.
-
-**Mistake: Over-relying on Memory Advisor estimates on mixed workload databases.**
-The advisors model the current workload. If your database has significant workload variation (e.g., batch at night, OLTP during the day), the advisor snapshot may not represent the workload you actually need to optimize for. Run advisors during representative peak periods.
+7. **アドバイザの検出結果を変更管理ワークフローに統合すること。** SQL チューニング・アドバイザのプロファイルや SQL 計画ベースラインは、本番環境で受け入れる前に非本番環境でテストする必要がある（たとえ Oracle の推奨事項が一般的に信頼できるものであっても）。
 
 ---
 
+## よくある間違いと回避方法
 
-## Oracle Version Notes (19c vs 26ai)
+**間違い: ピーク時間帯にヘルス・モニター・チェックを実行する。**  
+ディクショナリ整合性チェックなどのチェックはリソースを大量に消費し、内部ロックを取得したり大量の読み取りを実行したりする場合がある。メンテナンス・ウィンドウやトラフィックの少ない時間帯にスケジュールすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+**間違い: チェックによって失敗が検出された後、推奨事項を確認しない。**  
+失敗を発見しても推奨事項に従わないのは、チェックを全く実行しないよりも悪い。誤った安心感を生むからである。FAILURE 検出結果には常に迅速に対応すること。
 
-## Sources
+**間違い: テストせずに SQL チューニング・アドバイザのプロファイルを受け入れる。**  
+SQL プロファイルは実行計画を変更する。アドバイザは包括的な分析を行うが、特に計画の一貫性が重要な複雑な OLTP クエリについては、まず非本番環境でテストすること。
+
+**間違い: ADVISORY（アドバイザリ）タイプの検出結果を無視する。**  
+`ADVISORY` は失敗ではないが、多くの場合、早期の兆候（しきい値サイズに近づいているセグメント、まだエラーを引き起こしていないディクショナリの不整合など）を示している。週次の DBA チェックの中で、これらを確認すること。
+
+**間違い: SYS/SYSTEM スキーマに対してセグメント・アドバイザを実行する。**  
+これらのスキーマには、Oracle サポートの指導なしに縮小や移動を行うべきではない Oracle 内部オブジェクトが含まれている。セグメント・アドバイザのタスクからこれらを除外すること。
+
+**間違い: 混合ワークロードのデータベースでメモリー・アドバイザの見積もりに過度に依存する。**  
+アドバイザは現在のワークロードをモデル化する。データベースに大幅なワークロードの変動（例：夜間のバッチ、日中の OLTP）がある場合、アドバイザのスナップショットは、実際に最適化が必要なワークロードを代表していない可能性がある。代表的なピーク期間中にアドバイザを実行すること。
+
+---
+
+
+## Oracle バージョンに関する注意 (19c vs 26ai)
+
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c/23c 以降の機能は、Oracle Database 26ai 対応機能として扱う。
+- 19c と 26ai では、リリース更新によってデフォルト設定や非推奨機能が異なる場合があるため、両方の環境をサポートする場合は構文とパッケージの動作をテストすること。
+
+## ソース
 
 - [Oracle Database 19c Administrator's Guide — Monitoring Database Operations](https://docs.oracle.com/en/database/oracle/oracle-database/19/admin/monitoring-database-operations.html)
 - [Oracle Database 19c PL/SQL Packages Reference — DBMS_HM](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_HM.html)

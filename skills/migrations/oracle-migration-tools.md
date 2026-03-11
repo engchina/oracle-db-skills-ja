@@ -1,25 +1,25 @@
-# Oracle Migration Tools Reference
+# Oracle 移行ツール・リファレンス
 
-## Overview
+## 概要
 
-Migrating a database to Oracle is almost never a purely manual effort. A suite of tools exists to automate schema conversion, data migration, assessment, and ongoing replication. This guide covers the most important tools in the Oracle migration ecosystem: Oracle SQL Developer Migration Workbench, AWS Schema Conversion Tool (SCT), SSMA for Oracle, ora2pg, Oracle Zero Downtime Migration (ZDM), and a capability comparison matrix.
+データベースの Oracle への移行を、完全に手動で行うことはほとんどない。スキーマ変換、データ移行、アセスメント、および継続的なレプリケーションを自動化するためのツール・スイートが用意されている。本ガイドでは、Oracle 移行エコシステムにおける最も重要なツールを網羅する。具体的には、Oracle SQL Developer Migration Workbench、AWS Schema Conversion Tool (SCT)、ora2pg、SSMA for Oracle、Oracle Zero Downtime Migration (ZDM)、および機能比較表について解説する。
 
-Understanding which tool to use — and for which phase — is as important as knowing the tool itself. Most migrations require at least two tools: one for schema conversion and one for data movement.
+どのフェーズでどのツールを使用すべきかを理解することは、ツール自体の使い方を知ることと同じくらい重要である。ほとんどの移行プロジェクトでは、少なくとも2つのツールが必要になる。1つはスキーマ変換用、もう1つはデータ移行用である。
 
 ---
 
 ## Oracle SQL Developer Migration Workbench
 
-Oracle SQL Developer includes a built-in Migration Workbench that supports migrations from MySQL, SQL Server, Sybase ASE, DB2, Microsoft Access, PostgreSQL, and Teradata (using their respective JDBC drivers).
+Oracle SQL Developer には、Migration Workbench（移行ワークベンチ）が組み込まれている。これは、MySQL、SQL Server、Sybase ASE、DB2、Microsoft Access、PostgreSQL、および Teradata からの移行をサポートしている（それぞれの JDBC ドライバを使用）。
 
-### Step-by-Step: SQL Server to Oracle Migration
+### ステップ・バイ・ステップ：SQL Server から Oracle への移行
 
-#### Step 1 — Set Up a Migration Repository
+#### ステップ 1 — 移行リポジトリのセットアップ
 
-The Migration Workbench requires a dedicated Oracle schema to store migration metadata.
+Migration Workbench は、移行メタデータを保存するために専用の Oracle スキーマを必要とする。
 
 ```sql
--- Create a dedicated migration repository schema
+-- 専用の移行リポジトリ・スキーマを作成
 CREATE USER migration_repo IDENTIFIED BY "repo_password"
     DEFAULT TABLESPACE users QUOTA UNLIMITED ON users;
 GRANT CONNECT, RESOURCE TO migration_repo;
@@ -27,85 +27,85 @@ GRANT CREATE VIEW TO migration_repo;
 GRANT CREATE MATERIALIZED VIEW TO migration_repo;
 ```
 
-In SQL Developer: **Tools → Migration → Create Migration Repository** — point it at the migration_repo schema.
+SQL Developer で、**「ツール」→「移行」→「移行リポジトリの作成」**を選択し、作成した `migration_repo` スキーマを指定する。
 
-#### Step 2 — Create Source Database Connection
+#### ステップ 2 — 移行元データベース接続の作成
 
-- File → New Connection → Select "SQL Server" as connection type
-- Provide JDBC URL, credentials, and test connectivity
-- Tip: You need the SQL Server JDBC driver (jtds or Microsoft JDBC) in SQL Developer's classpath
+- 「ファイル」→「新規接続」→ 接続タイプとして「SQL Server」を選択。
+- JDBC URL、資格証明を入力し、接続をテストする。
+- ヒント：SQL Developer のクラスパスに SQL Server JDBC ドライバ (jTDS または Microsoft JDBC) を追加しておく必要がある。
 
-#### Step 3 — Capture the Source Database
+#### ステップ 3 — 移行元データベースのキャプチャ
 
-1. In the Migration Workbench (Tools → Migration), start a new migration project
-2. Right-click the source connection → **Capture SQL Server Database**
-3. Select the databases/schemas to capture
-4. SQL Developer reads all DDL, constraints, views, stored procedures, and data
+1. 移行ワークベンチ（「ツール」→「移行」）で、新しい移行プロジェクトを開始する。
+2. 移行元接続を右クリック → **「SQL Serverデータベースのキャプチャ」**を選択。
+3. キャプチャ対象のデータベース/スキーマを選択する。
+4. SQL Developer がすべての DDL、制約、ビュー、ストアド・プロシージャ、およびデータを読み取る。
 
-#### Step 4 — Convert
+#### ステップ 4 — 変換
 
-1. Right-click the captured source objects → **Convert to Oracle**
-2. SQL Developer generates Oracle DDL for all captured objects
-3. Review the **Migration Log** for errors and warnings:
-   - Green: converted automatically
-   - Yellow: converted with caveats
-   - Red: could not convert — requires manual intervention
+1. キャプチャされた移行元オブジェクトを右クリック → **「Oracleへの変換」**を選択。
+2. SQL Developer が、キャプチャされたすべてのオブジェクトに対して Oracle 形式の DDL を生成する。
+3. **「移行ログ」**でエラーや警告を確認する。
+   - 緑：自動的に変換された。
+   - 黄：注意が必要だが変換された。
+   - 赤：変換できなかった。手動での対応が必要。
 
-#### Step 5 — Inspect and Edit Generated DDL
+#### ステップ 5 — 生成された DDL の検査と編集
 
-Navigate the converted objects in the Migration Projects tree. Click each object to see the generated Oracle DDL. Edit directly in SQL Developer for objects flagged with warnings.
+「移行プロジェクト」ツリーで変換後のオブジェクトを確認する。各オブジェクトをクリックすると、生成された Oracle DDL が表示される。警告が表示されたオブジェクトについては、SQL Developer 上で直接編集する。
 
-Common manual corrections:
-- Stored procedures with dynamic SQL
-- T-SQL-specific system functions
-- Identity column seed/increment values
-- Collation-specific comparisons
+一般的な手動修正の例：
+- 動的 SQL を含むストアド・プロシージャ。
+- T-SQL 固有のシステム関数。
+- アイデンティティ列のシード/増分値。
+- 照合順序（Collation）に依存する比較。
 
-#### Step 6 — Create Target Oracle Connection
+#### ステップ 6 — 移行先 Oracle 接続の作成
 
-- Add a connection to your target Oracle database
-- Ensure the target user/schema has CREATE TABLE, CREATE PROCEDURE, CREATE INDEX, etc. privileges
+- 移行先となる Oracle データベースへの接続を追加する。
+- 移行先ユーザー/スキーマに、`CREATE TABLE`, `CREATE PROCEDURE`, `CREATE INDEX` などの権限があることを確認する。
 
-#### Step 7 — Migrate the Schema
+#### ステップ 7 — スキーマの移行
 
-1. Right-click the converted schema → **Migrate Schema to Oracle**
-2. SQL Developer executes all DDL against the Oracle target
-3. Review errors in the output window
+1. 変換後のスキーマを右クリック → **「Oracleへのスキーマの移行」**を選択。
+2. SQL Developer が、移行先 Oracle に対してすべての DDL を実行する。
+3. 出力ウィンドウでエラーを確認する。
 
-#### Step 8 — Migrate Data
+#### ステップ 8 — データ移行
 
-1. Right-click the migration project → **Migrate Data**
-2. SQL Developer streams rows from SQL Server to Oracle via JDBC
-3. Monitor progress in the Migration Data panel
+1. 移行プロジェクトを右クリック → **「データの移行」**を選択。
+2. SQL Developer が、JDBC 経由で SQL Server から Oracle へ行をストリーム転送する。
+3. 「移行データ」パネルで進捗を監視する。
 
-#### Step 9 — Validate
+#### ステップ 9 — 検証
 
-SQL Developer provides a basic row count comparison after migration. For thorough validation, see `migration-data-validation.md`.
+SQL Developer は、移行後に基本的な行数比較機能を提供する。詳細な検証については、`migration-data-validation.md` を参照。
 
-### What SQL Developer Migration Workbench Handles Well
+### SQL Developer Migration Workbench が得意なこと
 
-- Table definitions with most data types
-- Indexes and constraints (primary key, unique, foreign key, check)
-- Views (with syntax conversion)
-- Sequences and identity columns
-- Simple stored procedures and functions
-- Triggers (with partial conversion)
+- ほとんどのデータ型を含む表定義。
+- 索引と制約 (主キー, ユニーク, 外部キー, チェック)。
+- ビュー（構文変換を含む）。
+- シーケンスとアイデンティティ列。
+- シンプルなストアド・プロシージャと関数。
+- トリガー（部分的な変換）。
 
-### Limitations
+### 制限事項
 
-- Cannot handle CLR objects (SQL Server)
-- Limited support for dynamic SQL in procedures
-- Does not handle full-text indexes
-- Performance for large data migrations (millions of rows) is slower than SQL*Loader direct path
-- No incremental/CDC capability for low-downtime migrations
+- CLR オブジェクト (SQL Server) は処理できない。
+- プロシージャ内の動的 SQL へのサポートは限定的。
+- 全文検索索引はサポートしていない。
+- 大規模なデータ移行（数百万行以上）のパフォーマンスは、SQL*Loader ダイレクト・パスより遅い。
+- 低ダウンタイム移行のための増分移行/CDC 能力はない。
 
 ---
 
-## AWS Schema Conversion Tool (SCT) — Oracle Target
+## AWS Schema Conversion Tool (SCT) — Oracle への移行
 
-AWS SCT was primarily designed for AWS-target migrations (RDS, Aurora, Redshift), but it also supports Oracle as both a source and a target. It provides a sophisticated rule engine for procedure conversion.
+AWS SCT は主に AWS への移行（RDS, Aurora, Redshift）を目的として設計されているが、Oracle を移行元および構成先の両方としてサポートしている。プロシージャ変換のための洗練されたルール・エンジンを備えている。
 
-### Supported Sources for Oracle Target
+### Oracle を移行先とするサポート対象の移行元
 
 - SQL Server → Oracle
 - MySQL → Oracle
@@ -113,98 +113,98 @@ AWS SCT was primarily designed for AWS-target migrations (RDS, Aurora, Redshift)
 - Teradata → Oracle
 - SAP ASE (Sybase) → Oracle
 
-### Using AWS SCT for Oracle
+### Oracle への移行での AWS SCT の使用方法
 
-1. **Install SCT** from the AWS download page. SCT runs as a standalone desktop application.
+1. **SCT をインストール**する（AWS のダウンロード・ページから）。SCT はデスクトップ・アプリケーションとして動作する。
 
-2. **Create a new project:**
-   - File → New Project
-   - Select source database type and target "Oracle"
+2. **新しいプロジェクトを作成する:**
+   - 「File」→「New Project」。
+   - 移行元データベースのタイプを選択し、ターゲットに「Oracle」を選択する。
 
-3. **Connect to source and target databases**
+3. **移行元および移行先データベースに接続する。**
 
-4. **Run the Assessment Report:**
-   - View → Assessment Report
-   - SCT categorizes each object: automatically converted, converted with warnings, action required
-   - Each category has a percentage coverage estimate
+4. **アセスメント・レポートを実行する:**
+   - 「View」→「Assessment Report」。
+   - SCT が各オブジェクトを分類する：自動変換可能、警告付きで変換可能、アクションが必要。
+   - 各カテゴリについて、変換率の推定値が表示される。
 
-5. **Review the conversion dashboard:**
-   - The dashboard shows a "conversion complexity" score
-   - Objects requiring manual action are highlighted with explanations
+5. **変換ダッシュボードの確認:**
+   - ダッシュボードには「変換複雑度」スコアが表示される。
+   - 手動アクションが必要なオブジェクトは、解説とともにハイライトされる。
 
-6. **Convert the schema:**
-   - Right-click source objects → Convert Schema
-   - Review the converted Oracle DDL in the right panel
+6. **スキーマの変換:**
+   - 移行元オブジェクトを右クリック → 「Convert Schema」。
+   - 右側のパネルで、変換後の Oracle DDL を確認する。
 
-7. **Handle action items:**
-   - SCT provides specific "to-do" items with Oracle documentation links
-   - For each action item, edit the generated code or accept SCT's suggestion
+7. **アクション項目の処理:**
+   - SCT は、Oracle ドキュメントへのリンクが含まれた具体的な「To-Do」項目を提供する。
+   - 各アクション項目について、生成されたコードを編集するか、SCT の提案を受け入れる。
 
-8. **Apply to Oracle target:**
-   - Right-click converted schema → Apply to Database
+8. **Oracle への適用:**
+   - 変換されたスキーマを右クリック → 「Apply to Database」。
 
-### SCT Extension Pack
+### SCT Extension Pack (拡張パック)
 
-For SQL Server migrations, SCT provides an Extension Pack that creates Oracle implementations of SQL Server system functions:
+SQL Server からの移行において、SCT は SQL Server のシステム関数に対応する Oracle 実装を作成する拡張パックを提供する。
 
 ```sql
--- SCT installs an extension schema with Oracle equivalents of:
+-- SCT は、以下のような関数と同等の Oracle 関数を含む拡張スキーマをインストールする：
 -- CHARINDEX → aws_sqlserver_ext.charindex(...)
 -- LEFT       → aws_sqlserver_ext.left(...)
 -- FORMAT     → aws_sqlserver_ext.format(...)
 ```
 
-This allows converted code to call these functions without rewriting every occurrence. However, long-term you should replace extension pack calls with native Oracle equivalents.
+これにより、変換後のコードでこれらすべての箇所を書き換えることなく呼び出しが可能になる。ただし、長期的には拡張パックの呼び出しをネイティブな Oracle の同等機能に置き換えるべきである。
 
-### AWS SCT Strengths
+### AWS SCT の強み
 
-- Excellent SQL Server to Oracle conversion quality
-- Handles complex T-SQL patterns
-- Extension pack for unmappable functions
-- Good assessment metrics for effort estimation
-- Free to use
+- SQL Server から Oracle への変換品質が非常に高い。
+- 複雑な T-SQL パターンを処理できる。
+- マッピングできない関数のための拡張パック。
+- 作業量見積もりのための優れたアセスメント指標。
+- 無料で使用できる。
 
-### AWS SCT Limitations
+### AWS SCT の制限事項
 
-- Requires AWS account setup even for non-AWS migrations
-- Some complex stored procedures still require manual work
-- UI can be slow for very large schemas
-- Does not perform data migration (use AWS DMS or SQL*Loader separately)
+- AWS 以外の移行であっても、AWS アカウントのセットアップが必要。
+- 一部の複雑なストアド・プロシージャは、依然として手動での作業が必要。
+- 非常に大規模なスキーマの場合、UI が重くなることがある。
+- データ移行自体は行わない（別途 AWS DMS や SQL*Loader を使用する）。
 
 ---
 
 ## SSMA (SQL Server Migration Assistant) for Oracle
 
-> ⚠️ **Direction Correction:** SSMA for Oracle migrates FROM Oracle TO SQL Server (not the reverse). The section title can be misleading. This tool is not used when Oracle is the migration target.
+> ⚠️ **方向の注意：** SSMA for Oracle は、Oracle **から** SQL Server **へ**の移行ツールである（逆ではない）。セクション名が誤解を招く可能性があるが、Oracle が移行先となる場合はこのツールは使用しない。
 
-Note: SSMA for Oracle migrates FROM Oracle TO SQL Server. For SQL Server-to-Oracle migrations, use AWS SCT or SQL Developer Migration Workbench instead. The note in the `migrate-sqlserver-to-oracle.md` guide referencing "SSMA for Oracle" as enabling SQL Server → Oracle should be understood to mean using AWS SCT or SQL Developer, not SSMA for Oracle specifically.
+注：Oracle を移行先とする場合は、代わりに AWS SCT または SQL Developer Migration Workbench を使用すること。他のガイド（`migrate-sqlserver-to-oracle.md` など）で「SSMA for Oracle」に言及している場合は、SQL Server → Oracle の移行を指しているのではなく、AWS SCT や SQL Developer の活用を意図していると理解すべきである。
 
-The SSMA family includes:
+SSMA ファミリには以下が含まれる：
 - SSMA for Oracle (Oracle → SQL Server)
 - SSMA for MySQL (MySQL → SQL Server/Azure SQL)
 - SSMA for Sybase (Sybase → SQL Server)
 - SSMA for Access (Access → SQL Server)
 
-For SQL Server → Oracle migration specifically, AWS SCT or SQL Developer Migration Workbench are more appropriate.
+SQL Server → Oracle への移行には、AWS SCT または SQL Developer Migration Workbench が適している。
 
-### What SSMA Converts (Oracle to SQL Server direction)
+### SSMA が変換するもの (Oracle から SQL Server への方向)
 
-- Tables, views, sequences, synonyms
-- Stored procedures, functions, packages, triggers
-- PL/SQL to T-SQL translation
-- ROWNUM to TOP/ROW_NUMBER()
-- DECODE to CASE
-- Oracle date/time functions to SQL Server equivalents
+- 表、ビュー、シーケンス、シノニム。
+- ストアド・プロシージャ、関数、パッケージ、トリガー。
+- PL/SQL から T-SQL への翻訳。
+- `ROWNUM` を `TOP` / `ROW_NUMBER()` へ変換。
+- `DECODE` を `CASE` へ変換。
+- Oracle の日付/時刻関数を SQL Server の同等機能へ変換。
 
 ---
 
-## ora2pg — Oracle/MySQL to PostgreSQL (NOT an Oracle target tool)
+## ora2pg — Oracle/MySQL から PostgreSQL への移行 (Oracle 移行用ではない)
 
-> ⚠️ **Direction Correction:** ora2pg is an open-source Perl tool that migrates **Oracle** (or MySQL) databases **to PostgreSQL**. It is **not** a tool for migrating to Oracle. The source is Oracle or MySQL; the target is always PostgreSQL. Do not use ora2pg when Oracle is the migration target. For PostgreSQL-to-Oracle migrations use SQL Developer Migration Workbench or manual export/SQL*Loader workflows instead.
+> ⚠️ **方向の注意：** ora2pg は、**Oracle** (または MySQL) データベースを **PostgreSQL** へ移行するためのオープンソースの Perl ツールである。これは Oracle へ移行するためのツールでは**ない**。移行元が Oracle または MySQL であり、移行先は常に PostgreSQL である。Oracle が移行先となる場合は ora2pg を使用しないこと。PostgreSQL から Oracle への移行には、SQL Developer Migration Workbench や手動エクスポート / SQL*Loader のワークフローを使用する。
 
-ora2pg is listed here for completeness, as it is sometimes relevant when an organization is migrating away from Oracle to PostgreSQL (the reverse of the focus of this guide). Its assessment report format is also a useful reference for complexity estimation methodology.
+ora2pg は、組織が Oracle から PostgreSQL へ移行する場合（本ガイドの焦点の逆向き）に必要となる可能性があるため、完全性のためにここにリストされている。そのアセスメント・レポート形式は、複雑度見積もり手法の有用なリファレンスにもなる。
 
-### Assessment Report Format (for reference)
+### アセスメント・レポート形式（参考用）
 
 ```
 -------------------------------------------------------------------------------
@@ -226,66 +226,66 @@ TRIGGER     |     18 |       0 |              8 |
 -------------------------------------------------------------------------------
 ```
 
-### ora2pg Notes
+### ora2pg に関する注意点
 
-- Migrates Oracle → PostgreSQL (and MySQL → PostgreSQL); Oracle is the **source**, not the target
-- Free and open source; actively maintained
-- Provides a migration complexity assessment report
-- Not applicable for any migration where Oracle is the destination
+- Oracle → PostgreSQL (および MySQL → PostgreSQL) の移行用。Oracle は**移行元**であり、移行先ではない。
+- 無料でオープンソース。活発にメンテナンスされている。
+- 移行の複雑さに関するアセスメント・レポートを提供。
+- Oracle が移行先となる場合は、どのような移行にも適用できない。
 
 ---
 
 ## Oracle Zero Downtime Migration (ZDM)
 
-Oracle Zero Downtime Migration is Oracle's enterprise tool for migrating Oracle databases to Oracle-hosted targets — including Oracle Cloud Infrastructure (OCI), Oracle Database@Azure, Oracle Database@Google Cloud, Oracle Database@AWS, Exadata Cloud at Customer, and on-premises Exadata — with minimal or zero downtime. It uses Oracle GoldenGate for continuous replication during the online migration cutover window. The source database can be on-premises, on OCI, or on a third-party cloud.
+Oracle Zero Downtime Migration は、Oracle データベースを Oracle がホストするターゲット（Oracle Cloud Infrastructure (OCI)、Oracle Database@Azure、Oracle Database@Google Cloud、Oracle Database@AWS、Exadata Cloud at Customer、およびオンプレミスの Exadata）へ、最小限またはゼロのダウンタイムで移行するためのエンタープライズ・ツールである。オンライン移行の切り替え期間中、継続的なレプリケーションを行うために Oracle GoldenGate を使用する。移行元データベースは、オンプレミス、OCI、またはサードパーティのクラウドを問わない。
 
-### ZDM Architecture
+### ZDM アーキテクチャ
 
 ```
-Source Oracle DB
+移行元 Oracle DB
      |
-     v (initial bulk copy via Data Pump or RMAN)
-Target Oracle DB (OCI, Exadata, Autonomous)
+     v (Data Pump または RMAN による初期の一括コピー)
+移行先 Oracle DB (OCI, Exadata, Autonomous)
      |
-     ^ (continuous redo log replication via GoldenGate)
+     ^ (GoldenGate による継続的な REDO ログのレプリケーション)
      |
-[Cutover point: redirect application connections]
+[切り替えポイント：アプリケーションの接続先をリダイレクト]
 ```
 
-### ZDM Migration Phases
+### ZDM 移行フェーズ
 
-1. **VALIDATE** — Check prerequisites: connectivity, version compatibility, space, privileges
-2. **SETUP** — Configure GoldenGate, network, target database
-3. **INITIALIZE** — Bulk transfer of initial data via Data Pump or RMAN
-4. **REPLICATE** — GoldenGate replicates ongoing changes from source to target
-5. **MONITOR** — Track replication lag until lag approaches zero
-6. **CUTOVER** — Switch application connections to target; stop replication
+1. **VALIDATE (検証)** — 前提条件のチェック：接続性、バージョンの互換性、容量、権限。
+2. **SETUP (セットアップ)** — GoldenGate、ネットワーク、移行先データベースの構成。
+3. **INITIALIZE (初期化)** — Data Pump または RMAN による初期データの一括転送。
+4. **REPLICATE (レプリケーション)** — GoldenGate が移行元から移行先へ進行中の変更をレプリケート。
+5. **MONITOR (監視)** — レプリケーション遅延がゼロに近づくまで監視。
+6. **CUTOVER (切り替え)** — アプリケーションの接続先を移行先へ切り替え、レプリケーションを停止。
 
-### ZDM Configuration Example
+### ZDM の構成例
 
 ```bash
-# ZDM is installed on a separate ZDM host
-# Configuration file: zdmconfig.rsp
+# ZDM は、独立した ZDM ホストにインストールされる
+# 構成ファイル: zdmconfig.rsp
 
-MIGRATION_METHOD=ONLINE_PHYSICAL   # or ONLINE_LOGICAL, OFFLINE_PHYSICAL
-PLATFORM_TYPE=EXACS                # Target: EXACS, DBCS, AUTONOMOUS_DATABASE
+MIGRATION_METHOD=ONLINE_PHYSICAL   # または ONLINE_LOGICAL, OFFLINE_PHYSICAL
+PLATFORM_TYPE=EXACS                # ターゲット: EXACS, DBCS, AUTONOMOUS_DATABASE
 TARGETDATABASEADMINUSERNAME=admin
 TARGETDATABASEADMINPASSWORD=<password>
 SOURCEDATABASEADMINUSERNAME=sys
 SOURCEDATABASEADMINPASSWORD=<password>
 
-# GoldenGate settings (for online migration)
+# GoldenGate 設定 (オンライン移行用)
 GOLDENGATESOURCEHOME=/u01/app/goldengate
 GOLDENGATESOURCEHOSTUSERNAME=oracle
 GOLDENGATETARGETHOME=/u01/app/goldengate_tgt
 
-# Data Pump settings (for initial bulk load)
+# Data Pump 設定 (初期の一括ロード用)
 DATAPUMPSETTINGS_JOBMODE=SCHEMA
 DATAPUMPSETTINGS_DATAPUMPPARAMETERS_PARALLELISM=4
 ```
 
 ```bash
-# Validate migration
+# 移行の検証
 zdmcli migrate database -sourcedb ORCL \
     -sourcenode source_host \
     -srcauth zdmauth -srcarg1 user:oracle \
@@ -293,107 +293,106 @@ zdmcli migrate database -sourcedb ORCL \
     -targethostid abc123 \
     -tdbtokenarr token_string \
     -rsp /etc/zdm/zdmconfig.rsp \
-    -eval   # -eval flag for dry-run validation only
+    -eval   # -eval フラグでドライ・ランによる検証のみを実行
 ```
 
-### ZDM Strengths
+### ZDM の強み
 
-- Oracle-to-Oracle migrations with near-zero downtime
-- Built-in GoldenGate integration
-- Supports physical (RMAN) and logical (Data Pump) migration methods
-- OCI Autonomous Database as target
-- Oracle-supported and documented
+- Oracle から Oracle への移行において、ニアゼロ・ダウンタイムを実現。
+- GoldenGate が組み込まれている。
+- 物理的 (RMAN) および論理的 (Data Pump) な移行方法の両方をサポート。
+- 移行先として OCI Autonomous Database をサポート。
+- Oracle によって公式にサポートおよびドキュメント化されている。
 
-### ZDM Limitations
+### ZDM の制限事項
 
-- Only migrates Oracle-to-Oracle (not cross-RDBMS)
-- Supported targets are Oracle-branded cloud and on-premises Exadata platforms; not arbitrary on-premises Oracle installations on commodity hardware
-- GoldenGate licensing required for online (near-zero downtime) migration; offline migration does not require GoldenGate
-- Complex setup for first-time users
+- Oracle から Oracle への移行のみを対象とする（クロス RDBMS 移行は不可）。
+- サポート対象の移行先は Oracle ブランドのクラウドおよびオンプレミスの Exadata プラットフォームに限定される。汎用的なハードウェア上の任意のオンプレミス Oracle 環境は対象外。
+- オンライン（ニアゼロ・ダウンタイム）移行には GoldenGate のライセンスが必要（オフライン移行では不要）。
+- 初めて使用する場合、セットアップが複雑。
 
 ---
 
-## Tool Capability Comparison
+## 各ツールの機能比較
 
-| Capability | SQL Dev Workbench | AWS SCT | ora2pg | ZDM | GoldenGate |
+| 機能 | SQL Dev Workbench | AWS SCT | ora2pg | ZDM | GoldenGate |
 |---|---|---|---|---|---|
-| PostgreSQL → Oracle | Yes | Yes | No (wrong direction) | No | No |
-| MySQL → Oracle | Yes | Yes | No (wrong direction) | No | Yes |
-| SQL Server → Oracle | Yes | Yes | No | No | Yes |
-| Sybase → Oracle | Yes | Yes | No | No | No |
-| DB2 → Oracle | Yes | No | No | No | No |
-| Teradata → Oracle | Yes | No | No | No | No |
-| Oracle → PostgreSQL | No | No | Yes (primary use case) | No | No |
-| Oracle → Oracle | No | No | No | Yes | Yes |
-| Schema conversion | Yes | Yes | Yes (Oracle→PG only) | No | No |
-| Data migration | Yes (slow) | No | Yes (Oracle→PG only) | Yes | Yes |
-| Assessment report | Basic | Detailed | Detailed (Oracle→PG) | Validation | No |
-| Near-zero downtime | No | No | No | Yes | Yes |
-| Cost | Free | Free | Free | Included w/OCI | Licensed |
-| GUI | Yes | Yes | No (CLI) | CLI | Yes |
-| Stored procedure conversion | Good | Excellent | N/A for Oracle target | N/A | N/A |
+| PostgreSQL → Oracle | ○ | ○ | × (方向違い) | × | × |
+| MySQL → Oracle | ○ | ○ | × (方向違い) | × | ○ |
+| SQL Server → Oracle | ○ | ○ | × | × | ○ |
+| Sybase → Oracle | ○ | ○ | × | × | × |
+| DB2 → Oracle | ○ | × | × | × | × |
+| Teradata → Oracle | ○ | × | × | × | × |
+| Oracle → PostgreSQL | × | × | ○ (主要ケース) | × | × |
+| Oracle → Oracle | × | × | × | ○ | ○ |
+| スキーマ変換 | ○ | ○ | ○ (Ora→PGのみ) | × | × |
+| データ移行 | ○ (低速) | × | ○ (Ora→PGのみ) | ○ | ○ |
+| アセスメント・レポート | 基本的 | 詳細 | 詳細 (Ora→PG) | 検証のみ | × |
+| ニアゼロ・ダウンタイム | × | × | × | ○ | ○ |
+| コスト | 無料 | 無料 | 無料 | OCIに含まれる | ライセンス制 |
+| GUI | ○ | ○ | × (CLI) | CLI | ○ |
+| ストアド・プロシージャ変換 | 良 | 最良 | Oracle 向けは N/A | N/A | N/A |
 
 ---
 
-## Choosing the Right Tool Combination
+## 適切なツール構成の選択
 
-### For SQL Server → Oracle
+### SQL Server → Oracle の場合
 
-1. **AWS SCT** for schema conversion (tables, indexes, procedures)
-2. **SQL*Loader** or **Oracle Data Pump** for bulk data migration
-3. **Oracle GoldenGate** if near-zero downtime is required
+1. スキーマ変換（表、索引、プロシージャ）：**AWS SCT**。
+2. 大規模データの一括移行：**SQL*Loader** または **Oracle Data Pump**。
+3. ニアゼロ・ダウンタイムが必要な場合：**Oracle GoldenGate**。
 
-### For PostgreSQL → Oracle
+### PostgreSQL → Oracle の場合
 
-1. **SQL Developer Migration Workbench** for schema conversion (tables, indexes, views, procedures)
-2. **SQL*Loader** with CSV export (`\COPY` to CSV) for bulk data loading
-3. **AWS SCT** as an alternative for schema conversion with a more detailed assessment report
+1. スキーマ変換（表、索引、ビュー、プロシージャ）：**SQL Developer Migration Workbench**。
+2. 大規模データのロード：**SQL*Loader**。`\COPY` コマンドで CSV 出力して利用。
+3. 詳細なアセスメント・レポートを伴うスキーマ変換の代替手段：**AWS SCT**。
 
-### For MySQL → Oracle
+### MySQL → Oracle の場合
 
-1. **SQL Developer Migration Workbench** for schema conversion
-2. **SQL*Loader** with CSV export for data migration
+1. スキーマ変換：**SQL Developer Migration Workbench**。
+2. データ移行：CSV 出力した上で **SQL*Loader**。
 
-### For Oracle → Oracle (Cloud Migration)
+### Oracle → Oracle (クラウド移行) の場合
 
-1. **Oracle ZDM** for the full migration lifecycle
-2. **Data Pump** for offline schema/data transfer
-3. **GoldenGate** for online continuous replication
+1. 移行ライフサイクル全体の管理：**Oracle ZDM**。
+2. オフラインでのスキーマ / データ転送：**Data Pump**。
+3. オンラインでの継続的なレプリケーション：**GoldenGate**。
 
-### For MongoDB → Oracle
+### MongoDB → Oracle の場合
 
-No dedicated tool; use a combination of:
-1. **mongoexport** for data extraction
-2. Custom Python ETL scripts for transformation
-3. **SQL*Loader** for loading into Oracle
-4. **Oracle JSON Duality Views** (23c) for document-style access layer
-
----
-
-## Best Practices for Tool Usage
-
-1. **Always run the assessment first.** Every tool above has an assessment or report mode. Run it before doing any actual migration. The assessment reveals unknown complexity and effort estimates.
-
-2. **Migrate in phases.** Use the tool to migrate a subset of tables first, validate thoroughly, then proceed with the next batch. Never attempt a single-shot full migration of a large schema without phased validation.
-
-3. **Keep generated DDL in version control.** All schema conversion tools generate SQL files. Commit these to Git before applying them to the target database. This creates an audit trail and enables rollback.
-
-4. **Test stored procedure conversion manually.** No tool achieves 100% procedure conversion automatically. Plan for manual review of every converted procedure before deploying to production.
-
-5. **Use PARALLEL and DIRECT PATH options for data loads.** When loading large datasets with SQL*Loader, always use `DIRECT=TRUE` and `PARALLEL=TRUE` for maximum throughput.
-
-6. **Validate after every load.** Run row count and hash-based validation queries after each table migration. See `migration-data-validation.md` for full validation patterns.
+専用ツールはない。以下を組み合わせて使用する：
+1. データ抽出：**mongoexport**。
+2. 変換処理：カスタムの Python ETL スクリプト。
+3. Oracle へのロード：**SQL*Loader**。
+4. ドキュメント型アクセス・レイヤーの作成：**Oracle JSON Duality Views** (23c)。
 
 ---
 
+## ツールを使用する際のベスト・プラクティス
 
-## Oracle Version Notes (19c vs 26ai)
+1. **常に最初にアセスメントを実行する。** 前述のすべてのツールには、アセスメント・モードやレポート・モードがある。実際の移行を開始する前に必ず実行すること。アセスメントによって未知の複雑さが明らかになり、作業の見積もりが可能になる。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+2. **段階的に移行する。** まず一部の表のサブセットをツールで移行し、入念に検証してから次のグループに進む。大規模なスキーマの場合、段階的な検証なしに一回でフル移行を試みてはいけない。
 
-## Sources
+3. **生成された DDL をバージョン管理に含める。** すべてのスキーマ変換ツールは SQL ファイルを生成する。これらを移行先データベースに適用する前に Git にコミットすること。これにより監査証跡が作成され、ロールバックが可能になる。
+
+4. **ストアド・プロシージャの変換は手動でテストする。** 自動的に 100% 完璧にプロシージャを変換できるツールはない。本番環境にデプロイする前に、変換されたすべてのプロシージャを人間がレビューするように計画を立てること。
+
+5. **データ・ロードには PARALLEL および DIRECT パス・オプションを使用する。** SQL*Loader で大規模なデータセットをロードする場合、スループットを最大化するために常に `DIRECT=TRUE` と `PARALLEL=TRUE` を使用すること。
+
+6. **ロードのたびに検証を行う。** 各テーブルの移行後に行カウントとハッシュ・ベースの検証クエリを実行する。詳細な検証パターンについては、`migration-data-validation.md` を参照。
+
+---
+
+## Oracle バージョンに関する注意 (19c vs 26ai)
+
+- 本ファイル内の基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c, 23c, または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 複数バージョンをサポートする環境では、リリース更新（RU）によってデフォルト値や非推奨機能が異なる場合があるため、19c と 26ai の両方で動作をテストすること。
+
+## ソース
 
 - [Oracle SQL Developer Migration Workbench documentation](https://docs.oracle.com/en/database/oracle/sql-developer/23.1/rptug/migration-workbench.html)
 - [Oracle Zero Downtime Migration (ZDM) documentation](https://docs.oracle.com/en/database/oracle/zero-downtime-migration/index.html)

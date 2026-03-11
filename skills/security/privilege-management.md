@@ -1,95 +1,95 @@
-# Oracle Privilege Management
+# Oracle 権限管理 (Privilege Management)
 
-## Overview
+## 概要
 
-Privilege management is the foundation of Oracle database security. Oracle uses a discretionary access control (DAC) model where users are granted explicit rights to perform operations or access objects. Getting privilege management right is the single most impactful security control in any Oracle deployment — overly permissive privilege grants are the root cause of the vast majority of database breaches and insider threats.
+権限管理は、Oracle データベース・セキュリティの基盤である。Oracle は、ユーザーに対して操作の実行やオブジェクトへのアクセスに関する明示的な権利を付与する、任意アクセス制御 (DAC) モデルを使用している。権限管理を正しく行うことは、Oracle のデプロイメントにおいて最も影響力のあるセキュリティ制御である。過度に寛大な権限付与は、データベース侵害や内部脅威の大多数の根本原因となっている。
 
-Oracle privileges fall into two major categories: **system privileges** (the right to perform a class of operation anywhere in the database) and **object privileges** (the right to perform a specific operation on a specific object). Both can be granted directly to users or collected into **roles** for easier administration.
+Oracle の権限は、主に 2 つのカテゴリに分けられる。**システム権限**（データベース内のどこでも特定の種類の操作を実行する権利）と、**オブジェクト権限**（特定のオブジェクトに対して特定の操作を実行する権利）である。どちらもユーザーに直接付与することも、管理を容易にするために**ロール**にまとめて付与することもできる。
 
 ---
 
-## System Privileges
+## システム権限 (System Privileges)
 
-System privileges grant the ability to perform actions that affect the database as a whole or objects in any schema. There are over 200 system privileges in Oracle. The most dangerous ones are those with the `ANY` keyword.
+システム権限は、データベース全体、または任意のスキーマ内のオブジェクトに影響を与えるアクションを実行する能力を付与する。Oracle には 200 以上のシステム権限がある。最も危険なのは `ANY` キーワードを含む権限である。
 
-### Dangerous System Privileges to Watch
+### 注意すべき危険なシステム権限
 
-| Privilege | Risk |
+| 権限 | リスク |
 |---|---|
-| `DBA` role | Near-total control of the database |
-| `SYSDBA` / `SYSOPER` | Administrative OS-bypass access |
-| `CREATE ANY TABLE` | Create objects in any schema |
-| `DROP ANY TABLE` | Destroy any schema's data |
-| `SELECT ANY TABLE` | Read any data in the database |
-| `EXECUTE ANY PROCEDURE` | Run any stored code |
-| `ALTER ANY TABLE` | Modify any table's structure |
-| `GRANT ANY PRIVILEGE` | Re-grant privileges to anyone |
-| `GRANT ANY ROLE` | Assign any role to anyone |
-| `BECOME USER` | Impersonate any user |
+| `DBA` ロール | データベースのほぼ完全な制御 |
+| `SYSDBA` / `SYSOPER` | OS 認証をバイパスする管理者アクセス |
+| `CREATE ANY TABLE` | 任意のスキーマにオブジェクトを作成 |
+| `DROP ANY TABLE` | 任意のスキーマのデータを破壊 |
+| `SELECT ANY TABLE` | データベース内の任意のデータを読み取り |
+| `EXECUTE ANY PROCEDURE` | 任意のストアド・コードを実行 |
+| `ALTER ANY TABLE` | 任意の表の構造を変更 |
+| `GRANT ANY PRIVILEGE` | 誰に対しても権限を再付与 |
+| `GRANT ANY ROLE` | 誰に対してもロールを割り当て |
+| `BECOME USER` | 任意のユーザーになりすます |
 
-### Granting System Privileges
+### システム権限の付与
 
 ```sql
--- Grant a specific system privilege to a user
+-- 特定のシステム権限をユーザーに付与
 GRANT CREATE SESSION TO app_user;
 GRANT CREATE TABLE TO app_user;
 GRANT CREATE SEQUENCE TO app_user;
 
--- Grant with ADMIN OPTION allows the grantee to re-grant
--- Use this sparingly — it creates uncontrolled privilege spread
+-- WITH ADMIN OPTION を付けて付与すると、付与されたユーザーがさらに他者へ再付与できるようになる
+-- これは権限の無制限な拡散を招くため、慎重に使用すること
 GRANT CREATE TABLE TO schema_owner WITH ADMIN OPTION;
 
--- Grant to a role
+-- ロールに付与
 GRANT CREATE SESSION TO app_readonly_role;
 ```
 
-### Revoking System Privileges
+### システム権限の取り消し
 
 ```sql
--- Revoke a system privilege
+-- システム権限を取り消す
 REVOKE CREATE TABLE FROM app_user;
 
--- Note: Revoking a system privilege granted WITH ADMIN OPTION does NOT
--- cascade-revoke privileges that were re-granted by that user.
--- This is different from object privilege revoke behavior.
+-- 注: WITH ADMIN OPTION で付与されたシステム権限を取り消しても、
+-- そのユーザーによって再付与された権限は連鎖的に取り消されない。
+-- これは、オブジェクト権限の取り消し動作とは異なる。
 REVOKE CREATE SESSION FROM schema_owner;
 ```
 
 ---
 
-## Object Privileges
+## オブジェクト権限 (Object Privileges)
 
-Object privileges control what a user can do with a specific database object such as a table, view, sequence, or procedure. They are more granular than system privileges and should always be preferred.
+オブジェクト権限は、表、ビュー、順序、プロシージャなどの特定のデータベース・オブジェクトに対してユーザーができることを制御する。システム権限よりもきめ細かく、常にこちらを優先して使用すべきである。
 
-### Common Object Privileges
+### 一般的なオブジェクト権限
 
 ```sql
--- Table/View privileges
+-- 表/ビューの権限
 GRANT SELECT ON hr.employees TO reporting_user;
 GRANT INSERT ON hr.employees TO data_entry_user;
-GRANT UPDATE (salary, job_id) ON hr.employees TO hr_manager;  -- Column-level grant
+GRANT UPDATE (salary, job_id) ON hr.employees TO hr_manager;  -- 列レベルの付与
 GRANT DELETE ON hr.employees TO hr_admin;
-GRANT REFERENCES ON hr.departments TO app_user;  -- Needed for FK constraints
+GRANT REFERENCES ON hr.departments TO app_user;  -- 外部キー制約に必要
 
--- Sequence privileges
+-- 順序の権限
 GRANT SELECT ON hr.emp_seq TO app_user;
 
--- Procedure/Function/Package privileges
+-- プロシージャ/ファンクション/パッケージの権限
 GRANT EXECUTE ON hr.process_payroll TO payroll_app;
 
--- Grant to all users (avoid for sensitive objects)
-GRANT SELECT ON hr.public_holidays TO PUBLIC;  -- Use with caution!
+-- すべてのユーザーに付与（機密オブジェクトには避けること）
+GRANT SELECT ON hr.public_holidays TO PUBLIC;  -- 注意して使用！
 ```
 
-### Column-Level Grants
+### 列レベルの付与
 
-Oracle allows UPDATE and REFERENCES grants at the column level, which is a powerful tool for least privilege:
+Oracle では、UPDATE および REFERENCES 権限を列レベルで指定できる。これは最小権限の原則を実現するための強力なツールである。
 
 ```sql
--- Allow updating only specific columns
+-- 特定の列の更新のみを許可
 GRANT UPDATE (phone_number, email) ON hr.employees TO help_desk_role;
 
--- Verify column-level grants
+-- 列レベルの付与を確認
 SELECT grantee, owner, table_name, column_name, privilege
 FROM dba_col_privs
 WHERE owner = 'HR'
@@ -98,62 +98,62 @@ ORDER BY table_name, column_name;
 
 ---
 
-## Roles
+## ロール (Roles)
 
-Roles are named collections of privileges that simplify privilege administration. Rather than granting dozens of privileges to each user individually, you grant them a role. Roles can contain both system and object privileges, and roles can be granted to other roles.
+ロールは、権限の管理を簡素化するために、権限を名前付きでまとめたものである。各ユーザーに個別に数十の権限を付与するのではなく、ロールを一括して付与する。ロールにはシステム権限とオブジェクト権限の両方を含めることができ、ロールを他のロールに付与することもできる。
 
-### Creating and Managing Roles
+### ロールの作成と管理
 
 ```sql
--- Create a simple role
+-- シンプルなロールの作成
 CREATE ROLE app_read_role;
 CREATE ROLE app_write_role;
 CREATE ROLE app_admin_role;
 
--- Create a password-protected role (must be enabled explicitly)
+-- パスワード保護されたロール（明示的に有効化する必要がある）
 CREATE ROLE sensitive_data_role IDENTIFIED BY "R0leP@ssw0rd!";
 
--- Grant privileges into the role
+-- ロールへの権限付与
 GRANT SELECT ON orders.customers TO app_read_role;
 GRANT SELECT ON orders.order_lines TO app_read_role;
 GRANT SELECT ON orders.products TO app_read_role;
 
-GRANT app_read_role TO app_write_role;  -- Role hierarchy
+GRANT app_read_role TO app_write_role;  -- ロールの階層化
 GRANT INSERT, UPDATE, DELETE ON orders.customers TO app_write_role;
 
--- Grant the role to users
+-- ユーザーへのロール付与
 GRANT app_read_role TO reporting_svc;
 GRANT app_write_role TO webapp_svc;
 
--- Grant with ADMIN OPTION (allows re-granting the role)
+-- WITH ADMIN OPTION を付けて付与（ロールの再付与を許可）
 GRANT app_read_role TO team_lead WITH ADMIN OPTION;
 ```
 
-### Enabling Password-Protected Roles
+### パスワード保護されたロールの有効化
 
 ```sql
--- In application code or session setup
+-- アプリケーション・コードまたはセッション・セットアップ内
 SET ROLE sensitive_data_role IDENTIFIED BY "R0leP@ssw0rd!";
 
--- Disable a specific role for the current session
+-- 現在のセッションで特定のロール以外を無効化
 SET ROLE ALL EXCEPT sensitive_data_role;
 
--- Re-enable all roles
+-- すべてのロールを再度有効化
 SET ROLE ALL;
 ```
 
-### Predefined Oracle Roles (Use with Extreme Caution)
+### 事前定義された Oracle ロール（細心の注意が必要）
 
 ```sql
--- DBA role: grants nearly every system privilege including WITH ADMIN OPTION
--- NEVER grant this to application accounts
+-- DBA ロール: WITH ADMIN OPTION を含むほぼすべてのシステム権限を付与
+-- アプリケーション・アカウントには絶対に付与しないこと
 GRANT DBA TO scott;  -- BAD PRACTICE
 
--- CONNECT role: in 12c+ only grants CREATE SESSION
--- RESOURCE role: grants CREATE TABLE, SEQUENCE, PROCEDURE, etc.
--- These are acceptable for developer schemas but not for application service accounts
+-- CONNECT ロール: 12c 以降では CREATE SESSION のみを付与
+-- RESOURCE ロール: CREATE TABLE, SEQUENCE, PROCEDURE などを付与
+-- これらは開発用スキーマには許容されるが、アプリケーション・サービス・アカウントには不適切
 
--- Check what's inside Oracle's predefined roles
+-- 事前定義ロールの中身を確認する
 SELECT privilege, admin_option
 FROM dba_sys_privs
 WHERE grantee = 'DBA'
@@ -162,31 +162,31 @@ ORDER BY privilege;
 
 ---
 
-## Least Privilege Principle
+## 最小権限の原則 (Least Privilege Principle)
 
-The principle of least privilege states that any user, application, or process should have only the minimum access rights required to perform its function and nothing more.
+最小権限の原則とは、ユーザー、アプリケーション、またはプロセスが、その機能を実行するために必要な最小限のアクセス権のみを持ち、それ以上の権利は持たないようにすべきであるという考え方である。
 
-### Designing a Least-Privilege Schema
+### 最小権限を考慮したスキーマ設計
 
 ```sql
--- Step 1: Separate schema owner from application user
--- The schema owner creates objects but never connects in production
+-- ステップ 1: スキーマ所有者とアプリケーション・ユーザーを分離
+-- スキーマ所有者はオブジェクトを作成するが、本番環境で接続することはない
 CREATE USER orders_schema IDENTIFIED BY "SchemaP@ss!" ACCOUNT LOCK;
 
--- Step 2: Create the application service account with no unnecessary privileges
+-- ステップ 2: 不要な権限を持たないアプリケーション・サービス・アカウントを作成
 CREATE USER orders_app IDENTIFIED BY "AppP@ss!"
   DEFAULT TABLESPACE users
   TEMPORARY TABLESPACE temp
   PROFILE app_profile;
 
--- Step 3: Grant only what is needed
+-- ステップ 3: 必要なものだけを付与
 GRANT CREATE SESSION TO orders_app;
 GRANT SELECT, INSERT, UPDATE ON orders_schema.orders TO orders_app;
 GRANT SELECT ON orders_schema.customers TO orders_app;
 GRANT SELECT ON orders_schema.products TO orders_app;
 GRANT EXECUTE ON orders_schema.process_order TO orders_app;
 
--- Step 4: Create a read-only reporting account
+-- ステップ 4: 読み取り専用のレポート作成用アカウントを作成
 CREATE USER orders_report IDENTIFIED BY "ReportP@ss!";
 GRANT CREATE SESSION TO orders_report;
 GRANT SELECT ON orders_schema.orders TO orders_report;
@@ -195,17 +195,15 @@ GRANT SELECT ON orders_schema.order_lines TO orders_report;
 
 ---
 
-## Privilege Analysis with DBMS_PRIVILEGE_CAPTURE
+## DBMS_PRIVILEGE_CAPTURE による権限分析
 
-Oracle 12c+ includes the `DBMS_PRIVILEGE_CAPTURE` package, which lets you capture which privileges a user actually uses during a period of activity. This is the definitive tool for right-sizing privileges.
+Oracle 12c 以降には `DBMS_PRIVILEGE_CAPTURE` パッケージが含まれており、特定の期間内にユーザーが実際にどの権限を使用したかをキャプチャできる。これは、権限を適切なサイズに調整するための究極のツールである。
 
-### Running a Privilege Capture
+### 権限キャプチャの実行
 
 ```sql
--- Step 1: Create a capture policy
--- Capture type options: G_DATABASE (all), G_ROLE, G_CONTEXT, G_ROLE_AND_CONTEXT
--- The roles parameter is only meaningful when type = G_ROLE or G_ROLE_AND_CONTEXT.
--- For G_DATABASE, omit roles (or pass NULL).
+-- ステップ 1: キャプチャ・ポリシーを作成
+-- キャプチャ・タイプのオプション: G_DATABASE (すべて), G_ROLE, G_CONTEXT, G_ROLE_AND_CONTEXT
 BEGIN
   DBMS_PRIVILEGE_CAPTURE.CREATE_CAPTURE(
     name        => 'app_privs_capture',
@@ -215,71 +213,60 @@ BEGIN
 END;
 /
 
--- To capture only privileges used via a specific role, use G_ROLE:
--- BEGIN
---   DBMS_PRIVILEGE_CAPTURE.CREATE_CAPTURE(
---     name  => 'role_privs_capture',
---     type  => DBMS_PRIVILEGE_CAPTURE.G_ROLE,
---     roles => role_name_list('ORDERS_APP_ROLE')
---   );
--- END;
--- /
-
--- Step 2: Enable the capture
+-- ステップ 2: キャプチャを有効化
 EXEC DBMS_PRIVILEGE_CAPTURE.ENABLE_CAPTURE('app_privs_capture');
 
--- Step 3: Run the application workload now (run all code paths)
+-- ステップ 3: アプリケーション・ワークロードを実行（すべてのコード・パスを実行させる）
 
--- Step 4: Disable the capture
+-- ステップ 4: キャプチャを無効化
 EXEC DBMS_PRIVILEGE_CAPTURE.DISABLE_CAPTURE('app_privs_capture');
 
--- Step 5: Generate the analysis results
+-- ステップ 5: 分析結果を生成
 EXEC DBMS_PRIVILEGE_CAPTURE.GENERATE_RESULT('app_privs_capture');
 
--- Step 6: Query the results
--- Privileges that WERE used
+-- ステップ 6: 結果をクエリ
+-- 使用された（WERE used）権限
 SELECT username, sys_priv, object_owner, object_name, object_type
 FROM dba_used_privs
 WHERE capture = 'APP_PRIVS_CAPTURE'
 ORDER BY username, sys_priv;
 
--- Privileges that were NOT used (candidates for revocation)
+-- 使用されなかった（NOT used）権限（取り消し候補）
 SELECT username, sys_priv, object_owner, object_name, object_type
 FROM dba_unused_privs
 WHERE capture = 'APP_PRIVS_CAPTURE'
 ORDER BY username, sys_priv;
 
--- Step 7: Clean up
+-- ステップ 7: クリーンアップ
 EXEC DBMS_PRIVILEGE_CAPTURE.DROP_CAPTURE('app_privs_capture');
 ```
 
 ---
 
-## Querying the Privilege Data Dictionary
+## 権限データ・ディクショナリの照会
 
-### System Privilege Queries
+### システム権限のクエリ
 
 ```sql
--- All system privileges granted to a user (direct grants)
+-- ユーザーに付与されているすべてのシステム権限 (直接付与分)
 SELECT grantee, privilege, admin_option
 FROM dba_sys_privs
 WHERE grantee = 'ORDERS_APP'
 ORDER BY privilege;
 
--- All system privileges granted to a role
+-- ロールに付与されているすべてのシステム権限
 SELECT grantee, privilege, admin_option
 FROM dba_sys_privs
 WHERE grantee = 'APP_WRITE_ROLE'
 ORDER BY privilege;
 
--- Find all users with DBA role (direct or indirect)
+-- DBA ロールを持つすべてのユーザー（直接または間接）を特定
 SELECT grantee, granted_role, admin_option, default_role
 FROM dba_role_privs
 WHERE granted_role = 'DBA'
 ORDER BY grantee;
 
--- Recursively find all system privileges for a user including via roles
--- Uses recursive CTE (Oracle 11g R2+)
+-- ロール経由を含め、ユーザーのすべてのシステム権限を再帰的に検索
 WITH role_tree (role_or_user) AS (
   SELECT granted_role
   FROM dba_role_privs
@@ -298,28 +285,28 @@ WHERE sp.grantee IN (
 ORDER BY sp.grantee, sp.privilege;
 ```
 
-### Object Privilege Queries
+### オブジェクト権限のクエリ
 
 ```sql
--- All object privileges granted to a user
+-- ユーザーに付与されているすべてのオブジェクト権限
 SELECT owner, table_name, grantee, privilege, grantable, hierarchy
 FROM dba_tab_privs
 WHERE grantee = 'ORDERS_APP'
 ORDER BY owner, table_name, privilege;
 
--- Find who has access to a specific sensitive table
+-- 特定の機密表に誰がアクセスできるかを確認
 SELECT grantee, privilege, grantable
 FROM dba_tab_privs
 WHERE owner = 'HR' AND table_name = 'EMPLOYEES'
 ORDER BY grantee;
 
--- Column-level privileges
+-- 列レベルの権限
 SELECT owner, table_name, column_name, grantee, privilege
 FROM dba_col_privs
 WHERE owner = 'HR'
 ORDER BY table_name, column_name, grantee;
 
--- Find all grants made to PUBLIC (high risk)
+-- PUBLIC に付与されているものを検索 (高リスク)
 SELECT owner, table_name, privilege, grantable
 FROM dba_tab_privs
 WHERE grantee = 'PUBLIC'
@@ -331,22 +318,22 @@ WHERE grantee = 'PUBLIC'
 ORDER BY privilege;
 ```
 
-### Role Membership Queries
+### ロール・メンバーシップのクエリ
 
 ```sql
--- Roles granted to a user
+-- ユーザーに付与されているロール
 SELECT granted_role, admin_option, default_role
 FROM dba_role_privs
 WHERE grantee = 'ORDERS_APP'
 ORDER BY granted_role;
 
--- All members of a role
+-- ロールの全メンバー
 SELECT grantee, admin_option, default_role
 FROM dba_role_privs
 WHERE granted_role = 'APP_WRITE_ROLE'
 ORDER BY grantee;
 
--- Full role hierarchy
+-- ロール階層の確認
 SELECT role, privilege, admin_option
 FROM role_sys_privs
 WHERE role = 'APP_WRITE_ROLE'
@@ -360,16 +347,16 @@ ORDER BY owner, table_name;
 
 ---
 
-## Avoiding PUBLIC Grants
+## PUBLIC への付与の回避
 
-Granting privileges to `PUBLIC` makes them available to every user in the database, including any future users created. This is extremely dangerous for sensitive objects.
+`PUBLIC` に権限を付与すると、データベース内のすべてのユーザー（将来作成されるユーザーを含む）がその権限を利用できるようになる。これは、機密オブジェクトにとって非常に危険である。
 
 ```sql
--- DANGEROUS: Never do this for application tables
+-- 危険: アプリケーションの表に対して絶対に行わないこと
 GRANT SELECT ON payroll.salary_data TO PUBLIC;
-GRANT EXECUTE ON sys.utl_file TO PUBLIC;  -- Allows file system access
+GRANT EXECUTE ON sys.utl_file TO PUBLIC;  -- ファイル・システムへのアクセスを許可してしまう
 
--- Audit current PUBLIC grants
+-- 現在の PUBLIC への付与状況を監査
 SELECT owner, table_name, privilege
 FROM dba_tab_privs
 WHERE grantee = 'PUBLIC'
@@ -377,7 +364,7 @@ WHERE grantee = 'PUBLIC'
                     'FLOWS_FILES', 'CTXSYS', 'MDSYS', 'ORDSYS')
 ORDER BY owner, table_name;
 
--- Revoke excessive PUBLIC grants
+-- 過度な PUBLIC への付与を取り消す
 REVOKE EXECUTE ON utl_file FROM PUBLIC;
 REVOKE EXECUTE ON utl_http FROM PUBLIC;
 REVOKE EXECUTE ON utl_tcp FROM PUBLIC;
@@ -387,10 +374,10 @@ REVOKE EXECUTE ON dbms_advisor FROM PUBLIC;
 
 ---
 
-## User Account Security Settings
+## ユーザー・アカウントのセキュリティ設定
 
 ```sql
--- Create a secure profile for application users
+-- アプリケーション・ユーザー向けのセキュアなプロファイルを作成
 CREATE PROFILE app_profile LIMIT
   SESSIONS_PER_USER          5
   CPU_PER_SESSION            UNLIMITED
@@ -408,13 +395,13 @@ CREATE PROFILE app_profile LIMIT
   PASSWORD_LOCK_TIME         1/24
   PASSWORD_GRACE_TIME        7;
 
--- Assign profile to user
+-- プロファイルをユーザーに割り当て
 ALTER USER app_user PROFILE app_profile;
 
--- Lock accounts that should never log in directly
+-- 直接ログインすべきでないアカウントをロック
 ALTER USER schema_owner ACCOUNT LOCK;
 
--- Check for default passwords (Oracle 12c+)
+-- デフォルト・パスワードのアカウントを確認 (Oracle 12c 以降)
 SELECT username, account_status
 FROM dba_users_with_defpwd
 ORDER BY username;
@@ -422,74 +409,74 @@ ORDER BY username;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Use schema separation**: The account that owns objects should be locked and never used for application connections. Application service accounts should only have grants on the objects they need.
+1.  **スキーマ分離を使用する**: オブジェクトを所有するアカウントはロックし、アプリケーション接続には決して使用しない。アプリケーション用サービス・アカウントには、必要なオブジェクトに対する権限だけを付与する。
 
-2. **Never grant DBA to application accounts**: The DBA role grants almost every privilege in the database. Application service accounts must never hold it.
+2.  **アプリケーション・アカウントに DBA を付与しない**: DBA ロールはデータベース内のほぼすべての権限を付与する。アプリケーション用サービス・アカウントがこれを持つことはあってはならない。
 
-3. **Prefer roles over direct grants**: Roles make privilege management auditable and easier to revoke. Grant privileges to roles, grant roles to users.
+3.  **直接付与ではなくロールを使用する**: ロールを使用することで権限管理が監査可能になり、取り消しも容易になる。権限をロールに付与し、ロールをユーザーに付与する。
 
-4. **Avoid `WITH ADMIN OPTION` and `WITH GRANT OPTION`**: These allow privilege spread outside your control. Only grant them to DBA accounts when absolutely required.
+4.  **`WITH ADMIN OPTION` および `WITH GRANT OPTION` を避ける**: これらは管理者以外の制御が及ばない場所での権限拡散を許してしまう。どうしても必要な場合にのみ、DBA アカウントに対して付与する。
 
-5. **Never grant to PUBLIC**: Anything granted to PUBLIC is available to everyone. Even seemingly innocuous packages can be leveraged for SQL injection or data exfiltration.
+5.  **PUBLIC に付与しない**: PUBLIC に付与されたものは誰でも利用できる。一見無害に見えるパッケージでも、SQL インジェクションやデータの持ち出しに悪用される可能性がある。
 
-6. **Run DBMS_PRIVILEGE_CAPTURE before major releases**: Capture the privileges used in a staging environment and ensure the production account has exactly those privileges.
+6.  **メジャー・リリース前に DBMS_PRIVILEGE_CAPTURE を実行する**: ステージング環境で使用された権限をキャプチャし、本番環境のアカウントにそれらの権限のみが付与されていることを確認する。
 
-7. **Audit DBA_SYS_PRIVS regularly**: Schedule a weekly or monthly job to report on any new system privilege grants and have them reviewed.
+7.  **DBA_SYS_PRIVS を定期的に監査する**: 新しいシステム権限の付与状況を週次または月次でレポートするジョブをスケジュールし、レビューを行う。
 
-8. **Use the principle of separation of duties**: The user who creates data should not be the same user who can delete or export it.
+8.  **職務分掌の原則を使用する**: データを作成するユーザーと、データを削除またはエクスポートできるユーザーを分ける。
 
 ---
 
-## Common Mistakes and How to Avoid Them
+## よくある間違いとその回避方法
 
-### Mistake 1: Granting RESOURCE Role to Service Accounts
+### 間違い 1: サービス・アカウントに RESOURCE ロールを付与する
 
-The `RESOURCE` role grants `CREATE TABLE`, `CREATE PROCEDURE`, `CREATE SEQUENCE`, and others. Application service accounts should never create their own objects.
+`RESOURCE` ロールには `CREATE TABLE`, `CREATE PROCEDURE`, `CREATE SEQUENCE` などが含まれる。アプリケーション用サービス・アカウントが自らオブジェクトを作成すべきではない。
 
 ```sql
--- BAD
+-- 不適切
 GRANT RESOURCE TO webapp_svc;
 
--- GOOD: Grant only the specific object privileges needed
+-- 適切: 必要な特定のオブジェクト権限のみを付与
 GRANT SELECT, INSERT, UPDATE ON app_schema.orders TO webapp_svc;
 GRANT EXECUTE ON app_schema.order_pkg TO webapp_svc;
 ```
 
-### Mistake 2: Using `SELECT ANY TABLE` Instead of Specific Grants
+### 間違い 2: 特定の権限の代わりに `SELECT ANY TABLE` を使用する
 
 ```sql
--- BAD: Allows reading every table in the entire database
+-- 不適切: データベース全体のすべての表を読み取れてしまう
 GRANT SELECT ANY TABLE TO reporting_user;
 
--- GOOD: Create a view or grant specific tables
+-- 適切: ビューを作成するか、特定の表に対する権限を付与する
 GRANT SELECT ON sales.orders TO reporting_user;
 GRANT SELECT ON sales.order_lines TO reporting_user;
--- Or better: create a read-only role
+-- さらに良い方法: 読み取り専用ロールを作成して付与
 GRANT reporting_role TO reporting_user;
 ```
 
-### Mistake 3: Forgetting to Revoke Default Public Packages
+### 間違い 3: デフォルトで PUBLIC に付与されているパッケージを取り消し忘れる
 
 ```sql
--- Many dangerous packages are granted to PUBLIC by default
--- Revoke them and grant only to accounts that need them
+-- 多くの危険なパッケージがデフォルトで PUBLIC に付与されている
+-- これらを取り消し、必要なアカウントにのみ付与し直す
 REVOKE EXECUTE ON sys.dbms_backup_restore FROM PUBLIC;
 REVOKE EXECUTE ON sys.utl_file FROM PUBLIC;
 GRANT EXECUTE ON sys.utl_file TO etl_process_account;
 ```
 
-### Mistake 4: Not Auditing Privilege Grant History
+### 間違い 4: 権限付与の履歴を監査していない
 
-Without unified auditing enabled for privilege grants, you have no record of who granted what. Always audit `GRANT` and `REVOKE` statements (see `auditing.md`).
+権限付与に関する統合監査を有効にしていないと、誰が何を付与したかの記録が残らない。常に `GRANT` および `REVOKE` 文を監査対象にすること（`auditing.md` を参照）。
 
-### Mistake 5: Granting Privileges Without Time Limits
+### 間違い 5: 期限なしに権限を付与する
 
-Oracle does not have native privilege expiry, but you can implement it:
+Oracle にはネイティブな権限期限切れ機能はないが、以下のように実装できる。
 
 ```sql
--- Create a job to revoke a temporary grant
+-- 一時的な権限付与を自動的に取り消すジョブを作成
 BEGIN
   DBMS_SCHEDULER.CREATE_JOB(
     job_name        => 'REVOKE_TEMP_ACCESS',
@@ -505,37 +492,37 @@ END;
 
 ---
 
-## Compliance Considerations
+## コンプライアンスの考慮事項
 
-### SOX (Sarbanes-Oxley)
-- Requires separation of duties between developers, DBAs, and business users
-- Financial data tables must have documented access control lists
-- Privileged access must be reviewed at least quarterly
-- All DBA-level actions must be audited
+### SOX (サーベンス・オクスリー法)
+-   開発者、DBA、ビジネス・ユーザー間の職務分掌を要求
+-   財務データ表には文書化されたアクセス制御リストが必要
+-   特権アクセスは少なくとも四半期ごとにレビューが必要
+-   すべての DBA レベルのアクションは監査が必要
 
 ### PCI-DSS
-- Requirement 7: Restrict access to cardholder data by business need to know
-- Requirement 8: Identify and authenticate access to system components
-- Users accessing cardholder data must have the minimum necessary privileges
-- Access control lists must be reviewed at least every six months
+-   要件 7: 会員データへのアクセスを、業務上知る必要のある範囲に制限する
+-   要件 8: システム・コンポーネントへのアクセスを識別および認証する
+-   会員データにアクセスするユーザーには、必要最小限の権限のみを付与する
+-   アクセス制御リストは少なくとも 6 か月ごとにレビューが必要
 
 ### HIPAA
-- Minimum necessary standard: access only to PHI required for a user's role
-- Technical safeguards must ensure only authorized users access ePHI
-- Access must be unique per individual (no shared service account logins for humans)
-- Audit logs of access to PHI tables must be maintained
+-   最小必要標準：ユーザーの役割に必要な PHI（個人健康情報）へのアクセスのみを許可
+-   技術的保護手段により、承認されたユーザーのみが ePHI にアクセスできるようにする
+-   アクセスは個人ごとに固有である必要がある（人間による共有サービス・アカウントの使用禁止）
+-   PHI 表へのアクセスの監査ログを保持する必要がある
 
 ```sql
--- Compliance query: identify users with broad access to sensitive schemas
+-- コンプライアンス・クエリ: 機密スキーマへの広範なアクセス権を持つユーザーを特定
 SELECT DISTINCT grantee
 FROM dba_tab_privs
 WHERE owner IN ('HR', 'PAYROLL', 'FINANCE', 'HEALTH')
   AND grantee NOT IN (
-    SELECT role FROM dba_roles  -- Exclude role names from results
+    SELECT role FROM dba_roles  -- 結果からロール名を除外
   )
 ORDER BY grantee;
 
--- Find users with system privileges that could bypass row-level security
+-- 行レベル・セキュリティをバイパスできる可能性のあるシステム権限を持つユーザーを検索
 SELECT grantee, privilege
 FROM dba_sys_privs
 WHERE privilege IN (
@@ -543,25 +530,24 @@ WHERE privilege IN (
   'INSERT ANY TABLE',
   'UPDATE ANY TABLE',
   'DELETE ANY TABLE',
-  'EXEMPT ACCESS POLICY'  -- Bypasses VPD — extremely sensitive
+  'EXEMPT ACCESS POLICY'  -- VPD をバイパスする - 極めて機密性が高い
 )
 ORDER BY grantee, privilege;
 ```
 
-> **Critical**: The `EXEMPT ACCESS POLICY` privilege bypasses all Virtual Private Database (VPD) row-level security policies. It should never be granted to any user except for specific, documented ETL or DBA accounts, and its use must be heavily audited.
+> **重要**: `EXEMPT ACCESS POLICY` 権限は、すべての Virtual Private Database (VPD) 行レベル・セキュリティ・ポリシーをバイパスする。特定の文書化された ETL または DBA アカウントを除き、いかなるユーザーにも付与すべきではなく、その使用状況は厳格に監査される必要がある。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+-   このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効である。
+-   21c、23c、または 23ai と記された機能は、Oracle Database 26ai 対応機能として扱う。バージョンが混在する環境では、19c 互換の代替案を保持すること。
+-   リリース・アップデートによってデフォルトや非推奨が異なる場合があるため、両方のバージョンをサポートする環境では、19c と 26ai の両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Database 19c Security Guide (DBSEG)](https://docs.oracle.com/en/database/oracle/oracle-database/19/dbseg/)
-- [Oracle Database 19c SQL Language Reference — GRANT](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/GRANT.html)
-- [DBA_SYS_PRIVS — Oracle Database 19c Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/DBA_SYS_PRIVS.html)
-- [DBMS_PRIVILEGE_CAPTURE — Oracle Database 19c PL/SQL Packages and Types Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_PRIVILEGE_CAPTURE.html)
+-   [Oracle Database 19c Security Guide (DBSEG)](https://docs.oracle.com/en/database/oracle/oracle-database/19/dbseg/)
+-   [Oracle Database 19c SQL Language Reference — GRANT](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/GRANT.html)
+-   [DBA_SYS_PRIVS — Oracle Database 19c Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/DBA_SYS_PRIVS.html)
+-   [DBMS_PRIVILEGE_CAPTURE — Oracle Database 19c PL/SQL Packages and Types Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_PRIVILEGE_CAPTURE.html)

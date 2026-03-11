@@ -1,54 +1,54 @@
-# SQL Injection Avoidance in Oracle
+# OracleにおけるSQLインジェクション対策
 
-## Overview
+## 概要
 
-SQL injection is a code injection technique in which an attacker inserts malicious SQL fragments into a query by manipulating user-supplied input. In Oracle environments, injection can occur in both static application code and dynamic PL/SQL. The consequences range from unauthorized data access and data manipulation to privilege escalation and full database compromise.
+SQLインジェクションとは、攻撃者がユーザー提供の入力を操作することによって、クエリに悪意のあるSQL断片を挿入するコード・インジェクション手法である。Oracle環境では、アプリケーション・コードと動的PL/SQLの両方でインジェクションが発生する可能性がある。その影響は、不正なデータ・アクセスやデータ操作から、権限昇格、さらにはデータベース全体の完全な侵害にまで及ぶ。
 
-Oracle provides a layered set of defenses: bind variables (the single most important protection), the `DBMS_ASSERT` package for whitelist validation, careful dynamic SQL construction, and application-level input validation. This guide covers each layer with concrete examples of vulnerable versus safe patterns.
+Oracleは、多層的な防御策を提供している。バインド変数（最も重要な保護策）、ホワイトリスト・バリデーションのための `DBMS_ASSERT` パッケージ、慎重な動的SQLの構築、およびアプリケーション・レベルでの入力バリデーションである。本ガイドでは、脆弱なパターンと安全なパターンの具体例を交えながら、各層について解説する。
 
 ---
 
-## The Root Cause: String Concatenation
+## 根本原因: 文字列の連結
 
-SQL injection becomes possible when user-supplied values are concatenated directly into a SQL string rather than passed as bind variables. Oracle then parses the resulting string as SQL, making it impossible to distinguish intended structure from injected input.
+SQLインジェクションは、ユーザー提供の値をバインド変数として渡すのではなく、SQL文字列に直接連結したときに発生する。Oracleはその結果として生成された文字列をSQLとして解析するため、意図した構造と挿入された入力を区別することが不可能になる。
 
-### Vulnerable Pattern
+### 脆弱なパターン
 
 ```plsql
--- DANGEROUS: user input is concatenated directly into the query string
+-- 危険: ユーザー入力がクエリ文字列に直接連結されている
 CREATE OR REPLACE PROCEDURE get_employee_unsafe (
   p_name IN VARCHAR2
 ) AS
   v_sql VARCHAR2(500);
   v_result employees%ROWTYPE;
 BEGIN
-  -- If p_name = ' OR 1=1 --', this returns ALL rows
-  -- If p_name = 'Smith'' UNION SELECT username,password,null,null FROM dba_users--'
-  -- this leaks the DBA user table
+  -- もし p_name = ' OR 1=1 --' だった場合、すべての行が返される
+  -- もし p_name = 'Smith'' UNION SELECT username,password,null,null FROM dba_users--' だった場合、
+  -- DBAのユーザー・テーブルが漏洩する
   v_sql := 'SELECT * FROM employees WHERE last_name = ''' || p_name || '''';
   EXECUTE IMMEDIATE v_sql INTO v_result;
 END;
 /
 ```
 
-When an attacker passes `' OR '1'='1`, the resulting SQL becomes:
+攻撃者が `' OR '1'='1` を渡すと、生成されるSQLは以下のようになる。
 ```sql
 SELECT * FROM employees WHERE last_name = '' OR '1'='1'
 ```
-This returns every row in the table.
+これにより、テーブル内のすべての行が返されてしまう。
 
-When an attacker passes `' UNION SELECT username, password, NULL, NULL FROM dba_users--`, the resulting SQL leaks DBA credentials.
+攻撃者が `' UNION SELECT username, password, NULL, NULL FROM dba_users--` を渡すと、生成されるSQLによってDBAの認証情報が漏洩する。
 
 ---
 
-## Bind Variables: The Primary Defense
+## バインド変数: 主要な防御策
 
-Bind variables (also called bind parameters or parameterized queries) separate the SQL structure from its data values. The query is parsed once with placeholders; actual values are substituted at execution time. The database engine never re-parses the statement with injected content — the injected string is treated as a literal data value, not SQL syntax.
+バインド変数（バインド・パラメータまたはパラメータ化クエリとも呼ばれる）は、SQLの構造とデータ値を分離する。クエリはプレースホルダを使用して一度だけ解析され、実際の値は実行時に代入される。データベース・エンジンは、挿入されたコンテンツを含めてステートメントを再解析することはない。挿入された文字列はSQL構文としてではなく、リテラル・データ値として扱われる。
 
-### Safe Static SQL with Bind Variables
+### 静的SQLにおけるバインド変数の使用（安全）
 
 ```plsql
--- SAFE: bind variable prevents injection; also improves performance via plan reuse
+-- 安全: バインド変数によってインジェクションを防止。実行計画の再利用によりパフォーマンスも向上。
 CREATE OR REPLACE PROCEDURE get_employee_safe (
   p_name IN VARCHAR2
 ) AS
@@ -57,8 +57,8 @@ BEGIN
   SELECT *
   INTO   v_result
   FROM   employees
-  WHERE  last_name = p_name;   -- p_name is a bind variable here
-
+  WHERE  last_name = p_name;   -- p_name はここでバインド変数として扱われる
+  
   DBMS_OUTPUT.PUT_LINE(v_result.first_name || ' ' || v_result.last_name);
 EXCEPTION
   WHEN NO_DATA_FOUND THEN
@@ -69,10 +69,10 @@ END;
 /
 ```
 
-### Safe Dynamic SQL with Bind Variables via EXECUTE IMMEDIATE
+### EXECUTE IMMEDIATE を使用した動的SQLにおけるバインド変数の使用（安全）
 
 ```plsql
--- SAFE: EXECUTE IMMEDIATE with USING clause binds data separately from SQL structure
+-- 安全: USING句を伴う EXECUTE IMMEDIATE は、SQL構造からデータを分離してバインドする
 CREATE OR REPLACE PROCEDURE get_employee_dynamic_safe (
   p_name IN VARCHAR2
 ) AS
@@ -91,7 +91,7 @@ END;
 /
 ```
 
-### Multiple Bind Variables
+### 複数のバインド変数の使用
 
 ```plsql
 CREATE OR REPLACE PROCEDURE search_employees (
@@ -122,28 +122,28 @@ END;
 
 ---
 
-## DBMS_ASSERT: Whitelist Validation for Dynamic Structure
+## DBMS_ASSERT: 動的構造のためのホワイトリスト・バリデーション
 
-Bind variables protect data values but cannot protect dynamic SQL structure elements: table names, column names, schema names, and SQL keywords. These must be validated against a whitelist. Oracle's `DBMS_ASSERT` package provides built-in validators.
+バインド変数はデータ値を保護するが、動的SQLの構造要素（表名、列名、スキーマ名、SQLキーワードなど）を保護することはできない。これらはホワイトリストに対してバリデーションを行う必要がある。Oracleの `DBMS_ASSERT` パッケージは、組み込みのバリデータを提供している。
 
-### DBMS_ASSERT Functions
+### DBMS_ASSERT の関数
 
-| Function | What it validates |
+| 関数 | 役割 |
 |---|---|
-| `DBMS_ASSERT.SQL_OBJECT_NAME(str)` | String is a valid, existing schema object name |
-| `DBMS_ASSERT.SIMPLE_SQL_NAME(str)` | String matches the pattern of a simple SQL identifier (no quotes, spaces, or special chars) |
-| `DBMS_ASSERT.QUALIFIED_SQL_NAME(str)` | String is a valid qualified name (e.g., `schema.table`) |
-| `DBMS_ASSERT.SCHEMA_NAME(str)` | String is an existing schema name |
-| `DBMS_ASSERT.ENQUOTE_NAME(str)` | Returns the string as a properly quoted identifier |
-| `DBMS_ASSERT.ENQUOTE_LITERAL(str)` | Returns the string as a properly quoted SQL string literal (escapes single quotes) |
-| `DBMS_ASSERT.NOOP(str)` | Returns the string unchanged — used as a documentation marker only, no validation |
+| `DBMS_ASSERT.SQL_OBJECT_NAME(str)` | 文字列が有効で、かつ存在するスキーマ・オブジェクト名であることを確認 |
+| `DBMS_ASSERT.SIMPLE_SQL_NAME(str)` | 文字列が単純なSQL識別子のパターン（引用符、スペース、特殊文字なし）に一致することを確認 |
+| `DBMS_ASSERT.QUALIFIED_SQL_NAME(str)` | 文字列が有効な修飾名（例: `schema.table`）であることを確認 |
+| `DBMS_ASSERT.SCHEMA_NAME(str)` | 文字列が存在するスキーマ名であることを確認 |
+| `DBMS_ASSERT.ENQUOTE_NAME(str)` | 文字列を適切に引用符で囲まれた識別子として返す |
+| `DBMS_ASSERT.ENQUOTE_LITERAL(str)` | 文字列を適切に引用符で囲まれたSQL文字列リテラルとして返す（単一引用符のエスケープを含む） |
+| `DBMS_ASSERT.NOOP(str)` | 文字列をそのまま返す — ドキュメンテーション・マーカーとしてのみ使用され、バリデーションは行わない |
 
-Validation functions raise specific errors on failure: `SCHEMA_NAME` raises `ORA-44001`, `SQL_OBJECT_NAME` raises `ORA-44002`, `SIMPLE_SQL_NAME` raises `ORA-44003`, and `QUALIFIED_SQL_NAME` raises `ORA-44004`.
+バリデーション関数は失敗時に特定のエラーを発生させる。`SCHEMA_NAME` は `ORA-44001`、`SQL_OBJECT_NAME` は `ORA-44002`、`SIMPLE_SQL_NAME` は `ORA-44003`、`QUALIFIED_SQL_NAME` は `ORA-44004` を発生させる。
 
-### Dynamic Table Name — Vulnerable vs. Safe
+### 動的な表名 — 脆弱vs安全
 
 ```plsql
--- DANGEROUS: an attacker can pass 'employees WHERE 1=1 UNION SELECT ...'
+-- 危険: 攻撃者は 'employees WHERE 1=1 UNION SELECT ...' のような値を渡すことができる
 CREATE OR REPLACE PROCEDURE count_rows_unsafe (
   p_table_name IN VARCHAR2
 ) AS
@@ -155,8 +155,8 @@ BEGIN
 END;
 /
 
--- SAFE: DBMS_ASSERT.SQL_OBJECT_NAME raises an error if the table doesn't exist
--- and rejects any string containing SQL syntax characters
+-- 安全: DBMS_ASSERT.SQL_OBJECT_NAME は、表が存在しない場合にエラーを発生させ、
+-- SQL構文文字を含む文字列を拒否する
 CREATE OR REPLACE PROCEDURE count_rows_safe (
   p_table_name IN VARCHAR2
 ) AS
@@ -178,10 +178,10 @@ END;
 /
 ```
 
-### Dynamic Column Name with SIMPLE_SQL_NAME
+### SIMPLE_SQL_NAME による動的な列名の保護
 
 ```plsql
--- SAFE: validates that the column name is a simple identifier
+-- 安全: 列名が単純な識別子であることをバリデーションする
 CREATE OR REPLACE PROCEDURE get_column_value (
   p_table_name  IN VARCHAR2,
   p_column_name IN VARCHAR2,
@@ -204,19 +204,19 @@ END;
 /
 ```
 
-### ENQUOTE_LITERAL for String Values in Dynamic SQL
+### 動的SQLでの文字列値に対する ENQUOTE_LITERAL
 
-When you genuinely cannot use a bind variable (e.g., inside a DDL statement), use `DBMS_ASSERT.ENQUOTE_LITERAL` to safely quote a string value:
+DDL文内などでバインド変数をどうしても使用できない場合は、`DBMS_ASSERT.ENQUOTE_LITERAL` を使用して文字列値を安全に引用符で囲む。
 
 ```plsql
--- Properly escapes embedded single quotes and wraps in quotes
+-- 埋め込まれた単一引用符を適切にエスケープし、引用符で囲む
 DECLARE
-  v_input    VARCHAR2(100) := 'O''Brien';   -- contains a single quote
+  v_input    VARCHAR2(100) := 'O''Brien';   -- 単一引用符を含む
   v_safe_lit VARCHAR2(200);
   v_sql      VARCHAR2(500);
 BEGIN
   v_safe_lit := DBMS_ASSERT.ENQUOTE_LITERAL(v_input);
-  -- v_safe_lit is now: 'O''Brien'  (properly escaped)
+  -- v_safe_lit は 'O''Brien' となる（適切にエスケープ済み）
 
   v_sql := 'INSERT INTO audit_log(name) VALUES(' || v_safe_lit || ')';
   EXECUTE IMMEDIATE v_sql;
@@ -226,17 +226,17 @@ END;
 
 ---
 
-## Dangerous Patterns and Their Safe Replacements
+## 危険なパターンと安全な代替策
 
-### Pattern 1: Dynamic WHERE clause construction from a list
+### パターン 1: リストからの動的な WHERE 句の構築
 
 ```plsql
--- DANGEROUS: building IN list from concatenated input
--- Input: '1,2,3' becomes WHERE id IN (1,2,3) -- safe-looking but fragile
--- Input: '1,2) OR (1=1' becomes WHERE id IN (1,2) OR (1=1) -- injection!
+-- 危険: 連結された入力から IN リストを構築する
+-- 入力: '1,2,3' -> WHERE id IN (1,2,3) -- 安全そうに見えるが脆弱
+-- 入力: '1,2) OR (1=1' -> WHERE id IN (1,2) OR (1=1) -- インジェクション！
 v_sql := 'SELECT * FROM orders WHERE customer_id IN (' || p_id_list || ')';
 
--- SAFE: use a collection and TABLE() operator
+-- 安全: コレクションと TABLE() 演算子を使用する
 CREATE OR REPLACE TYPE number_list AS TABLE OF NUMBER;
 /
 
@@ -249,26 +249,26 @@ BEGIN
   OPEN v_cur FOR
     SELECT * FROM orders
     WHERE  customer_id IN (SELECT COLUMN_VALUE FROM TABLE(p_ids));
-  -- process cursor...
+  -- カーソルを処理...
   CLOSE v_cur;
 END;
 /
 ```
 
-### Pattern 2: Dynamic ORDER BY column
+### パターン 2: 動的な ORDER BY 列
 
 ```plsql
--- DANGEROUS: ORDER BY from user input
+-- 危険: ユーザー入力から ORDER BY を構築
 v_sql := 'SELECT * FROM employees ORDER BY ' || p_sort_col;
 
--- SAFE: whitelist against known column names
+-- 安全: 既知の列名のホワイトリストと照合する
 CREATE OR REPLACE PROCEDURE get_employees_sorted (
   p_sort_col IN VARCHAR2
 ) AS
   v_safe_col VARCHAR2(30);
   v_sql      VARCHAR2(500);
 BEGIN
-  -- Explicit whitelist; reject anything not in the list
+  -- 明示的なホワイトリスト。リストにないものはすべて拒否する。
   v_safe_col := CASE p_sort_col
                   WHEN 'last_name'   THEN 'last_name'
                   WHEN 'salary'      THEN 'salary'
@@ -287,40 +287,40 @@ END;
 /
 ```
 
-### Pattern 3: Login / authentication query
+### パターン 3: ログイン / 認証クエリ
 
 ```plsql
--- DANGEROUS: classic login bypass
--- Input username: admin' --
--- Results in: WHERE username = 'admin' --' AND password = '...'
--- The password check is commented out!
+-- 危険: クラシックなログイン回避
+-- ユーザー名入力: admin' --
+-- 結果: WHERE username = 'admin' --' AND password = '...'
+-- パスワード・チェックがコメントアウトされてしまう！
 v_sql := 'SELECT COUNT(*) FROM users WHERE username = ''' || p_user
       || ''' AND password = ''' || p_pass || '''';
 
--- SAFE: use bind variables; the injected quote is treated as data
+-- 安全: バインド変数を使用する。挿入された引用符はデータとして扱われる。
 SELECT COUNT(*)
 INTO   v_count
 FROM   users
 WHERE  username = p_user
-AND    password = STANDARD_HASH(p_pass, 'SHA256');  -- also: don't store plaintext passwords
+AND    password = STANDARD_HASH(p_pass, 'SHA256');  -- 注意: パスワードを平文で保存しない
 ```
 
-### Pattern 4: DBMS_SQL with dynamic bind variables (truly dynamic column count)
+### パターン 4: DBMS_SQL による動的バインド変数（列数が完全に動的な場合）
 
 ```plsql
--- SAFE: DBMS_SQL allows dynamic bind variable count at runtime
--- Use when the number of bind variables isn't known until runtime
+-- 安全: DBMS_SQL は実行時のバインド変数の動的な数を許容する
+-- バインド変数の数が実行時まで確定しない場合に使用する
 CREATE OR REPLACE PROCEDURE flexible_search (
-  p_conditions IN SYS.ODCIVARCHAR2LIST,  -- array of 'column_name=value' pairs
+  p_conditions IN SYS.ODCIVARCHAR2LIST,  -- '列名=値' のペアの配列
   p_values     IN SYS.ODCIVARCHAR2LIST
 ) AS
   v_cursor  INTEGER;
   v_sql     VARCHAR2(4000) := 'SELECT employee_id, last_name FROM employees WHERE 1=1';
   v_rows    INTEGER;
 BEGIN
-  -- Build WHERE clause with bind placeholders (never concatenate values)
+  -- バインド・プレースホルダを使用して WHERE 句を構築（決して値を連結しない）
   FOR i IN 1..p_conditions.COUNT LOOP
-    -- Validate column name against whitelist before appending
+    -- 追加する前に、列名をホワイトリストでバリデーションする
     v_sql := v_sql || ' AND '
           || DBMS_ASSERT.SIMPLE_SQL_NAME(p_conditions(i))
           || ' = :b' || i;
@@ -341,21 +341,21 @@ END;
 
 ---
 
-## Input Validation Layers
+## 入力バリデーション層
 
-Defense in depth means applying validation at multiple layers. Bind variables handle data values; these techniques handle everything else.
+防御の「深層防護（Defense in Depth）」とは、複数の層でバリデーションを適用することを意味する。バインド変数はデータ値を担当するが、これ以外の要素については以下の手法で対応する。
 
-### Application Tier Validation
+### アプリケーション層でのバリデーション
 
-- Validate data types before sending to the database (ensure numeric inputs are actually numeric).
-- Enforce length limits; a surname field should never accept 4,000 characters.
-- Use an allowlist (permitted characters) rather than a blocklist (forbidden characters). Blocklists always miss edge cases.
-- Reject null bytes (`chr(0)`), escape sequences, and Unicode normalization tricks.
+- データベースに送信する前にデータ型を検証する（数値入力が実際に数値であることを確認する）。
+- 長さ制限を課す。例えば「名字」フィールドに 4,000 文字も受け入れるべきではない。
+- ブラックリスト（禁止文字）ではなく、ホワイトリスト（許可文字）を使用する。ブラックリストでは未知の回避策を見落とすリスクがある。
+- ヌル・バイト (`chr(0)`)、エスケープ・シーケンス、および Unicode 正規化のトリックを拒否する。
 
-### PL/SQL Tier Validation
+### PL/SQL 層でのバリデーション
 
 ```plsql
--- Utility: validate that input is a positive integer
+-- ユーティリティ: 入力が正の整数であることを確認する
 CREATE OR REPLACE FUNCTION is_positive_integer (p_input IN VARCHAR2)
 RETURN BOOLEAN AS
   v_num NUMBER;
@@ -368,7 +368,7 @@ EXCEPTION
 END;
 /
 
--- Utility: strip non-alphanumeric characters (use with caution — prefer whitelisting)
+-- ユーティリティ: 英数字以外の文字を削除する（注意して使用 — なるべくホワイトリストを優先）
 CREATE OR REPLACE FUNCTION sanitize_alphanumeric (p_input IN VARCHAR2)
 RETURN VARCHAR2 AS
 BEGIN
@@ -377,64 +377,63 @@ END;
 /
 ```
 
-### Least Privilege at the Database Level
+### データベース・レベルでの最小限の権限（最小権限の原則）
 
-Even if injection occurs, a least-privilege schema limits the blast radius:
+たとえインジェクションが発生しても、権限が制限されたスキーマであれば被害を最小限に抑えられる。
 
 ```sql
--- Application schema should have only the minimum required privileges
+-- アプリケーション・スキーマには必要最小限の権限のみを付与する
 GRANT SELECT, INSERT, UPDATE ON hr.employees TO app_user;
--- Never GRANT DBA or GRANT ANY PRIVILEGE to application accounts
+-- アプリケーション用アカウントに DBA 権限や ANY 特権を付与してはならない
 
--- Use a dedicated low-privilege schema for application connections
--- Never connect as SYS or SYSTEM from application code
+-- アプリケーション接続用には、専用の低権限スキーマを使用する
+-- アプリケーション・コードから SYS や SYSTEM として接続してはならない
 ```
 
 ---
 
-## Best Practices Summary
+## ベストプラクティスのまとめ
 
-- **Always use bind variables** for data values in both static and dynamic SQL. This is the single most effective defense.
-- **Validate dynamic identifiers** (table/column names) with `DBMS_ASSERT` functions or explicit whitelists before interpolating into SQL strings.
-- **Never build SQL from unvalidated input** of any kind, even from internal sources — insider threat and compromised middleware are real.
-- **Apply least privilege** to database accounts used by applications. An account with only `SELECT` on specific tables cannot drop tables even if injected SQL runs.
-- **Log and alert on `DBMS_ASSERT` exceptions.** Repeated assertion failures are a strong signal of active probing.
-- **Audit sensitive queries** using Fine-Grained Auditing (FGA) so injection attempts leave a trace.
-- **Use connection pooling with application-specific schemas**, not DBA-level credentials.
+- **データ値には常にバインド変数を使用する**。静的SQLと動的SQLの両方で適用すること。これが最も効果的な防御策である。
+- **動的識別子（表名/列名）を検証する**。SQL文字列に埋め込む前に、`DBMS_ASSERT` 関数または明示的なホワイトリストを使用する。
+- **バリデーションされていない入力からSQLを構築しない**。社内ソース、権限の低いミドルウェアなど、あらゆる入力元を疑うこと。
+- **最小権限の原則を適用する**。アプリケーションが使用するアカウントには最低限の権限のみを付与する。特定のテーブルへの `SELECT` しか持たないアカウントであれば、SQLを注入されてもテーブル削除はできない。
+- **DBMS_ASSERT の例外をログに記録し、アラートを発する**。アサーション失敗が繰り返される場合、アクティブな調査が行われている強い兆候である。
+- **機密性の高いクエリを監査する**。ファイングレイン監査 (FGA) を使用することで、インジェクションの試行を追跡可能にする。
+- **アプリケーション・コンテキストに応じた接続プールを使用する**。DBAレベルの認証情報は絶対に使用しない。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Why It's Dangerous | Fix |
+| 間違い | なぜ危険か | 解決策 |
 |---|---|---|
-| Concatenating numeric input directly | Numbers can still carry injection: `1 UNION SELECT...` | Validate type with `TO_NUMBER()`, then use bind variable |
-| Trusting escaping/encoding | Encoding tricks (URL encoding, multi-byte characters) can bypass simple escaping | Use bind variables; escaping is not a substitute |
-| Using `DBMS_ASSERT.NOOP` thinking it validates | `NOOP` does nothing — it is purely a documentation marker | Use `SIMPLE_SQL_NAME` or `SQL_OBJECT_NAME` |
-| Whitelisting only in the UI layer | UI can be bypassed; direct API/DB access skips UI entirely | Always validate at the PL/SQL/database layer |
-| Dynamic DDL from user input | `CREATE TABLE`, `DROP TABLE`, `GRANT` in dynamic SQL is very dangerous | Never allow user input to influence DDL structure |
-| Storing credentials in source code | Credentials in code become injection entry points if code is exposed | Use Oracle Wallet or secret management tools |
+| 数値入力を直接連結する | 数値であってもインジェクションが可能: `1 UNION SELECT...` | `TO_NUMBER()` で型を検証し、バインド変数を使用する |
+| エスケープ/エンコーディングを信頼する | エンコーディングのトリック（URLエンコード、マルチバイト文字）によって単純なエスケープはバイパスされ得る | バインド変数を使用する。エスケープは代替手段にはならない |
+| `DBMS_ASSERT.NOOP` がバリデーションを行うと誤解する | `NOOP` は何もしない。単なるドキュメンテーション・マーカーである | `SIMPLE_SQL_NAME` や `SQL_OBJECT_NAME` を使用する |
+| UI 層でのみホワイトリストをチェックする | UI はバイパスできる。API や DB への直接アクセスは UI を介さない | 常に PL/SQL / データベース層でバリデーションを行う |
+| ユーザー入力による動的 DDL の実行 | 動的SQLでの `CREATE TABLE`、`DROP TABLE`、`GRANT` は極めて危険 | DDL の構造にユーザー入力を反映させてはならない |
+| ソース・コード内への認証情報の保存 | コードが公開された場合、認証情報そのものがインジェクションの足がかりになる | Oracle Wallet や秘匿情報管理ツールを使用する |
 
 ---
 
-## Oracle-Specific Notes
+## Oracle 固有の考慮事項
 
-- Oracle's **Fine-Grained Auditing (FGA)** via `DBMS_FGA.ADD_POLICY` can alert when sensitive columns are accessed, providing detection capability alongside prevention.
-- **Virtual Private Database (VPD)** adds predicates to queries automatically based on application context, limiting data exposure even if a query is injected.
-- Oracle **Label Security** and **Database Vault** provide additional controls for environments with strict data segregation requirements.
-- The `CURSOR_SHARING = FORCE` parameter can force bind variable use system-wide at the cost of some optimizer accuracy — it is a last resort, not a substitute for proper bind variable use in application code.
-- Oracle **SQL Firewall** (21c+) can whitelist exactly which SQL statements are permitted from each database account, blocking any SQL that doesn't match the learned baseline.
+- Oracle の **ファイングレイン監査 (FGA)** (`DBMS_FGA.ADD_POLICY`) を使用すると、機密性の高い列にアクセスがあったときにアラートを発することができ、予防だけでなく検知も可能になる。
+- **仮想プライベート・データベース (VPD)** は、アプリケーション・コンテキストに基づいてクエリに自動的に述語（条件）を追加し、クエリが注入された場合でもデータの露出を制限する。
+- **Oracle Label Security** および **Database Vault** は、厳密なデータ分離が必要な環境に追加の制御を提供する。
+- `CURSOR_SHARING = FORCE` パラメータは、システム全体でバインド変数の使用を強制できるが、オプティマイザの精度を犠牲にする可能性がある。これは最終手段であり、アプリケーション・コードでの適切なバインド変数使用の代わりにはならない。
+- **Oracle SQL Firewall** (21c+) は、データベース・アカウントごとに許可されるSQL文を正確にホワイトリスト化し、学習されたベースラインに一致しないSQLをブロックできる。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ガイドの基本的な指針は、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- ハイブリッド環境では、デフォルトや非推奨がリリース更新によって異なる場合があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c SQL Language Reference (SQLRF)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/)
 - [DBMS_ASSERT — Oracle Database 19c PL/SQL Packages and Types Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_ASSERT.html)

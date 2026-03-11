@@ -1,29 +1,29 @@
-# Memory Tuning — SGA, PGA, and Oracle Memory Management
+# メモリ・チューニング — SGA、PGA、および Oracle のメモリ管理
 
-## Overview
+## 概要
 
-Oracle database memory is divided into two primary structures:
+Oracle データベースのメモリは、主に次の 2 つの構造に分けられる。
 
-- **SGA (System Global Area):** Shared memory used by all sessions and background processes. Includes the buffer cache, shared pool, large pool, Java pool, streams pool, and redo log buffer.
-- **PGA (Program Global Area):** Per-session private memory. Used for sort areas, hash join areas, bitmap operations, and session state.
+- **SGA (System Global Area):** すべてのセッションとバックグラウンド・プロセスによって使用される共有メモリ。バッファ・キャッシュ、共有プール、ラージ・プール、Java プール、ストリーム・プール、および REDO ログ・バッファが含まれる。
+- **PGA (Program Global Area):** セッションごとのプライベート・メモリ。ソート・エリア、ハッシュ・ジョイン・エリア、ビットマップ・オペレーション、およびセッション状態に使用される。
 
-Memory sizing is one of the highest-leverage tuning activities — get it right and many other problems disappear. Get it wrong and you face excessive I/O, hard parsing, and spills to temp.
+メモリのサイジングは、最も効果の高いチューニング活動の 1 つである。適切に設定すれば多くの問題が解消するが、誤れば過度な I/O、ハード・パース、TEMP へのあふれ（スビル）に直面することになる。
 
-Oracle offers three memory management modes:
-- **Manual Memory Management:** DBA manually sets each SGA component and PGA sort area parameters.
-- **ASMM (Automatic Shared Memory Management):** DBA sets `SGA_TARGET`; Oracle distributes memory among SGA components automatically.
-- **AMM (Automatic Memory Management):** DBA sets `MEMORY_TARGET`; Oracle manages both SGA and PGA automatically.
+Oracle には 3 つのメモリ管理モードがある。
+- **手動メモリ管理:** 管理者が各 SGA コンポーネントおよび PGA ソート・エリア・パラメータを手動で設定する。
+- **ASMM (Automatic Shared Memory Management):** 管理者が `SGA_TARGET` を設定し、Oracle が SGA コンポーネント間で自動的にメモリを分配する。
+- **AMM (Automatic Memory Management):** 管理者が `MEMORY_TARGET` を設定し、Oracle が SGA と PGA の両方を自動的に管理する。
 
 ---
 
-## SGA Components
+## SGA コンポーネント
 
-### Buffer Cache
+### バッファ・キャッシュ (Buffer Cache)
 
-The buffer cache holds copies of data blocks read from disk. It is typically the largest SGA component and the most performance-sensitive.
+バッファ・キャッシュは、ディスクから読み取られたデータ・ブロックのコピーを保持する。通常、SGA で最大のコンポーネントであり、パフォーマンスに最も敏感である。
 
 ```sql
--- Current buffer cache size
+-- 現在のバッファ・キャッシュ・サイズ
 SELECT component,
        current_size / 1024 / 1024  AS current_mb,
        min_size / 1024 / 1024      AS min_mb,
@@ -31,7 +31,7 @@ SELECT component,
 FROM   v$sga_dynamic_components
 WHERE  component = 'DEFAULT buffer cache';
 
--- Buffer cache hit ratio (cumulative since startup)
+-- バッファ・キャッシュ・ヒット率 (起動時からの累積)
 SELECT ROUND(
          (1 - (phyrds.value / (dbgets.value + congets.value))) * 100, 2
        ) AS buffer_hit_pct
@@ -42,7 +42,7 @@ WHERE  phyrds.name  = 'physical reads'
   AND  dbgets.name  = 'db block gets'
   AND  congets.name = 'consistent gets';
 
--- How much would increasing the buffer cache reduce physical reads?
+-- バッファ・キャッシュを増やした場合に物理読み取りがどれくらい減るか？
 SELECT size_for_estimate          AS cache_size_mb,
        size_factor,
        estd_physical_reads,
@@ -54,39 +54,39 @@ WHERE  name       = 'DEFAULT'
 ORDER  BY size_for_estimate;
 ```
 
-**Target:** Buffer cache hit ratio > 95% for OLTP workloads. But always look at absolute physical reads — a 99% hit ratio with 10 million physical reads per minute is still a lot of I/O.
+**目安:** OLTP ワークロードではバッファ・キャッシュ・ヒット率 > 95% が望ましい。ただし、常に物理読み取りの実数も確認すること。ヒット率 99% でも、分あたり 1,000 万回の物理読み取りが発生していれば、依然として大量の I/O である。
 
-### Keep and Recycle Pools
+### Keep プールと Recycle プール
 
-Separate buffer pools for specific access patterns:
+特定のアクセス・パターン用の個別のバッファ・プール：
 
 ```sql
--- Keep pool: for small, frequently accessed tables (never evict)
--- Example: PIN a small reference table into the KEEP pool
+-- Keep プール: 小規模で頻繁にアクセスされる表用 (溢れさせない)
+-- 例: 小さな参照表を KEEP プールに固定 (PIN) する
 ALTER TABLE country_codes STORAGE (BUFFER_POOL KEEP);
 
--- Recycle pool: for large, infrequently accessed objects (evict fast)
+-- Recycle プール: 大規模で頻繁にアクセスされないオブジェクト用 (すぐに解放)
 ALTER TABLE archive_log STORAGE (BUFFER_POOL RECYCLE);
 
--- Size the pools
+-- プールのサイズ設定
 ALTER SYSTEM SET DB_KEEP_CACHE_SIZE   = 64M;
 ALTER SYSTEM SET DB_RECYCLE_CACHE_SIZE = 32M;
 ```
 
-### Shared Pool
+### 共有プール (Shared Pool)
 
-The shared pool holds:
-- **Library Cache:** Parsed SQL, PL/SQL code, execution plans
-- **Dictionary Cache (Row Cache):** Cached data dictionary metadata
-- **Result Cache (12c+):** Cached query result sets
+共有プールには以下が保持される：
+- **ライブラリ・キャッシュ (Library Cache):** 解析済み SQL、PL/SQL コード、実行計画。
+- **ディクショナリ・キャッシュ (Row Cache):** キャッシュされたデータ・ディクショナリのメタデータ。
+- **結果キャッシュ (Result Cache, 12c+):** キャッシュされたクエリ実行結果セット。
 
 ```sql
--- Shared pool size
+-- 共有プールのサイズ
 SELECT component, current_size / 1024 / 1024 AS mb
 FROM   v$sga_dynamic_components
 WHERE  component IN ('shared pool', 'large pool', 'java pool', 'streams pool');
 
--- Library cache health
+-- ライブラリ・キャッシュの健全性
 SELECT namespace,
        gets,
        gethits,
@@ -99,9 +99,9 @@ SELECT namespace,
 FROM   v$librarycache
 ORDER  BY gets DESC
 FETCH  FIRST 10 ROWS ONLY;
--- Pin hit ratio and get hit ratio should both be > 99%
+-- ピン・ヒット率 (Pin hit ratio) とゲット・ヒット率 (Get hit ratio) は共に > 99% であるべき。
 
--- Dictionary cache (row cache) miss rates
+-- ディクショナリ・キャッシュ (行キャッシュ) ミス率
 SELECT parameter,
        gets,
        getmisses,
@@ -110,29 +110,27 @@ FROM   v$rowcache
 WHERE  gets > 0
 ORDER  BY getmisses DESC
 FETCH  FIRST 15 ROWS ONLY;
--- Miss rate should be < 2% for established workloads
+-- 安定したワークロードでのミス率は < 2% であるべき。
 
--- Shared pool free memory
+-- 共有プールの空きメモリ
 SELECT name, bytes / 1024 / 1024 AS mb
 FROM   v$sgastat
 WHERE  pool = 'shared pool'
   AND  name = 'free memory';
--- If near zero, shared pool may be undersized or heavily fragmented
+-- ほぼゼロの場合、共有プールが不足しているか、激しく断片化している可能性がある。
 ```
 
-### Shared Pool Fragmentation
+### 共有プールの断片化
 
-Over time, many small allocations and deallocations can fragment the shared pool, leading to `ORA-04031: unable to allocate N bytes of shared memory` errors even when total free memory exists.
+時間の経過とともに、多数の小さな割り当てと解放によって共有プールが断片化し、空きメモリが合計では存在していても、`ORA-04031: unable to allocate N bytes of shared memory` エラーが発生することがある。
 
 ```sql
--- Look for allocation failures
+-- 割り当て失敗の確認
 SELECT name, value
 FROM   v$sysstat
 WHERE  name LIKE '%shared pool%';
 
--- Shared pool reserved area stats (V$SHARED_POOL_RESERVED)
--- Key columns: FREE_SPACE, USED_SPACE, REQUEST_FAILURES, LAST_FAILURE_SIZE
--- (V$SHARED_POOL_RESERVED does NOT have CHUNK_SIZE or CHUNK_TYPE columns)
+-- 共有プール予約領域の統計 (V$SHARED_POOL_RESERVED)
 SELECT free_space,
        avg_free_size,
        free_count,
@@ -143,89 +141,89 @@ SELECT free_space,
        last_failure_size
 FROM   v$shared_pool_reserved;
 
--- Pin objects in shared pool to prevent eviction and reduce fragmentation
--- (for frequently used PL/SQL packages)
+-- オブジェクトを共有プールに固定 (PIN) して、解放を防止し断片化を軽減する
+-- (頻繁に使用される PL/SQL パッケージ用)
 BEGIN
   DBMS_SHARED_POOL.KEEP('HR.ORDER_PROCESSING', 'P');  -- P = Package
   DBMS_SHARED_POOL.KEEP('SYS.STANDARD', 'P');
 END;
 /
 
--- View pinned objects
+-- 固定されたオブジェクトの表示
 SELECT owner, name, type, kept
 FROM   v$db_object_cache
 WHERE  kept = 'YES';
 ```
 
-### Large Pool
+### ラージ・プール (Large Pool)
 
-The large pool is a separate memory pool for specific large allocations that would otherwise crowd the shared pool:
+ラージ・プールは、共有プールを圧迫する可能性がある特定の大きな割り当てのための独立したメモリ・プールである：
 
-- RMAN backup/restore operations
-- Parallel query message buffers
-- Shared server (`UGA` memory for connection pooling)
-- Oracle XA transaction management
+- RMAN バックアップ/リカバリ操作。
+- パラレル・クエリのメッセージ・バッファ。
+- 共有サーバー (`UGA` メモリ)。
+- Oracle XA トランザクション管理。
 
 ```sql
--- Check large pool usage
+-- ラージ・プールの使用状況確認
 SELECT name, bytes / 1024 / 1024 AS mb
 FROM   v$sgastat
 WHERE  pool = 'large pool'
 ORDER  BY bytes DESC;
 
--- Set large pool size
+-- ラージ・プールのサイズ設定
 ALTER SYSTEM SET LARGE_POOL_SIZE = 256M;
 ```
 
-**Rule of thumb:** Size large pool based on expected RMAN parallelism × channel buffer sizes + parallel query slave count × message buffer size.
+**目安:** ラージ・プールは、「RMAN パラレル数 × チャネル・バッファ・サイズ」+「パラレル・クエリ・スレーブ数 × メッセージ・バッファ・サイズ」に基づいてサイズを決定する。
 
-### Redo Log Buffer
+### REDO ログ・バッファ
 
-The redo log buffer is a circular buffer in the SGA that holds redo records before they are written to the online redo log files by LGWR.
+REDO ログ・バッファは、LGWR によってオンライン REDO ログ・ファイルに書き込まれる前に、REDO レコードを保持する SGA 内の循環バッファである。
 
 ```sql
--- Redo log buffer size
+-- REDO ログ・バッファ・サイズ
 SELECT name, bytes / 1024 AS kb
 FROM   v$sgainfo
 WHERE  name = 'Redo Buffers';
 
--- Redo buffer contention
+-- REDO バッファの競合
 SELECT name, value
 FROM   v$sysstat
 WHERE  name IN ('redo log space requests',
                 'redo log space wait time',
                 'redo buffer allocation retries');
--- 'redo log space requests' > 0 may indicate redo buffer is too small
+-- 'redo log space requests' > 0 は REDO バッファが小さすぎる可能性がある。
 
--- Current redo parameter
+-- 現在の REDO パラメータ
 SELECT name, value FROM v$parameter WHERE name = 'log_buffer';
 ```
 
-**Sizing guidance:** Default is typically adequate (3-15 MB). Increase if `redo log space requests > 0` or redo buffer hit ratio is low. Large values (> 64MB) rarely help more.
+**サイジングの指針:** デフォルトで十分な場合が多い（3 ～ 15 MB）。`redo log space requests > 0` の場合やヒット率が低い場合に増やす。非常に大きな値（> 64MB）が効果的であることは稀である。
 
 ---
 
-## PGA Memory Management
+## PGA メモリ管理
 
-The PGA is per-session private memory. Key consumers:
+PGA はセッションごとのプライベート・メモリである。主な消費要因：
 
-- **Sort Area:** `ORDER BY`, `GROUP BY`, `DISTINCT`, index creation
-- **Hash Area:** Hash joins, hash aggregation
-- **Bitmap Area:** Bitmap merge operations
-- **Session State:** Cursor state, bind variables, execution context
+- **ソート・エリア (Sort Area):** `ORDER BY`、`GROUP BY`、`DISTINCT`、索引作成。
+- **ハッシュ・エリア (Hash Area):** ハッシュ・ジョイン、ハッシュ集計。
+- **ビットマップ・エリア (Bitmap Area):** ビットマップ・マージ操作。
+- **セッション状態:** カーソル状態、バインド変数、実行コンテキスト。
 
-### Automatic PGA Management (Recommended)
+### 自動 PGA 管理 (推奨)
 
 ```sql
--- Enable automatic PGA management
-ALTER SYSTEM SET WORKAREA_SIZE_POLICY = AUTO;     -- default
-ALTER SYSTEM SET PGA_AGGREGATE_TARGET = 2G;        -- total target for all sessions
+-- 自動 PGA 管理を有効にする
+ALTER SYSTEM SET WORKAREA_SIZE_POLICY = AUTO;     -- デフォルト
+ALTER SYSTEM SET PGA_AGGREGATE_TARGET = 2G;        -- 全セッションの合計ターゲット
 
--- 12c+: Hard limit on PGA (prevents runaway queries from crashing the instance)
+-- 12c+: PGA のハード制限 (暴走クエリによるインスタンスのクラッシュを防止)
 ALTER SYSTEM SET PGA_AGGREGATE_LIMIT = 4G;
--- Must be >= 2 * PGA_AGGREGATE_TARGET
+-- 通常、PGA_AGGREGATE_TARGET の 2 倍以上に設定する。
 
--- Check current PGA usage vs. target
+-- 現在の PGA 使用状況とターゲットの確認
 SELECT name, value
 FROM   v$pgastat
 WHERE  name IN (
@@ -238,26 +236,26 @@ WHERE  name IN (
   'cache hit percentage',
   'recompute count (total)'
 );
--- Cache hit percentage should be > 90% for most workloads
+-- ほとんどのワークロードでキャッシュ・ヒット率は > 90% であるべき。
 ```
 
-### PGA Advisory
+### PGA アドバイザ
 
 ```sql
--- How much would increasing PGA reduce temp I/O?
+-- PGA を増やした場合に TEMP I/O がどれくらい減るか？
 SELECT pga_target_for_estimate / 1024 / 1024   AS pga_target_mb,
        pga_target_factor,
        estd_pga_cache_hit_percentage,
-       estd_overalloc_count   -- non-zero means PGA is too small
+       estd_overalloc_count   -- ゼロでない場合は PGA が小さすぎる
 FROM   v$pga_target_advice
 ORDER  BY pga_target_for_estimate;
--- Look for the point where cache_hit_pct plateaus and overalloc_count = 0
+-- cache_hit_pct が横ばいになり、overalloc_count = 0 になるポイントを探す。
 ```
 
-### PGA Usage per Session
+### セッションごとの PGA 使用量
 
 ```sql
--- Top PGA consumers
+-- PGA 消費の上位セッション
 SELECT s.sid,
        s.username,
        s.program,
@@ -272,12 +270,12 @@ ORDER  BY p.pga_used_mem DESC
 FETCH  FIRST 10 ROWS ONLY;
 ```
 
-### Sort Spills to Temp
+### TEMP へのソートあふれ (ディスク・ソート)
 
-When the work area for a sort or hash join is too small, Oracle spills to the TEMP tablespace (disk). This dramatically slows operations.
+ソートやハッシュ・ジョインのためのワーク・エリアが不足すると、Oracle は TEMP 表領域（ディスク）へデータを書き出す。これは処理速度を著しく低下させる。
 
 ```sql
--- Detect sort spills right now
+-- 現在発生しているソートあふれの検出
 SELECT s.sid,
        s.username,
        s.sql_id,
@@ -287,21 +285,21 @@ FROM   v$sort_usage su
 JOIN   v$session s ON su.session_addr = s.saddr
 ORDER  BY su.blocks DESC;
 
--- Historical: how many sorts went to disk?
+-- 履歴: ディスク・ソート의 発生回数
 SELECT name, value
 FROM   v$sysstat
 WHERE  name IN ('sorts (memory)', 'sorts (disk)');
--- 'sorts (disk)' should be a very small fraction of 'sorts (memory)'
+-- 'sorts (disk)' は 'sorts (memory)' のごく一部であるべき。
 
--- From AWR:
+-- AWR からの確認:
 SELECT snap_id,
        sorts_disk,
        sorts_mem,
        ROUND(sorts_disk * 100.0 / NULLIF(sorts_disk + sorts_mem, 0), 2) AS pct_disk
 FROM (
   SELECT snap_id,
-         SUM(CASE WHEN stat_name = 'sorts (disk)'   THEN value END) AS sorts_disk,
-         SUM(CASE WHEN stat_name = 'sorts (memory)' THEN value END) AS sorts_mem
+          SUM(CASE WHEN stat_name = 'sorts (disk)'   THEN value END) AS sorts_disk,
+          SUM(CASE WHEN stat_name = 'sorts (memory)' THEN value END) AS sorts_mem
   FROM   dba_hist_sysstat
   WHERE  stat_name IN ('sorts (disk)', 'sorts (memory)')
     AND  snap_id BETWEEN 200 AND 210
@@ -314,46 +312,46 @@ ORDER  BY snap_id;
 
 ## AMM vs. ASMM
 
-### Automatic Memory Management (AMM)
+### 自動メモリ管理 (AMM)
 
-AMM manages both SGA and PGA automatically. Set only `MEMORY_TARGET` and optionally `MEMORY_MAX_TARGET`.
+SGA と PGA の両方を自動的に管理する。`MEMORY_TARGET` と、必要に応じて `MEMORY_MAX_TARGET` のみを設定する。
 
 ```sql
--- Enable AMM
+-- AMM を有効にする
 ALTER SYSTEM SET MEMORY_TARGET     = 8G SCOPE = SPFILE;
 ALTER SYSTEM SET MEMORY_MAX_TARGET = 12G SCOPE = SPFILE;
--- When AMM is active, SGA_TARGET and PGA_AGGREGATE_TARGET become sub-limits or are set to 0
--- Requires /dev/shm (tmpfs) on Linux to be large enough
+-- AMM が有効な場合、SGA_TARGET と PGA_AGGREGATE_TARGET はサブ・リミットになるか 0 に設定される。
+-- Linux では /dev/shm (tmpfs) が十分に大きい必要がある。
 
--- Check AMM is active
+-- AMM が有効か確認
 SELECT name, value
 FROM   v$parameter
 WHERE  name IN ('memory_target', 'memory_max_target', 'sga_target', 'pga_aggregate_target');
 ```
 
-**AMM Pros:** Lowest administrative burden; Oracle moves memory between SGA and PGA dynamically based on demand.
+**AMM の利点:** 管理負荷が最も低い。需要に応じて、Oracle が SGA と PGA の間でメモリを動的に移動させる。
 
-**AMM Cons:**
-- Not supported with HugePages on Linux (significant performance regression on large instances)
-- Less predictable; memory can shift unexpectedly
-- Not recommended for most production deployments on Linux with large memory
+**AMM の欠点:**
+- Linux で HugePages をサポートしていない（大規模インスタンスでは致命的なパフォーマンス低下の原因となる）。
+- 予測可能性が低い（メモリが予期せず移動することがある）。
+- 大規模メモリを搭載した Linux 本番環境では推奨されない。
 
-### Automatic Shared Memory Management (ASMM)
+### 自動共有メモリ管理 (ASMM)
 
-ASMM manages SGA components automatically. You set `SGA_TARGET` and optionally minimum sizes per component. PGA is managed separately via `PGA_AGGREGATE_TARGET`.
+SGA コンポーネントを自動的に管理する。`SGA_TARGET` を設定し、必要に応じて各コンポーネントの最小サイズを設定する。PGA は `PGA_AGGREGATE_TARGET` を介して個別に管理される。
 
 ```sql
--- Enable ASMM (recommended for most production Linux deployments)
-ALTER SYSTEM SET MEMORY_TARGET  = 0;        -- disable AMM
+-- ASMM を有効にする (Linux 本番環境での推奨)
+ALTER SYSTEM SET MEMORY_TARGET  = 0;        -- AMM を無効化
 ALTER SYSTEM SET SGA_TARGET     = 16G;
 ALTER SYSTEM SET PGA_AGGREGATE_TARGET = 4G;
 
--- Optional: set minimum sizes for components (Oracle won't shrink below these)
-ALTER SYSTEM SET DB_CACHE_SIZE     = 4G;      -- minimum for buffer cache
-ALTER SYSTEM SET SHARED_POOL_SIZE  = 1G;      -- minimum for shared pool
-ALTER SYSTEM SET LARGE_POOL_SIZE   = 256M;    -- minimum for large pool
+-- オプション: 各コンポーネントの最小サイズを設定 (Oracle はこれ未満には縮小しない)
+ALTER SYSTEM SET DB_CACHE_SIZE     = 4G;      -- バッファ・キャッシュの最小値
+ALTER SYSTEM SET SHARED_POOL_SIZE  = 1G;      -- 共有プールの最小値
+ALTER SYSTEM SET LARGE_POOL_SIZE   = 256M;    -- ラージ・プールの最小値
 
--- SGA advisory (ASMM): how should Oracle distribute within SGA_TARGET?
+-- SGA アドバイザ (ASMM): Oracle は SGA_TARGET をどのように分配すべきか？
 SELECT component,
        current_size / 1024 / 1024     AS current_mb,
        min_size / 1024 / 1024         AS min_mb,
@@ -363,10 +361,10 @@ FROM   v$sga_dynamic_components
 ORDER  BY current_size DESC;
 ```
 
-### SGA_TARGET Advice
+### SGA_TARGET アドバイザ
 
 ```sql
--- Would increasing SGA_TARGET help? (ASMM only)
+-- SGA_TARGET を増やせば効果があるか？ (ASMM のみ)
 SELECT sga_size          AS sga_mb,
        sga_size_factor,
        estd_db_time,
@@ -374,31 +372,31 @@ SELECT sga_size          AS sga_mb,
        estd_physical_reads
 FROM   v$sga_target_advice
 ORDER  BY sga_size;
--- Look for the "knee" where doubling SGA produces < 10% more improvement
+-- SGA を 2 倍にしても改善幅が 10% 未満になる限界点を探す。
 ```
 
 ---
 
-## V$SGA Summary Views
+## V$SGA 要約ビュー
 
 ```sql
--- High-level SGA summary
+-- SGA の概要
 SELECT name, bytes / 1024 / 1024 AS mb
 FROM   v$sga
 ORDER  BY bytes DESC;
 
--- Detailed SGA components
+-- 詳細な SGA コンポーネント
 SELECT pool, name, bytes / 1024 / 1024 AS mb
 FROM   v$sgastat
 ORDER  BY bytes DESC
 FETCH  FIRST 20 ROWS ONLY;
 
--- SGA info (12c+)
+-- SGA 情報 (12c+)
 SELECT name, bytes / 1024 / 1024 AS mb, resizeable
 FROM   v$sgainfo
 ORDER  BY bytes DESC;
 
--- Maximum SGA and PGA since instance startup
+-- インスタンス起動時からの最大 PGA 使用量
 SELECT name, value / 1024 / 1024 AS max_mb
 FROM   v$pgastat
 WHERE  name = 'maximum PGA allocated';
@@ -406,121 +404,120 @@ WHERE  name = 'maximum PGA allocated';
 
 ---
 
-## HugePages Configuration (Linux)
+## HugePages の構成 (Linux)
 
-On Linux systems, using HugePages (2MB pages instead of 4KB) for the SGA dramatically reduces TLB (Translation Lookaside Buffer) pressure and avoids page swapping.
+Linux システムでは、SGA に **HugePages** (4KB ではなく 2MB ページ) を使用することで、TLB (Translation Lookaside Buffer) の負荷を劇的に軽減し、ページ・スワップを防止できる。
 
 ```sql
--- Find current SGA size to calculate HugePages needed
+-- 必要な HugePages を算出するために現在の SGA サイズを確認
 SELECT SUM(bytes) / 1024 / 1024 AS total_sga_mb
 FROM   v$sgainfo
 WHERE  name != 'Free SGA Memory Available';
 ```
 
 ```bash
-# Linux: calculate required HugePages
-# SGA (MB) / 2 = number of 2MB HugePages needed (plus ~10% buffer)
-# Set in /etc/sysctl.conf:
-# vm.nr_hugepages = <calculated value>
+# Linux: 必要な HugePages の計算
+# SGA (MB) / 2 = 必要な 2MB HugePages の数 (さらに ~10% のバッファを追加)
+# /etc/sysctl.conf で設定する例:
+# vm.nr_hugepages = <計算値>
 
-# Verify current HugePages
+# 現在の HugePages の確認
 grep -i huge /proc/meminfo
 ```
 
-**Important:** When using HugePages, set `USE_LARGE_PAGES = ONLY` in Oracle init parameters. Also, `MEMORY_TARGET` (AMM) **cannot** use HugePages — this is why ASMM is preferred on Linux production systems.
+**重要:** HugePages を使用する場合、Oracle の初期化パラメータで `USE_LARGE_PAGES = ONLY` を設定する。また、`MEMORY_TARGET` (AMM) は HugePages を使用**できない**ため、Linux の本番環境では ASMM が好まれる。
 
 ```sql
 ALTER SYSTEM SET USE_LARGE_PAGES = ONLY SCOPE = SPFILE;
--- If not enough HugePages, instance startup will fail
--- Use 'TRUE' to fall back to regular pages if HugePages unavailable
+-- 起動時に十分な HugePages がない場合、インスタンスの起動は失敗する。
+-- 利用できない場合に通常のページにフォールバックさせたい場合は 'TRUE' を使用する。
 ```
 
 ---
 
-## Memory Tuning Workflow
+## メモリ・チューニングのワークフロー
 
 ```sql
--- Step 1: Check current memory configuration
+-- ステップ 1: 現在のメモリ構成を確認
 SELECT name, value
 FROM   v$parameter
 WHERE  name IN ('sga_target', 'sga_max_size', 'pga_aggregate_target',
                 'pga_aggregate_limit', 'memory_target', 'db_cache_size',
                 'shared_pool_size', 'large_pool_size', 'log_buffer');
 
--- Step 2: Check for memory pressure indicators
+-- ステップ 2: メモリ不足の指標を確認
 SELECT name, value
 FROM   v$sysstat
-WHERE  name IN ('free buffer waits',      -- buffer cache too small
-                'redo log space requests', -- redo buffer too small
-                'sorts (disk)',            -- PGA too small
-                'parse count (hard)');    -- shared pool / bind variable issue
+WHERE  name IN ('free buffer waits',      -- バッファ・キャッシュ不足
+                'redo log space requests', -- REDO バッファ不足
+                'sorts (disk)',            -- PGA 不足
+                'parse count (hard)');    -- 共有プール不足 / バインド変数問題
 
--- Step 3: Check advisory views
--- Buffer cache:
+-- ステップ 3: アドバイザ・ビューを確認
+-- バッファ・キャッシュ:
 SELECT size_for_estimate, estd_physical_reads FROM v$db_cache_advice
 WHERE  name = 'DEFAULT' ORDER BY size_for_estimate;
--- Shared pool:
+-- 共有プール:
 SELECT shared_pool_size_for_estimate, estd_lc_size, estd_lc_memory_objects
 FROM   v$shared_pool_advice ORDER BY shared_pool_size_for_estimate;
 -- PGA:
 SELECT pga_target_for_estimate, estd_pga_cache_hit_percentage FROM v$pga_target_advice
 ORDER  BY pga_target_for_estimate;
 
--- Step 4: Apply changes (ASMM example)
--- If buffer cache advice shows significant read reduction at higher sizes:
-ALTER SYSTEM SET SGA_TARGET = 20G;  -- Oracle redistributes
--- If PGA overalloc_count > 0:
+-- ステップ 4: 変更を反映する (ASMM の例)
+-- バッファ・キャッシュ・アドバイザで大幅な読み取り削減が見込める場合:
+ALTER SYSTEM SET SGA_TARGET = 20G;  -- Oracle が再分配する
+-- PGA overalloc_count > 0 の場合:
 ALTER SYSTEM SET PGA_AGGREGATE_TARGET = 6G;
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Prefer ASMM + HugePages on Linux production** over AMM. HugePages provide significant performance benefits for large SGA, but are incompatible with AMM.
-- **Set `SGA_MAX_SIZE` >= `SGA_TARGET`** to allow dynamic growth without restart.
-- **Pin frequently-used packages in shared pool** with `DBMS_SHARED_POOL.KEEP` to reduce fragmentation and prevent eviction under pressure.
-- **Monitor `free buffer waits` and `sorts (disk)`** as early warning signals of memory pressure.
-- **Use advisory views** (`V$DB_CACHE_ADVICE`, `V$PGA_TARGET_ADVICE`, `V$SHARED_POOL_ADVICE`) before making memory changes — they show expected impact.
-- **Leave OS headroom.** Do not allocate 100% of RAM to Oracle. Reserve at least 10-20% for the OS, file system cache (if not using direct I/O), and other processes.
-- **Size large pool** explicitly when using RMAN parallel channels or many parallel query slaves.
+- **Linux 本番環境では AMM より ASMM + HugePages を優先する。** 大規模な SGA では HugePages によるパフォーマンスのメリットが大きいが、AMM とは互換性がない。
+- **Restart なしでの動的拡張を可能にするため、`SGA_MAX_SIZE` >= `SGA_TARGET` とする。**
+- **頻繁に使用されるパッケージを共有プールに固定する。** `DBMS_SHARED_POOL.KEEP` を使用して断片化を軽減し、高負荷時の追い出しを防止する。
+- **`free buffer waits` および `sorts (disk)` を監視する。** これらはメモリ不足の早期警告信号となる。
+- **変更前にアドバイザ・ビューを活用する。** `V$DB_CACHE_ADVICE`、`V$PGA_TARGET_ADVICE`、`V$SHARED_POOL_ADVICE` を参照し、変更による期待効果を把握する。
+- **OS 用の余白を残す。** RAM の 100% を Oracle に割り当ててはならない。少なくとも 10 ～ 20% は OS、ファイル・システム・キャッシュ（Direct I/O を未使用の場合）、その他のプロセスのために残しておくこと。
+- **ラージ・プールを明示的にサイジングする。** RMAN パラレル・チャネルや多数のパラレル・クエリ・スレーブを使用する場合。
 
 ```sql
--- Shared pool advice
+-- 共有プール・アドバイザの確認
 SELECT shared_pool_size_for_estimate / 1024 / 1024 AS sp_mb,
        estd_lc_size / 1024 / 1024                  AS lc_mb,
        estd_lc_memory_objects,
        estd_lc_time_saved_factor
 FROM   v$shared_pool_advice
 ORDER  BY shared_pool_size_for_estimate;
--- Diminishing returns visible in estd_lc_time_saved_factor
+-- estd_lc_time_saved_factor で収穫逓減のポイントを確認できる。
 ```
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Impact | Fix |
+| 間違い | 影響 | 対策 |
 |---|---|---|
-| Using AMM with HugePages on Linux | HugePages silently not used; TLB thrashing | Use ASMM; disable AMM (`MEMORY_TARGET=0`) |
-| Setting `SGA_TARGET` = total RAM | OS starvation; swap usage | Leave 20% of RAM for OS |
-| Not setting `PGA_AGGREGATE_LIMIT` (12c+) | Runaway query can exhaust all RAM | Always set limit >= 2x target |
-| Undersizing LARGE_POOL for RMAN | RMAN allocates from shared pool; fragmentation | Set large pool based on channel count × buffer size |
-| Ignoring `estd_overalloc_count` in PGA advice | Confirms PGA is undersized | Increase PGA until overalloc_count = 0 |
-| Pinning everything in shared pool | Evicts needed objects; wastes space | Only pin large, frequently invalidated packages |
-| Setting individual SGA component sizes with ASMM enabled | Creates rigid sub-limits; defeats ASMM flexibility | If using ASMM, set only minimum sizes as guards |
-| Forgetting to resize `/dev/shm` on Linux after increasing MEMORY_TARGET | ORA-00845 on startup | Increase `/dev/shm` to >= MEMORY_MAX_TARGET |
+| Linux で HugePages と AMM を併用する | HugePages が無視される。TLB の競合が発生 | ASMM を使用し、AMM を無効化 (`MEMORY_TARGET=0`) する。 |
+| `SGA_TARGET` を全 RAM 容量に設定する | OS がリソース不足に陥り、スワップが発生 | OS 用に RAM の 20% を残す。 |
+| `PGA_AGGREGATE_LIMIT` を設定しない (12c+) | 暴走クエリがすべての RAM を使い果たす可能性がある | ターゲットの 2 倍以上の制限を常に設定する。 |
+| RMAN 使用時に LARGE_POOL を過小評価する | 共有プールから割り当てられ、断片化を引き起こす | チャネル数 × バッファ・サイズに基づきラージ・プールを設定する。 |
+| PGA アドバイザの `estd_overalloc_count` を無視する | PGA が不足している証拠である | overalloc_count = 0 になるまで PGA を増やす。 |
+| 共有プールのすべてのオブジェクトを固定する | 必要なオブジェクトを追い出し、領域を浪費する | 大規模で頻繁に無効化されるパッケージのみに絞る。 |
+| ASMM 有効時に個々の SGA コンポーネント・サイズを固定する | 硬直的なサブ・リミットを生み、柔軟性を損なう | ASMM 使用時は、最小サイズとしてのガード的な設定に留める。 |
+| MEMORY_TARGET 増設後に Linux の `/dev/shm` の拡張を忘れる | 起動時に ORA-00845 エラーが発生 | `/dev/shm` を `MEMORY_MAX_TARGET` 以上に増やす。 |
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。混在環境では 19c 互換の代替策を保持すること。
+- 19c と 26ai の両方をサポートする環境では、リリース更新によってデフォルトや非推奨が異なる場合があるため、両方のバージョンで構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c Performance Tuning Guide (TGDBA)](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgdba/)
 - [V$SGA — Oracle Database 19c Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-SGA.html)

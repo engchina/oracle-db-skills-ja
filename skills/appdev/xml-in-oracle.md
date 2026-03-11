@@ -1,34 +1,34 @@
-# XML in Oracle Database
+# Oracle DatabaseにおけるXML
 
-## Overview
+## 概要
 
-Oracle has provided native XML support since Oracle 9i through the `XMLType` data type and the Oracle XML DB (XMLDB) component. Oracle's XML capabilities span storage, querying with XQuery and XPath, generation, transformation, and indexing. While JSON has largely displaced XML for new application development, XML remains essential for:
+Oracleは、Oracle 9iから `XMLType` データ型および Oracle XML DB (XMLDB) コンポーネントを通じて、ネイティブのXMLサポートを提供している。OracleのXML機能は、ストレージ、XQueryやXPathによる照会、生成、変換、および索引付けにまで及ぶ。新しいアプリケーション開発ではJSONがXMLに取って代わることが多くなったが、XMLは依然として以下の用途で不可欠である：
 
-- EDI, HIPAA, and government data exchange standards
-- SOAP web service integration
-- Legacy system interfaces
-- Document management and content repositories
-- Configuration storage
+- EDI、HIPAA、および政府のデータ交換標準
+- SOAPウェブサービスの統合
+- レガシー・システムのインターフェース
+- ドキュメント管理およびコンテンツ・リポジトリ
+- 設定情報の格納
 
 ---
 
-## XMLType Storage Options
+## XMLTypeのストレージ・オプション
 
-Oracle XMLType can be stored in three distinct internal formats, each with different performance trade-offs.
+Oracle XMLTypeは、3つの異なる内部形式で格納でき、それぞれパフォーマンス上のトレードオフがある。
 
-### 1. Object-Relational Storage (Schema-Registered XML)
+### 1. オブジェクト・リレーショナル・ストレージ (スキーマ登録済みXML)
 
-Best for: Highly structured, frequently queried XML with a stable, known schema. Oracle maps XML elements to relational columns internally, enabling fast XPath navigation.
+最適：高度に構造化され、頻繁に照会されるXMLで、安定した既知のスキーマを持つ場合。OracleはXML要素を内部的にリレーショナル列にマップし、高速なXPathナビゲーションを可能にする。
 
 ```sql
--- Register an XML schema
+-- XMLスキーマの登録
 BEGIN
     DBMS_XMLSCHEMA.REGISTER_SCHEMA(
         SCHEMAURL => 'http://myapp.com/schemas/order.xsd',
         SCHEMADOC => XMLTYPE(
             '<?xml version="1.0"?>
              <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
-                        targetNamespace="http://myapp.com/schemas/order">
+                         targetNamespace="http://myapp.com/schemas/order">
                <xs:element name="Order">
                  <xs:complexType>
                    <xs:sequence>
@@ -48,7 +48,7 @@ BEGIN
 END;
 /
 
--- Create table with schema-based XMLType
+-- スキーマベースの XMLType を持つ表の作成
 CREATE TABLE orders_xml (
     order_id   NUMBER PRIMARY KEY,
     order_doc  XMLType
@@ -58,19 +58,19 @@ XMLTYPE COLUMN order_doc STORE AS OBJECT RELATIONAL
     ELEMENT "Order";
 ```
 
-### 2. CLOB Storage (Unstructured XML)
+### 2. CLOB ストレージ (非構造化XML)
 
-Best for: Variable-structure XML, XML you mainly store and retrieve whole, legacy data. Simplest to set up.
+最適：可変構造のXML、主に全体を格納・取得するXML、レガシーデータ。セットアップが最も簡単。
 
 ```sql
--- XMLType stored as CLOB (unstructured)
+-- CLOBとして格納される XMLType (非構造化)
 CREATE TABLE contracts (
     contract_id   NUMBER PRIMARY KEY,
     contract_xml  XMLType
 )
 XMLTYPE COLUMN contract_xml STORE AS CLOB;
 
--- Insert XML
+-- XMLの挿入
 INSERT INTO contracts VALUES (
     1,
     XMLType('<Contract>
@@ -84,7 +84,7 @@ INSERT INTO contracts VALUES (
              </Contract>')
 );
 
--- Or from a string variable
+-- 文字列変数からの挿入
 DECLARE
     v_xml CLOB := '<Contract><ContractId>1002</ContractId></Contract>';
 BEGIN
@@ -93,9 +93,9 @@ BEGIN
 END;
 ```
 
-### 3. Binary XML Storage (Recommended for 11g+)
+### 3. バイナリXMLストレージ (11g以降の推奨)
 
-Best for: General-purpose XML storage without schema registration. Stores in a compact binary post-parse format (similar to conceptual approach as JSON's OSON). Faster than CLOB, simpler than object-relational.
+最適：スキーマ登録を行わない汎用的なXMLストレージ。パース後のバイナリ形式でコンパクトに格納される（JSONのOSONと概念的に似たアプローチ）。CLOBよりも高速で、オブジェクト・リレーショナルよりもシンプル。
 
 ```sql
 CREATE TABLE product_specs (
@@ -104,7 +104,7 @@ CREATE TABLE product_specs (
 )
 XMLTYPE COLUMN spec_xml STORE AS BINARY XML;
 
--- Insert XML
+-- XMLの挿入
 INSERT INTO product_specs VALUES (
     101,
     XMLType('<Specification>
@@ -125,39 +125,39 @@ INSERT INTO product_specs VALUES (
 
 ---
 
-## XPath Extraction with XMLType Methods
+## XMLTypeメソッドによるXPath抽出
 
 ```sql
--- Extract a single node value using XPath
+-- XPath を使用して単一のノード値を抽出
 SELECT EXTRACTVALUE(spec_xml, '/Specification/Name') AS product_name
 FROM   product_specs;
 
--- Extract an XML fragment (returns XMLType)
+-- XMLフラグメントを抽出 (XMLType を返す)
 SELECT EXTRACT(spec_xml, '/Specification/Dimensions') AS dimensions_xml
 FROM   product_specs;
 
--- existsNode: test for node existence
+-- existsNode: ノードの存在を確認
 SELECT product_id
 FROM   product_specs
 WHERE  EXISTSNODE(spec_xml, '/Specification/Materials/Material[text()="Steel"]') = 1;
 
--- XMLQuery: XQuery evaluation returning XMLType
+-- XMLQuery: XMLType を返す XQuery 評価
 SELECT XMLQuery('$x/Specification/Name/text()'
                 PASSING spec_xml AS "x"
                 RETURNING CONTENT) AS name_value
 FROM   product_specs;
 ```
 
-Note: `EXTRACTVALUE`, `EXTRACT`, and `EXISTSNODE` are deprecated in 11g+. Prefer `XMLQUERY`, `XMLEXISTS`, and `XMLTABLE`.
+注意: `EXTRACTVALUE`, `EXTRACT`, `EXISTSNODE` は 11g 以降で非推奨。`XMLQUERY`, `XMLEXISTS`, `XMLTABLE` の使用が推奨される。
 
 ---
 
-## XMLTable: Shredding XML into Relational Rows
+## XMLTable: XMLをリレーショナルな行に変換 (シュレッド)
 
-`XMLTable` is the modern, recommended way to convert XML documents into relational data. It uses XQuery path expressions to navigate the document.
+`XMLTable` は、XMLドキュメントをリレーショナルデータに変換するための最新かつ推奨される方法である。XQueryパス式を使用してドキュメントをナビゲートする。
 
 ```sql
--- Basic XMLTable usage
+-- 基本的な XMLTable の使用
 SELECT x.product_id_val, x.product_name, x.width, x.height
 FROM   product_specs p,
        XMLTable('/Specification'
@@ -169,7 +169,7 @@ FROM   product_specs p,
                height          NUMBER         PATH 'Dimensions/Height'
        ) x;
 
--- Expand repeating elements (array-like)
+-- 繰り返し要素の展開 (配列のような扱い)
 SELECT p.product_id, m.material_name
 FROM   product_specs p,
        XMLTable('/Specification/Materials/Material'
@@ -178,17 +178,17 @@ FROM   product_specs p,
                material_name  VARCHAR2(100)  PATH '.'
        ) m;
 
--- Extract attribute values
+-- 属性値の抽出
 SELECT x.currency, x.value
 FROM   contracts c,
        XMLTable('/Contract/Value'
            PASSING c.contract_xml
            COLUMNS
-               currency  VARCHAR2(3)     PATH '@currency',  -- @ for attributes
+               currency  VARCHAR2(3)     PATH '@currency',  -- 属性には @ を使用
                value     NUMBER(15,2)    PATH '.'
        ) x;
 
--- Nested XMLTable for hierarchical data
+-- 階層データのためのネストされた XMLTable
 SELECT p.product_id, outer_x.dim_unit, inner_x.dim_name, inner_x.dim_value
 FROM   product_specs p,
        XMLTable('/Specification/Dimensions'
@@ -205,10 +205,10 @@ FROM   product_specs p,
        ) inner_x;
 ```
 
-### XMLTable with Namespaces
+### 名前空間を伴う XMLTable
 
 ```sql
--- XML with namespace declarations
+-- 名前空間宣言を含む XML
 SELECT x.order_id, x.customer
 FROM   XMLTable(
            XMLNAMESPACES('http://orders.example.com' AS "ord"),
@@ -227,12 +227,12 @@ FROM   XMLTable(
 
 ---
 
-## Generating XML: XMLElement, XMLForest, XMLAgg
+## XMLの生成: XMLElement, XMLForest, XMLAgg
 
-Oracle provides functions to generate XML from relational data.
+Oracleは、リレーショナルデータからXMLを生成する関数を提供している。
 
 ```sql
--- XMLElement: create an XML element from a value
+-- XMLElement: 値からXML要素を作成
 SELECT XMLElement("Employee",
            XMLElement("Name", first_name || ' ' || last_name),
            XMLElement("Department", department_id),
@@ -241,7 +241,7 @@ SELECT XMLElement("Employee",
 FROM   employees
 WHERE  department_id = 10;
 
--- XMLForest: create a sequence of elements from columns
+-- XMLForest: 列から要素のシーケンスを作成
 SELECT XMLElement("Employee",
            XMLForest(
                employee_id AS "Id",
@@ -252,7 +252,7 @@ SELECT XMLElement("Employee",
        ).getClobVal() AS emp_xml
 FROM   employees;
 
--- XMLAttributes: add attributes to an element
+-- XMLAttributes: 要素に属性を追加
 SELECT XMLElement("Product",
            XMLAttributes(
                product_id AS "id",
@@ -265,7 +265,7 @@ SELECT XMLElement("Product",
        ).getClobVal() AS product_xml
 FROM   products;
 
--- XMLAgg: aggregate multiple XML elements into one parent
+-- XMLAgg: 複数のXML要素を1つの親要素に集約
 SELECT XMLElement("Department",
            XMLAttributes(department_id AS "id"),
            XMLAgg(
@@ -282,10 +282,10 @@ FROM   employees
 GROUP  BY department_id;
 ```
 
-### XMLRoot and XMLDocument
+### XMLRoot と XMLDocument
 
 ```sql
--- Add XML declaration and root element
+-- XML宣言とルート要素を追加
 SELECT XMLRoot(
            XMLElement("Employees",
                XMLAgg(XMLElement("Employee", first_name || ' ' || last_name))
@@ -298,10 +298,10 @@ FROM   employees;
 
 ---
 
-## XQuery with XMLQuery and XMLExists
+## XMLQuery と XMLExists による XQuery
 
 ```sql
--- XMLQuery: execute XQuery expression, return XMLType
+-- XMLQuery: XQuery 式を実行し、XMLType を返す
 SELECT XMLQuery(
            'for $o in /OrderSet/Order
             where $o/Status = "PENDING"
@@ -311,7 +311,7 @@ SELECT XMLQuery(
        ).getStringVal() AS pending_ids
 FROM   order_documents;
 
--- XMLExists: test with XQuery predicate
+-- XMLExists: XQuery 述語によるテスト
 SELECT order_id
 FROM   order_documents
 WHERE  XMLExists(
@@ -321,7 +321,7 @@ WHERE  XMLExists(
            PASSING order_xml
        );
 
--- XQuery FLWOR expression
+-- XQuery FLWOR 式
 SELECT XMLQuery(
            'for $i in /Specification/Materials/Material
             order by $i
@@ -335,17 +335,17 @@ WHERE  product_id = 101;
 
 ---
 
-## XML Indexes
+## XMLの索引
 
-### XMLIndex (Structured and Unstructured)
+### XMLIndex (構造化および非構造化)
 
 ```sql
--- Unstructured XMLIndex: indexes all text nodes and attribute values
+-- 非構造化 XMLIndex: すべてのテキストノードと属性値を索引付け
 CREATE INDEX idx_contracts_xml
     ON contracts (contract_xml)
     INDEXTYPE IS XDB.XMLIndex;
 
--- Structured XMLIndex: index specific paths for targeted performance
+-- 構造化 XMLIndex: ターゲットのパフォーマンス向上のために特定のパスを索引付け
 CREATE INDEX idx_contracts_structured
     ON contracts (contract_xml)
     INDEXTYPE IS XDB.XMLIndex
@@ -355,14 +355,14 @@ CREATE INDEX idx_contracts_structured
         path (/Contract/Value)
     )');
 
--- Drop XML index
+-- XML索引の削除
 DROP INDEX idx_contracts_xml;
 ```
 
-### Function-Based Index for Common XPath
+### 一般的な XPath 用のファンクション索引
 
 ```sql
--- When you always query a specific scalar path
+-- 特定のスカラーパスを常に照会する場合
 CREATE INDEX idx_spec_product_name
     ON product_specs (
         XMLCast(XMLQuery('/Specification/Name/text()'
@@ -370,7 +370,7 @@ CREATE INDEX idx_spec_product_name
                 AS VARCHAR2(200))
     );
 
--- Query using the same expression to leverage the index
+-- 索引を活用するために同じ式を使用して照会
 SELECT product_id
 FROM   product_specs
 WHERE  XMLCast(XMLQuery('/Specification/Name/text()'
@@ -380,15 +380,15 @@ WHERE  XMLCast(XMLQuery('/Specification/Name/text()'
 
 ---
 
-## Oracle XML DB (XMLDB) Repository
+## Oracle XML DB (XMLDB) リポジトリ
 
-XMLDB includes a hierarchical repository accessible via WebDAV or FTP protocols, allowing XML documents to be stored in a folder-like structure within the database.
+XMLDBには、WebDAVやFTPプロトコル経由でアクセス可能な階層型リポジトリが含まれており、XMLドキュメントをデータベース内のフォルダのような構造で格納できる。
 
 ```sql
--- Create a folder in the XMLDB repository
+-- XMLDBリポジトリにフォルダを作成
 CALL DBMS_XDB.CREATEFOLDER('/public/contracts');
 
--- Create/store an XML resource
+-- XMLリソースを作成/格納
 DECLARE
     v_result BOOLEAN;
 BEGIN
@@ -407,12 +407,12 @@ BEGIN
     COMMIT;
 END;
 
--- Query XML files in the repository using RESOURCE_VIEW
+-- RESOURCE_VIEW を使用してリポジトリ内の XML ファイルを照会
 SELECT PATH(1) AS file_path, XMLType(RES) AS resource_xml
 FROM   RESOURCE_VIEW
 WHERE  UNDER_PATH(RES, '/public/contracts', 1) = 1;
 
--- Query content from repository documents
+-- リポジトリドキュメントの内容を照会
 SELECT x.contract_id, x.status
 FROM   RESOURCE_VIEW rv,
        XMLTable('/Contract'
@@ -426,23 +426,23 @@ WHERE  UNDER_PATH(rv.RES, '/public/contracts', 1) = 1;
 
 ---
 
-## XML Type Conversions and Utilities
+## XML型の変換とユーティリティ
 
 ```sql
--- Convert XMLType to CLOB
+-- XMLType を CLOB に変換
 SELECT spec_xml.getClobVal() AS xml_clob FROM product_specs;
 
--- Convert XMLType to VARCHAR2 (if small enough)
+-- XMLType を VARCHAR2 に変換 (十分に小さい場合)
 SELECT spec_xml.getStringVal() AS xml_string FROM product_specs WHERE product_id = 101;
 
--- Convert VARCHAR2/CLOB to XMLType
+-- VARCHAR2/CLOB を XMLType に変換
 SELECT XMLType('<root><value>42</value></root>') AS xml_val FROM DUAL;
 
--- Validate XML against a registered schema
+-- 登録済みスキーマに対して XML を検証
 SELECT spec_xml.isSchemaValid('http://myapp.com/schemas/product.xsd') AS is_valid
 FROM   product_specs;
 
--- Transform with XSLT
+-- XSLT による変換
 SELECT XMLType('<data><item>Hello</item></data>').transform(
     XMLType('<?xml version="1.0"?>
              <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
@@ -453,52 +453,52 @@ SELECT XMLType('<data><item>Hello</item></data>').transform(
 ).getClobVal() AS transformed
 FROM   DUAL;
 
--- Pretty-print XML
+-- XMLの整形表示
 SELECT XMLSerialize(DOCUMENT spec_xml INDENT SIZE = 2) AS formatted_xml
 FROM   product_specs;
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Choose Binary XML storage** (not CLOB, not object-relational) for new XMLType columns unless you have a specific reason for the alternatives. Binary XML offers the best balance of storage efficiency, query performance, and flexibility.
-- **Use XMLTable and XMLQuery** (not deprecated EXTRACTVALUE/EXTRACT) for all new development.
-- **Index specific XPath expressions** with structured XMLIndex or function-based indexes for frequently queried paths.
-- **Avoid fetching entire XML documents to application code** to extract one field. Use XMLTable/XMLQuery to shred at the database level.
-- **Use XMLSerialize** for controlled serialization when generating XML output — it handles encoding, indentation, and namespace declarations correctly.
-- **For large XML documents (>1MB)**, consider CLOB storage and process with `DBMS_XMLPARSER` streaming API rather than loading entire documents into memory.
-- **Validate XML on insert** using schema registration or `IS JSON` equivalent (`XMLTYPE ... VALIDATING`) to catch structure errors early.
+- 特段の理由がない限り、新しい XMLType 列には **バイナリXMLストレージ**（CLOBやオブジェクト・リレーショナルではなく）を選択すること。バイナリXMLは、ストレージ効率、クエリ・パフォーマンス、および柔軟性のバランスが最も優れている。
+- 新規開発では、すべての箇所で（非推奨の EXTRACTVALUE/EXTRACT ではなく）**XMLTable および XMLQuery** を使用すること。
+- 頻繁に照会されるパスについては、構造化 XMLIndex またはファンクション索引を使用して、**特定の XPath 式に索引を付ける**こと。
+- 1つのフィールドを抽出するために、XMLドキュメント全体をアプリケーション・コードに取得することを避ける。データベース・レベルでシュレッドするために XMLTable/XMLQuery を使用すること。
+- XML出力を生成する際は、**XMLSerialize** を使用してシリアライズを制御すること。これにより、エンコーディング、インデント、および名前空間宣言が正しく処理される。
+- **巨大なXMLドキュメント（1MB超）**の場合は、CLOBストレージを検討し、ドキュメント全体をメモリーにロードするのではなく `DBMS_XMLPARSER` ストリーミング API で処理することを検討する。
+- 構造エラーを早期に発見するために、スキーマ登録または `IS JSON` に相当する機能 (`XMLTYPE ... VALIDATING`) を使用して、**挿入時に XML を検証**すること。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-### Mistake 1: Using Deprecated Functions
+### 間違い 1: 非推奨の関数の使用
 
 ```sql
--- DEPRECATED: avoid in new code
+-- 非推奨: 新規コードでは避けること
 SELECT EXTRACTVALUE(xml_col, '/Root/Value') FROM t;
 SELECT EXTRACT(xml_col, '/Root/Child') FROM t;
 
--- PREFERRED
+-- 推奨
 SELECT XMLCast(XMLQuery('/Root/Value/text()' PASSING xml_col RETURNING CONTENT) AS VARCHAR2(100)) FROM t;
 SELECT XMLQuery('/Root/Child' PASSING xml_col RETURNING CONTENT) FROM t;
 ```
 
-### Mistake 2: CLOB Storage for Frequently Queried XML
+### 間違い 2: 頻繁に照会される XML への CLOB ストレージの使用
 
-Storing as CLOB means every XPath query must parse the document from scratch. For XML that is queried often, use Binary XML or Object-Relational with an XMLIndex.
+CLOBとして格納すると、XPathクエリが実行されるたびにドキュメントを最初からパースする必要がある。頻繁に照会されるXMLには、バイナリXMLまたは XMLIndex を伴うオブジェクト・リレーショナル・ストレージを使用すること。
 
-### Mistake 3: No Namespace Handling
+### 間違い 3: 名前空間の処理漏れ
 
-Forgetting to declare namespaces in XMLTable/XMLQuery causes silent empty result sets — Oracle returns no rows instead of an error when namespace-qualified paths don't match.
+XMLTable/XMLQuery で名前空間の宣言を忘れると、結果セットが黙って空になる。Oracleは、名前空間で修飾されたパスが一致しない場合、エラーではなく「行なし」を返すためである。
 
 ```sql
--- WRONG: ignores namespace, returns nothing
+-- 誤り: 名前空間を無視し、何も返さない
 SELECT * FROM XMLTable('/Order/Id' PASSING namespace_xml_col COLUMNS id NUMBER PATH '.');
 
--- RIGHT: declare the namespace
+-- 正解: 名前空間を宣言する
 SELECT * FROM XMLTable(
     XMLNAMESPACES('http://orders.com/v1' AS "o"),
     '/o:Order/o:Id'
@@ -507,30 +507,29 @@ SELECT * FROM XMLTable(
 );
 ```
 
-### Mistake 4: Comparing XMLType with =
+### 間違い 4: XMLType を = で比較する
 
-XMLType cannot be compared with `=`. Use XMLExists, XMLQuery, or extract a scalar value first.
+XMLType は `=` で比較できない。XMLExists や XMLQuery を使用するか、最初にスカラー値を抽出してから比較すること。
 
 ```sql
--- WRONG
+-- 誤り
 WHERE spec_xml = XMLType('<Specification>...')
 
--- RIGHT: compare extracted values
+-- 正解: 抽出した値を比較する
 WHERE XMLCast(XMLQuery('/Specification/ProductId/text()'
-                       PASSING spec_xml RETURNING CONTENT) AS NUMBER) = 101
+                        PASSING spec_xml RETURNING CONTENT) AS NUMBER) = 101
 ```
 
 ---
 
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Database 19c XML Developer's Kit Programmer's Guide (ADXDK)](https://docs.oracle.com/en/database/oracle/oracle-database/19/adxdk/)
-- [Oracle Database 19c SQL Language Reference — XML Functions](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/)
-- [Oracle XML DB Developer's Guide (ADXDB)](https://docs.oracle.com/en/database/oracle/oracle-database/19/adxdb/)
+- [Oracle Database 19c XML Developer's Kit プログラマーズ・ガイド (ADXDK)](https://docs.oracle.com/en/database/oracle/oracle-database/19/adxdk/)
+- [Oracle Database 19c SQL言語リファレンス — XML関数](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/)
+- [Oracle XML DB デベロッパーズ・ガイド (ADXDB)](https://docs.oracle.com/en/database/oracle/oracle-database/19/adxdb/)

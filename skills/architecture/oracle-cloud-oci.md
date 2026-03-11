@@ -1,77 +1,76 @@
-# Oracle Database on OCI: Cloud Services Reference
+# OCI上のOracle Database: クラウド・サービス・リファレンス
 
-## Overview
+## 概要
 
-Oracle Cloud Infrastructure (OCI) offers a spectrum of database services ranging from fully self-managed virtual machine databases to fully autonomous, self-driving databases. Understanding which service tier fits a workload requires knowing the trade-offs in control, automation, cost, and performance for each option.
+Oracle Cloud Infrastructure (OCI) は、完全に自己管理型の仮想マシン・データベースから、完全に自律した「自動運転」型のデータベースまで、幅広いデータベース・サービスを提供している。ワークロードにどのサービス・ティアが適しているかを判断するには、それぞれのオプションにおける制御、自動化、コスト、およびパフォーマンスのトレードオフを理解する必要がある。
 
-The three primary Oracle Database service families on OCI are:
+OCI 上の主要な Oracle Database サービス・ファミリーは以下の3つである：
 
-| Service Family | Management Level | Best For |
+| サービス・ファミリー | 管理レベル | 最適な用途 |
 |---|---|---|
-| Autonomous Database (ATP/ADW) | Fully managed + self-tuning | New apps, analytics, dev/test, cost-sensitive |
-| Base Database Service (DBCS) | Infrastructure managed; DB managed by you | Lift-and-shift, existing apps, full DBA control |
-| Exadata Cloud Service (ExaCS) | Infrastructure managed; DB managed by you | Mission-critical OLTP, large-scale consolidation |
+| Autonomous Database (ATP/ADW) | 完全管理 + 自己チューニング | 新規アプリ、分析、開発/テスト、コスト重視 |
+| Base Database Service (DBCS) | インフラを管理、DB は自社管理 | リフト＆シフト、既存アプリ、完全な DBA 権限 |
+| Exadata Cloud Service (ExaCS) | インフラを管理、DB は自社管理 | ミッションクリティカルな OLTP、大規模な統合 |
 
 ---
 
 ## 1. Autonomous Transaction Processing (ATP)
 
-ATP is Oracle's fully managed OLTP database service. Oracle manages the infrastructure, patching, backup, tuning, and availability. Customers manage schemas, SQL, and application connectivity.
+ATP（Autonomous Transaction Processing）は、Oracle の完全管理型 OLTP データベース・サービスである。Oracle がインフラ、パッチ適用、バックアップ、チューニング、および可用性を管理する。顧客はスキーマ、SQL、およびアプリケーションの接続のみを管理する。
 
-### Key Characteristics
+### 主な特徴
 
-- **Workload type:** Mixed OLTP + operational reporting
-- **Storage format:** Row store by default, with In-Memory Column Store enabled automatically for eligible objects
-- **Compute model:** OCPU-based (1 OCPU = 2 vCPUs); billed per OCPU-hour
-- **Connection security:** mTLS enforced by default; wallet-based connections
-- **Oracle version:** Latest Oracle 19c (or higher) with automated quarterly patching
-- **Concurrency model:** 3 pre-configured services — `_tp` (low latency), `_tpurgent` (highest priority), `_low` (background)
+- **ワークロード・タイプ:** OLTP と運用レポートの混在
+- **ストレージ形式:** デフォルトは行ストア。適格なオブジェクトに対してはインメモリー列ストアが自動的に有効化される
+- **コンピュート・モデル:** OCPU ベース (1 OCPU = 2 vCPU)。OCPU 時間単位で課金
+- **接続セキュリティ:** デフォルトで mTLS を強制。ウォレットベースの接続
+- **Oracle バージョン:** 最新の Oracle 19c (以上)。四半期ごとに自動パッチ適用
+- **並行性モデル:** 3 つの事前構成済みサービス：`_tp` (低レイテンシ)、`_tpurgent` (最高優先順位)、`_low` (バックグラウンド)
 
-### Connecting to ATP
+### ATP への接続
 
 ```sql
--- ATP requires Oracle Wallet for authentication (mTLS)
--- Download the wallet (Instance Wallet or Regional Wallet) from OCI Console
--- or using OCI CLI:
+-- ATP は認証に Oracle ウォレット (mTLS) を必要とする
+-- OCI コンソール、または OCI CLI を使用してウォレット (インスタンス・ウォレットまたはリージョン・ウォレット) をダウンロードする
 -- oci db autonomous-database generate-wallet --autonomous-database-id <ocid> --file wallet.zip --password WalletPass#1
 
--- sqlplus connection using TNS_ADMIN pointing to wallet directory
+-- ウォレット・ディレクトリを指す TNS_ADMIN を使用した sqlplus 接続
 -- export TNS_ADMIN=/home/oracle/wallet
 -- sqlplus admin/YourPass#1@myatp_tp
 
--- JDBC connection string for applications
+-- アプリケーション用の JDBC 接続文字列
 -- jdbc:oracle:thin:@myatp_tp?TNS_ADMIN=/wallet_dir
 
--- Check service names available in ATP
+-- ATP で利用可能なサービス名の確認
 SELECT name, network_name, goal
 FROM   v$active_services
 WHERE  name NOT IN ('SYS$BACKGROUND', 'SYS$USERS')
 ORDER  BY name;
 ```
 
-### ATP-Specific Features
+### ATP 固有の機能
 
 ```sql
--- Autonomous Database automatically creates performance indexes
--- View auto-created indexes
+-- Autonomous Database はパフォーマンス索引を自動的に作成する
+-- 自動作成された索引の表示
 SELECT index_name, table_name, visibility, status, auto
 FROM   user_indexes
 WHERE  auto = 'YES'
 ORDER  BY table_name;
 
--- Auto-partitioning: ATP can automatically partition tables to improve performance
--- Check auto-partitioning candidates and status
+-- 自動パーティショニング: ATP はパフォーマンス向上のため、表を自動的にパーティション化できる
+-- 自動パーティショニングの候補とステータスの確認
 SELECT table_name, partition_count, strategy, status, last_analyzed
 FROM   dba_auto_partition_config
 ORDER  BY table_name;
 
--- View auto-partitioning history
+-- 自動パーティショニング履歴の表示
 SELECT report_date, table_owner, table_name, partition_count, status
 FROM   dba_auto_partition_history
 ORDER  BY report_date DESC;
 
--- Machine Learning features in ATP
--- Oracle ML is pre-installed
+-- ATP の機械学習 (ML) 機能
+-- Oracle ML はインストール済み
 SELECT *
 FROM   user_mining_models;
 ```
@@ -80,43 +79,43 @@ FROM   user_mining_models;
 
 ## 2. Autonomous Data Warehouse (ADW)
 
-ADW is Oracle's fully managed analytical database service. It is architected for parallel query execution, columnar storage, and BI/reporting workloads.
+ADW（Autonomous Data Warehouse）は、Oracle の完全管理型分析用データベース・サービスである。パラレル・クエリ実行、列形式ストレージ、および BI/レポート・ワークロード向けに構築されている。
 
-### Key Differences from ATP
+### ATP との主な違い
 
-| Feature | ATP | ADW |
+| 機能 | ATP | ADW |
 |---|---|---|
-| Primary workload | OLTP, mixed | Analytics, DW, reporting |
-| Default parallelism | Low (OLTP-appropriate) | High (auto parallel query) |
-| Default In-Memory | Selective | Aggressive (for eligible objects) |
-| Auto-indexing | Enabled | Disabled (analytics prefers FTS) |
-| Default compression | Advanced Row Compression | HCC Query High |
-| Default service | `_tp` | `_high`, `_medium`, `_low` |
+| 主なワークロード | OLTP、混在 | 分析、DW、レポート |
+| デフォルトの並列度 | 低 (OLTP 向け) | 高 (自動パラレル・クエリ) |
+| デフォルトのインメモリー | 選択的 | 積極的 (適格なオブジェクトに対して) |
+| 自動索引作成 | 有効 | 無効 (分析では全表スキャンを優先) |
+| デフォルトの圧縮 | アドバンスト行圧縮 | HCC Query High |
+| デフォルトのサービス | `_tp` | `_high`, `_medium`, `_low` |
 
-### ADW Connection Services
+### ADW の接続サービス
 
-ADW provides three pre-defined services with different resource profiles:
+ADW は、リソース・プロファイルの異なる 3 つの事前定義済みサービスを提供している：
 
-| Service | Parallelism | Priority | Use Case |
+| サービス | 並列度 | 優先順位 | ユースケース |
 |---|---|---|---|
-| `_high` | Max DOP | Highest | Single critical query |
-| `_medium` | Moderate DOP | Medium | Standard BI/reporting |
-| `_low` | Minimal | Lowest | ETL, data loads, background |
+| `_high` | 最大並列度 (DOP) | 最高 | 単一のクリティカルなクエリ |
+| `_medium` | 中程度の並列度 | 中 | 標準的な BI/レポート |
+| `_low` | 最小限 | 最低 | ETL、データ・ロード、バックグラウンド |
 
 ```sql
--- Connect using the appropriate service for workload type
--- For BI tool connections: @myinstance_medium
--- For ETL loads: @myinstance_low
--- For ad-hoc critical queries: @myinstance_high
+-- ワークロード・タイプに適したサービスを使用して接続する
+-- BI ツールの接続用: @myinstance_medium
+-- ETL ロード用: @myinstance_low
+-- アドホックなクリティカル・クエリ用: @myinstance_high
 
--- Check current resource group assignments
+-- 現在のリソース・コンシューマ・グループの割り当てを確認
 SELECT username, resource_consumer_group
 FROM   v$session
 WHERE  type = 'USER'
 ORDER  BY username;
 
--- ADW automatically applies HCC compression to new tables
--- Check compression on ADW tables
+-- ADW は新しい表に HCC 圧縮を自動的に適用する
+-- ADW 表の圧縮状態を確認
 SELECT table_name, compression, compress_for
 FROM   user_tables
 ORDER  BY table_name;
@@ -124,20 +123,20 @@ ORDER  BY table_name;
 
 ---
 
-## 3. Auto-Scaling and Auto-Backup
+## 3. 自動スケーリングと自動バックアップ
 
-### Auto-Scaling (Compute)
+### 自動スケーリング (コンピュート)
 
-Autonomous Databases support automatic scaling of compute resources without downtime when the database is under CPU pressure.
+Autonomous Database は、CPU に負荷がかかった場合にダウンタイムなしでコンピュート・リソースを自動的にスケーリング（増減）することをサポートしている。
 
 ```sql
--- Scaling is managed via OCI Console, CLI, or REST API
--- OCI CLI to enable auto-scaling:
+-- スケーリングは OCI コンソール、CLI、または REST API 経由で管理される
+-- サービスを有効化する OCI CLI 例:
 -- oci db autonomous-database update \
 --     --autonomous-database-id <ocid> \
 --     --is-auto-scaling-enabled true
 
--- Monitor CPU usage to understand scaling behavior
+-- スケーリング動作を理解するために CPU 使用率を監視する
 SELECT end_interval_time,
        ROUND(AVG(value), 2) AS avg_cpu_pct
 FROM   dba_hist_sysmetric_summary
@@ -147,29 +146,29 @@ GROUP  BY end_interval_time
 ORDER  BY end_interval_time DESC
 FETCH  FIRST 48 ROWS ONLY;
 
--- Autonomous Database scales between baseCPU and 3x baseCPU automatically
--- Current OCPU allocation visible in:
+-- Autonomous Database は、ベース CPU 数からその 3 倍まで自動的にスケールする
+-- 現在の OCPU 割り当ては以下で確認可能:
 SELECT name, value
 FROM   v$parameter
 WHERE  name IN ('cpu_count', 'parallel_threads_per_cpu')
 ORDER  BY name;
 ```
 
-### Auto-Backup
+### 自動バックアップ
 
-Autonomous Databases perform automatic daily backups to OCI Object Storage with a 60-day retention period by default.
+Autonomous Database は、デフォルトで 60 日間の保持期間を持ち、OCI オブジェクト・ストレージ（Object Storage）への自動日次バックアップを実行する。
 
 ```sql
--- OCI CLI: list available backups for an Autonomous Database
+-- OCI CLI: Autonomous Database で利用可能なバックアップのリストを表示
 -- oci db autonomous-database-backup list \
 --     --autonomous-database-id <ocid>
 
--- OCI CLI: restore to a specific point in time
+-- OCI CLI: 特定の時点にリストア
 -- oci db autonomous-database restore \
 --     --autonomous-database-id <ocid> \
 --     --timestamp "2026-03-01T12:00:00.000Z"
 
--- View backup history from within the database
+-- データベース内からのバックアップ履歴の表示
 SELECT input_type, status, start_time, end_time,
        input_bytes / 1024 / 1024 / 1024 AS input_gb,
        output_bytes / 1024 / 1024 / 1024 AS output_gb
@@ -182,53 +181,53 @@ FETCH  FIRST 10 ROWS ONLY;
 
 ## 4. Base Database Service (DBCS)
 
-Base Database Service provisions Oracle Database on OCI compute shapes (Virtual Machine or Bare Metal). Oracle manages the underlying infrastructure (OS patching, storage provisioning), while the DBA retains full control over the database.
+Base Database Service は、OCI コンピュート・シェイプ（仮想マシンまたはベア・メタル）上に Oracle Database をプロビジョニングする。Oracle が基盤となるインフラ（OS のパッチ適用、ストレージ・プロビジョニング）を管理し、DBA はデータベースに対して完全な制御権を持つ。
 
-### VM DB System vs. Bare Metal DB System
+### 仮想マシン (VM) DB システム vs ベア・メタル (BM) DB システム
 
-| Aspect | VM DB System | BM DB System |
+| 項目 | VM DB システム | BM DB システム |
 |---|---|---|
-| Compute | Shared or dedicated VM | Full bare metal node |
-| Storage | Iscsi block volumes | NVMe local SSD + block |
-| RAC support | Up to 2 nodes (RAC Two-Node) | Up to 2 nodes |
-| Starting size | 1 OCPU | 24+ OCPUs |
-| Use case | Dev, test, smaller prod | Large OLTP, high I/O |
+| コンピュート | 共有または専用 VM | 専有ベア・メタル・ノード |
+| ストレージ | iSCSI ブロック・ボリューム | NVMe ローカル SSD + ブロック |
+| RAC サポート | 最大 2 ノード (RAC 2ノード) | 最大 2 ノード |
+| 開始サイズ | 1 OCPU | 24 OCPU 以上 |
+| ユースケース | 開発、テスト、小規模本番 | 大規模 OLTP、高 I/O |
 
-### Provisioning Considerations
+### プロビジョニング時の考慮事項
 
 ```sql
--- After provisioning via OCI Console or CLI, verify DB configuration
+-- OCI コンソールまたは CLI 経由でプロビジョニングした後、DB 構成を確認する
 SELECT name, db_unique_name, log_mode, open_mode,
        flashback_on, force_logging, platform_name
 FROM   v$database;
 
--- Check storage usage on DBCS (block volumes appear as ASM disk groups)
+-- DBCS でのストレージ使用量の確認 (ブロック・ボリュームは ASM ディスク・グループとして見える)
 SELECT group_number, name, type, state, total_mb, free_mb,
        ROUND((total_mb - free_mb) / total_mb * 100, 1) AS pct_used
 FROM   v$asm_diskgroup
 ORDER  BY name;
 
--- DBCS includes Data Guard by default for Enterprise Edition High Performance
--- Check Data Guard configuration
+-- Enterprise Edition High Performance 以上の DBCS にはデフォルトで Data Guard が含まれる
+-- Data Guard 構成の確認
 SELECT db_unique_name, role, open_mode, protection_mode, protection_level
 FROM   v$database;
 ```
 
-### DBCS-Specific Operations
+### DBCS 固有の運用
 
 ```sql
--- Enable or verify archivelog mode (required for backups and Data Guard)
+-- アーカイブログ・モードの有効化または確認 (バックアップと Data Guard に必要)
 ARCHIVE LOG LIST;
 
--- RMAN backup on DBCS (Oracle manages backup to OCI Object Storage or local)
--- The OCI backup plugin (bkup_api) is pre-installed on DBCS
--- Manual RMAN backup to OCI Object Storage:
+-- DBCS での RMAN バックアップ (Oracle が OCI オブジェクト・ストレージまたはローカルへのバックアップを管理)
+-- OCI バックアップ・プラグイン (bkup_api) は DBCS にプリインストールされている
+-- OCI オブジェクト・ストレージへの手動 RMAN バックアップ例:
 -- RMAN> CONFIGURE CHANNEL DEVICE TYPE SBT
 --   PARMS='SBT_LIBRARY=/opt/oracle/dcs/commonstore/pkgrepos/oss/odbcs/libopc.so
 --          ENV=(OPC_PFILE=/opt/oracle/dcs/commonstore/objectstore/config/opctest.ora)';
 -- RMAN> BACKUP DATABASE PLUS ARCHIVELOG;
 
--- DBCS patching uses DBA console (OCI console) or dbaascli utility
+-- DBCS のパッチ適用には、DBA コンソール（OCI コンソール）または dbaascli ユーティリティを使用する
 -- dbaascli dbpatch apply --db MYDB --patch_id <patch_id>
 ```
 
@@ -236,24 +235,24 @@ ARCHIVE LOG LIST;
 
 ## 5. Exadata Cloud Service (ExaCS)
 
-ExaCS brings the full Exadata hardware platform (including Smart Scan, Storage Indexes, and HCC) to OCI. Oracle manages the Exadata hardware and grid infrastructure; the customer manages the database.
+ExaCS は、スマート・スキャン、ストレージ索引、および HCC を含む Exadata ハードウェア・プラットフォームの全機能を OCI に提供する。Oracle が Exadata ハードウェアと Grid Infrastructure を管理し、顧客はデータベースを管理する。
 
-### ExaCS Infrastructure Options
+### ExaCS インフラストラクチャ・オプション
 
-| Option | Description |
+| オプション | 説明 |
 |---|---|
-| Quarter Rack | 2 DB servers, 3 storage cells |
-| Half Rack | 4 DB servers, 6 storage cells |
-| Full Rack | 8 DB servers, 12 storage cells |
-| Elastic Configurations (X9M+) | Choose DB server and storage cell count independently |
+| Quarter Rack (1/4 ラック) | 2 つの DB サーバー, 3 つのストレージ・セル |
+| Half Rack (1/2 ラック) | 4 つの DB サーバー, 6 つのストレージ・セル |
+| Full Rack (フルラック) | 8 つの DB サーバー, 12 つのストレージ・セル |
+| 弾力的な構成 (X9M 以降) | DB サーバー数とストレージ・セル数を個別に選択可能 |
 
-### ExaCS vs. ExaDB-C@C (Exadata Cloud at Customer)
+### ExaCS vs ExaDB-C@C (Exadata Cloud at Customer)
 
-- **ExaCS**: Exadata hardware resides in OCI data centers. Customer manages the DB; Oracle manages Exadata infrastructure.
-- **ExaDB-C@C**: Exadata hardware installed at the customer's on-premises data center; Oracle manages infrastructure remotely; customer manages the DB.
+- **ExaCS**: Exadata ハードウェアは OCI データセンターに配置される。顧客が DB を管理し、Oracle が Exadata インフラを管理する。
+- **ExaDB-C@C**: Exadata ハードウェアは顧客のオンプレミス・データセンターに設置される。Oracle がインフラをリモート管理し、顧客が DB を管理する。
 
 ```sql
--- Verify Exadata features are active
+-- Exadata 機能がアクティブであることを確認
 SELECT name, value
 FROM   v$parameter
 WHERE  name IN ('cell_offload_processing',
@@ -262,7 +261,7 @@ WHERE  name IN ('cell_offload_processing',
                 'enable_goldengate_replication')
 ORDER  BY name;
 
--- Confirm Smart Scan is being used
+-- スマート・スキャンが使用されていることの確認
 SELECT name, value
 FROM   v$sysstat
 WHERE  name IN (
@@ -275,128 +274,128 @@ ORDER  BY name;
 
 ---
 
-## 6. OCI Connection Methods
+## 6. OCI 接続方法
 
-### Standard Connections (Non-Autonomous)
+### 標準接続 (Autonomous 以外)
 
 ```sql
--- Standard JDBC connection to DBCS
+-- DBCS への標準的な JDBC 接続
 -- jdbc:oracle:thin:@//host:1521/service_name
 
--- TNS-based connection
+-- TNS ベースの接続例
 -- HOST_PORT_SN =
 --   (DESCRIPTION =
 --     (ADDRESS = (PROTOCOL = TCP)(HOST = mydbcs-host.subnet.vcn.oraclevcn.com)(PORT = 1521))
 --     (CONNECT_DATA = (SERVER = DEDICATED)(SERVICE_NAME = mydb.subnet.vcn.oraclevcn.com))
 --   )
 
--- Check listening services on DBCS
+-- DBCS でリスニングされているサービスの確認
 SELECT name, network_name
 FROM   v$active_services
 WHERE  name NOT IN ('SYS$BACKGROUND', 'SYS$USERS')
 ORDER  BY name;
 ```
 
-### Wallet-Based Connections (Autonomous Database)
+### ウォレットベースの接続 (Autonomous Database)
 
 ```sql
--- Three wallet types for Autonomous Databases:
--- 1. Instance Wallet: specific to one DB instance
--- 2. Regional Wallet: works with any Autonomous DB in the region
--- 3. mTLS (mutual TLS): two-way certificate authentication
+-- Autonomous Database には 3 つのウォレット・タイプがある：
+-- 1. インスタンス・ウォレット: 特定の DB インスタンスに固有
+-- 2. リージョン・ウォレット: そのリージョン内の任意の Autonomous DB で動作
+-- 3. mTLS (相互 TLS): 双方向の証明書認証
 
--- TLS-only connection (wallet not required, 21c and later ADB)
--- Disable wallet requirement for TLS-only connections:
+-- TLS のみの接続 (ウォレット不要、21c 以降の ADB)
+-- TLS のみの接続を可能にするためのウォレット要件の無効化例:
 -- oci db autonomous-database update \
 --     --autonomous-database-id <ocid> \
 --     --is-mtls-connection-required false
 
--- JDBC Easy Connect Plus syntax (no wallet, TLS only)
+-- JDBC Easy Connect Plus 構文 (ウォレットなし、TLS のみ)
 -- jdbc:oracle:thin:@myatp.adb.us-ashburn-1.oraclecloud.com:1522/dbname_tp.adb.oraclecloud.com
 
--- Verify TLS settings
+-- TLS 設定の確認
 SELECT name, value
 FROM   v$parameter
 WHERE  name IN ('ssl_version', 'sqlnet.encryption_server', 'sqlnet.authentication_services');
 ```
 
-### Private Endpoint Connections
+### プライベート・エンドポイント接続
 
-OCI supports connecting to Autonomous Databases from within a VCN using Private Endpoints, eliminating internet exposure:
+OCI は、インターネットに公開することなく、プライベート・エンドポイントを使用して VCN 内から Autonomous Database に接続することをサポートしている：
 
 ```sql
--- Private endpoint forces all connections through the VCN
--- Configured at provisioning time or added post-provisioning via OCI Console
+-- プライベート・エンドポイントは、すべての接続を VCN 経由に強制する
+-- プロビジョニング時に構成するか、プロビジョニング後に OCI コンソール経由で追加する
 
--- After enabling private endpoint, check endpoint details:
+-- プライベート・エンドポイントを有効にした後、エンドポイント詳細を確認する例:
 -- oci db autonomous-database get --autonomous-database-id <ocid> \
 --     --query 'data.{"private-endpoint": "private-endpoint", "private-ip": "private-ip"}'
 
--- Connection string for private endpoint uses private IP or private DNS name
+-- プライベート・エンドポイントの接続文字列には、プライベート IP またはプライベート DNS 名を使用する
 -- jdbc:oracle:thin:@10.0.1.25:1521/myatp_tp
 ```
 
 ---
 
-## 7. Oracle Cloud Free Tier
+## 7. Oracle Cloud Free Tier (常に無料)
 
-Oracle Cloud Free Tier provides two Autonomous Databases (1 OCPU, 20 GB storage each) permanently free with no time limit, plus $300 in credits for other services for 30 days.
+Oracle Cloud Free Tier は、1 OCPU、20GB ストレージを搭載した 2 つの Autonomous Database を時間制限なしで永久無料で提供し、さらに 30 日間有効な他のサービス用クレジットを提供している。
 
-### Free Tier Limitations
+### Free Tier の制限
 
-| Resource | Always Free Limit |
+| リソース | 常に無料 (Always Free) の制限 |
 |---|---|
-| Autonomous DB instances | 2 (one ATP, one ADW) |
-| OCPUs per instance | 1 (no auto-scaling) |
-| Storage per instance | 20 GB |
-| APEX workspaces | Included |
-| Oracle ML notebooks | Included |
-| Data loading | REST, APEX, DB Actions |
-| Backup | 60 days included |
+| Autonomous DB インスタンス | 2 (ATP 1 つ、ADW 1 つ) |
+| インスタンスごとの OCPU | 1 (自動スケーリングなし) |
+| インスタンスごとのストレージ | 20 GB |
+| APEX ワークスペース | 含まれる |
+| Oracle ML ノートブック | 含まれる |
+| データ・ロード | REST, APEX, DB Actions |
+| バックアップ | 60 日間含まれる |
 
 ```sql
--- Connecting to Free Tier Autonomous Database
--- Service names follow the same pattern as paid ADB
--- Available services: _tp, _tpurgent, _low, _high, _medium
+-- Free Tier の Autonomous Database への接続
+-- サービス名は有料 ADB と同じパターンに従う
+-- 利用可能なサービス: _tp, _tpurgent, _low, _high, _medium
 
--- Verify Free Tier resource constraints
+-- Free Tier のリソース制約の確認
 SELECT name, value
 FROM   v$parameter
 WHERE  name IN ('cpu_count', 'sga_max_size', 'pga_aggregate_target')
 ORDER  BY name;
 
--- Free Tier comes with Oracle APEX pre-installed
+-- Free Tier には Oracle APEX がプリインストールされている
 SELECT version, status
 FROM   apex_release;
 
--- ORDS (Oracle REST Data Services) is pre-enabled in Free Tier
--- Check ORDS configuration
+-- ORDS (Oracle REST Data Services) は Free Tier で事前有効化されている
+-- ORDS 構成の確認
 SELECT *
 FROM   user_ords_schemas;
 ```
 
 ---
 
-## 8. Cloud-Specific Features Summary
+## 8. クラウド固有機能のサマリー
 
-### Autonomous Database Operational Commands (OCI CLI)
+### Autonomous Database 運用コマンド (OCI CLI)
 
 ```bash
-# Start / Stop Autonomous Database
+# Autonomous Database の起動 / 停止
 oci db autonomous-database start  --autonomous-database-id <ocid>
 oci db autonomous-database stop   --autonomous-database-id <ocid>
 
-# Scale OCPUs (no downtime)
+# OCPU のスケーリング (ダウンタイムなし)
 oci db autonomous-database update \
     --autonomous-database-id <ocid> \
     --cpu-core-count 8
 
-# Scale storage (no downtime, can only increase)
+# ストレージのスケーリング (ダウンタイムなし、増加のみ可能)
 oci db autonomous-database update \
     --autonomous-database-id <ocid> \
     --data-storage-size-in-tbs 2
 
-# Clone an Autonomous Database
+# Autonomous Database のクローン作成
 oci db autonomous-database create-from-clone \
     --clone-type FULL \
     --source-id <source_ocid> \
@@ -406,80 +405,80 @@ oci db autonomous-database create-from-clone \
     --compartment-id <compartment_ocid>
 ```
 
-### Database Actions (SQL Developer Web)
+### Database Actions (旧 SQL Developer Web)
 
-All Autonomous Database instances include Database Actions (formerly SQL Developer Web), a browser-based SQL and administration IDE accessible at:
+すべての Autonomous Database インスタンスには、ブラウザベースの SQL および管理用 IDE である Database Actions（旧 SQL Developer Web）が含まれており、以下からアクセスできる：
 
 ```
 https://<adb_host>/ords/sql-developer
 ```
 
-Key Database Actions modules:
-- SQL Worksheet — interactive SQL execution
-- Data Load — upload CSV/JSON/Parquet directly to tables
-- Data Studio — business intelligence, data insights
-- Oracle ML — Jupyter-compatible ML notebooks
-- Oracle APEX — full application development platform
+主な Database Actions モジュール：
+- SQL Worksheet — インタラクティブな SQL 実行
+- データ・ロード — CSV/JSON/Parquet を表に直接アップロード
+- データ・スタジオ — ビジネス・インテリジェンス、データ・インサイト
+- Oracle ML — Jupyter 互換の ML ノートブック
+- Oracle APEX — フル機能のアプリケーション開発プラットフォーム
 
 ---
 
-## 9. Best Practices
+## 9. ベスト・プラクティス
 
-- **Use Private Endpoints for all production Autonomous Databases.** Public endpoints expose the database to the internet. Private endpoints restrict access to your VCN and eliminate the need for IP allowlisting.
-- **Use the `_medium` service for BI tool connections to ADW.** The `_high` service uses maximum parallelism, which works well for single queries but can cause contention when many BI users are active simultaneously.
-- **Enable auto-scaling during initial deployment and disable it only after load testing.** It is far better to discover that auto-scaling is needed during testing than after a production load spike causes connection timeouts.
-- **Store wallet files securely.** Autonomous Database wallets contain private keys. Never commit wallet files to source control. Use OCI Vault for secret management in CI/CD pipelines.
-- **Right-size DBCS before migrating to Autonomous.** Test the application on ATP using the same data volume and workload profile. Autonomous's automatic optimizations can change query plans; validate execution plans after migration.
-- **Use Data Safe for Autonomous Database security posture management.** Data Safe (included with ADB) provides security assessments, user assessments, data masking, and activity auditing with no additional configuration.
+- **すべての本番用 Autonomous Database にはプライベート・エンドポイントを使用する。** パブリック・エンドポイントはデータベースをインターネットにさらすことになる。プライベート・エンドポイントはアクセスを VCN 内に制限し、IP 許可リスト（Allowlisting）の必要性をなくす。
+- **ADW への BI ツール接続には `_medium` サービスを使用する。** `_high` サービスは最大並列度を使用するため、単一のクエリには適しているが、多数の BI ユーザーが同時にアクティブな場合には競合を引き起こす可能性がある。
+- **初期デプロイ時に自動スケーリングを有効にし、負荷テスト後にのみ無効にする。** 本番環境での負荷急増による接続タイムアウトが発生した後に気づくよりも、テスト中に自動スケーリングが必要であることを発見する方がはるかに良い。
+- **ウォレット・ファイルを安全に保管する。** Autonomous Database のウォレットには秘密鍵が含まれている。ウォレット・ファイルをソース管理にコミットしてはいけない。CI/CD パイプラインでのシークレット管理には OCI Vault を使用すること。
+- **Autonomous への移行前に DBCS のサイズを適切に調整する。** 同じデータ量とワークロード・プロファイルを使用して。ATP 上でアプリケーションをテストすること。Autonomous の自動最適化によってクエリ計画が変わる可能性があるため、移行後に実行計画を検証すること。
+- **Autonomous Database のセキュリティ・ポスチャ管理（セキュリティ態勢管理）には Data Safe を活用する。** Data Safe（ADB に含まれる）は、追加の構成なしで、セキュリティ・アセスメント、ユーザー・アセスメント、データ・マスキング、およびアクティビティ監査を提供する。
 
 ---
 
-## 10. Common Mistakes and How to Avoid Them
+## 10. よくある間違いとその回避方法
 
-### Mistake 1: Connecting to ATP with `_high` Service for OLTP Applications
+### 間違い 1: OLTP アプリケーションから ATP の `_high` サービスに接続する
 
-The `_high` service in ATP uses maximum DOP, which causes parallel query overhead and resource contention for short OLTP transactions. Use `_tp` (low-latency, no parallelism) for OLTP and `_tpurgent` for priority transactions.
+ATP の `_high` サービスは最大並列度を使用するため、負荷の軽い短い OLTP トランザクションに対してパラレル・クエリのオーバーヘッドとリソース競合を引き起こす。OLTP には `_tp`（低レイテンシ、並列処理なし）を、優先順位の高いトランザクションには `_tpurgent` を使用すること。
 
-### Mistake 2: Not Rotating Wallets After Security Events
+### 間違い 2: セキュリティ・イベント後にウォレットをローテーションしない
 
-Wallets do not expire automatically. After a security incident or staff change, download and deploy a new wallet. The old wallet remains valid until explicitly invalidated by rotating the database password.
+ウォレットは自動的には期限切れにならない。セキュリティ・インシデントや担当者の変更後は、新しいウォレットをダウンロードしてデプロイすること。古いウォレットは、データベースのパスワードを変更（ローテーション）することで明示的に無効化されるまで有効なままである。
 
 ```bash
-# Rotate the ADMIN password (invalidates the old wallet on next download)
+# ADMIN パスワードを変更する (次回ダウンロード時に古いウォレットが無効になる)
 oci db autonomous-database update \
     --autonomous-database-id <ocid> \
     --admin-password "NewSecurePass#2"
-# Then re-download the wallet
+# その後、ウォレットを再ダウンロードする
 oci db autonomous-database generate-wallet \
     --autonomous-database-id <ocid> \
     --file new_wallet.zip \
     --password "WalletPass#2"
 ```
 
-### Mistake 3: Assuming DBCS Patches Are Automatic
+### 間違い 3: DBCS のパッチが自動的に適用されると思い込む
 
-Unlike Autonomous Databases, DBCS patches are **not** applied automatically. The DBA must apply quarterly DB patches manually through the OCI Console (one-click patching) or via `dbaascli`. Unpatched DBCS instances accumulate CVEs over time.
+Autonomous Database とは異なり、DBCS のパッチは**自動的には適用されない**。DBA は OCI コンソール（ワンクリックでのパッチ適用）または `dbaascli` を通じて、四半期ごとの DB パッチを手動で適用する必要がある。パッチが適用されていない DBCS インスタンスには、時間の経過とともに脆弱性（CVE）が蓄積される。
 
-### Mistake 4: Using Autonomous Database for Workloads Requiring Custom Initialization Parameters
+### 間違い 4: カスタム初期化パラメータが必要なワークロードに Autonomous Database を使用する
 
-ATP and ADW do not allow modification of most `init.ora` parameters. Workloads that require specific `optimizer_features_enable`, custom `event` settings, or non-standard memory parameters are not suitable for Autonomous Database. Use DBCS or ExaCS for those workloads.
+ATP および ADW では、ほとんどの `init.ora` パラメータを変更できない。特定の `optimizer_features_enable` やカスタム `event` 設定、あるいは標準外のメモリー・パラメータを必要とするワークロードは、Autonomous Database には適していない。そのようなワークロードには DBCS または ExaCS を使用すること。
 
-### Mistake 5: Ignoring Egress Costs When Loading Data
+### 間違い 5: データ・ロード時のエグレス・コストを無視する
 
-Downloading large datasets from Autonomous Database to on-premises incurs OCI egress charges. Use OCI Object Storage as an intermediate stage (egress between ADB and OCI Object Storage in the same region is free) and then transfer from Object Storage to on-premises.
+Autonomous Database からオンプレミスに大規模なデータセットをダウンロードすると、OCI のエグレス（送信データ転送）料金が発生する。中継ステージとして OCI オブジェクト・ストレージを使用し（同じリージョン内の ADB と オブジェクト・ストレージ間のエグレスは無料）、その後オブジェクト・ストレージからオンプレミスに転送するように検討すること。
 
 ---
 
 
-## Oracle Version Notes (19c vs 26ai)
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-## Sources
+## ソース
 
-- [Oracle Autonomous Database Documentation](https://docs.oracle.com/en/cloud/paas/autonomous-database/) — ATP, ADW, auto-scaling, auto-backup, wallet connections
-- [Oracle Base Database Service Documentation](https://docs.oracle.com/en/cloud/paas/base-database/) — DBCS provisioning, VM vs. BM, patching
-- [Oracle Exadata Cloud Service Documentation](https://docs.oracle.com/en/engineered-systems/exadata-cloud-service/) — ExaCS infrastructure options
-- [OCI CLI Reference](https://docs.oracle.com/en-us/iaas/tools/oci-cli/latest/) — autonomous-database commands
+- [Oracle Autonomous Database Documentation](https://docs.oracle.com/en/cloud/paas/autonomous-database/) — ATP, ADW, 自動スケーリング, 自動バックアップ, ウォレット接続
+- [Oracle Base Database Service Documentation](https://docs.oracle.com/en/cloud/paas/base-database/) — DBCS プロビジョニング, VM vs BM, パッチ適用
+- [Oracle Exadata Cloud Service Documentation](https://docs.oracle.com/en/engineered-systems/exadata-cloud-service/) — ExaCS インフラ・オプション
+- [OCI CLI Reference](https://docs.oracle.com/en-us/iaas/tools/oci-cli/latest/) — autonomous-database コマンド

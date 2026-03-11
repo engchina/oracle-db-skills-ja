@@ -1,34 +1,34 @@
-# SQL Patterns in Oracle
+# OracleにおけるSQLパターン
 
-## Overview
+## 概要
 
-Oracle SQL includes a rich set of advanced constructs beyond basic SELECT/INSERT/UPDATE/DELETE. Mastering these patterns allows complex analytical, hierarchical, and transformational logic to be expressed entirely in SQL — often with dramatic performance and readability advantages over equivalent PL/SQL procedural code.
+Oracle SQLには、基本的な SELECT/INSERT/UPDATE/DELETE を超えた、高度な構文が豊富に用意されている。これらのパターンを習得することで、複雑な分析、階層、および変換ロジックをすべてSQL内で表現できるようになり、同等のPL/SQL手続き型コードと比較して、パフォーマンスと可読性の両面で劇的なメリットが得られることが多い。
 
-This guide covers the most impactful advanced SQL patterns: analytic (window) functions, Common Table Expressions, hierarchical queries, PIVOT/UNPIVOT, the MERGE statement, and the MODEL clause.
+本ガイドでは、実務上最も影響力の大きい高度なSQLパターン（分析（ウィンドウ）関数、共通テーブル式（CTE）、階層クエリ、PIVOT/UNPIVOT、MERGE文、およびMODEL句）について解説する。
 
 ---
 
-## Analytic (Window) Functions
+## 分析（ウィンドウ）関数
 
-Analytic functions compute values across a "window" of rows related to the current row, without collapsing the result set the way GROUP BY does. They are evaluated after the WHERE, GROUP BY, and HAVING clauses but before the final ORDER BY.
+分析関数は、GROUP BY のように結果セットを1行にまとめることなく、現在の行に関連する行の「ウィンドウ」全体で値を計算する。分析関数は WHERE、GROUP BY、HAVING 句の後に評価されるが、最終的な ORDER BY の前に評価される。
 
-**Syntax template:**
+**構文テンプレート:**
 
 ```sql
-function_name([arguments])
+関数名([引数])
   OVER (
-    [PARTITION BY partition_cols]
-    [ORDER BY order_cols]
-    [ROWS | RANGE BETWEEN frame_start AND frame_end]
+    [PARTITION BY 分割列]
+    [ORDER BY ソート列]
+    [ROWS | RANGE BETWEEN フレーム開始 AND フレーム終了]
   )
 ```
 
-### ROW_NUMBER, RANK, and DENSE_RANK
+### ROW_NUMBER, RANK, および DENSE_RANK
 
 ```sql
--- ROW_NUMBER: unique sequential number regardless of ties
--- RANK: tied rows get the same number; next rank is skipped (1,2,2,4)
--- DENSE_RANK: tied rows get the same number; no gaps (1,2,2,3)
+-- ROW_NUMBER: 重複に関係なく、一意で連続した番号を付与
+-- RANK: 同じ値の行には同じ番号を付与。次の番号はスキップされる (1, 2, 2, 4)
+-- DENSE_RANK: 同じ値の行には同じ番号を付与。番号に欠番は生じない (1, 2, 2, 3)
 SELECT
   employee_id,
   last_name,
@@ -41,10 +41,10 @@ FROM employees
 ORDER BY department_id, salary DESC;
 ```
 
-**Common pattern: top-N per group**
+**よくあるパターン: グループごとの上位N件**
 
 ```sql
--- Top 3 earners per department
+-- 各部門の給与上位3名を取得
 SELECT *
 FROM (
   SELECT
@@ -59,12 +59,12 @@ WHERE rnk <= 3
 ORDER BY department_id, rnk;
 ```
 
-### LAG and LEAD
+### LAG と LEAD
 
-`LAG` accesses a value from a preceding row; `LEAD` accesses a value from a following row. Both avoid self-joins.
+`LAG` は前の行の値にアクセスし、`LEAD` は後の行の値にアクセスする。どちらも自己結合を回避できる。
 
 ```sql
--- Compare each employee's salary to the previous hire in their department
+-- 各従業員の給与を、同じ部門の直近の採用者と比較
 SELECT
   employee_id,
   last_name,
@@ -77,10 +77,10 @@ FROM employees
 ORDER BY department_id, hire_date;
 ```
 
-### SUM, AVG, COUNT as Analytic Functions (Running Totals)
+### 分析関数としての SUM, AVG, COUNT (累計)
 
 ```sql
--- Running total of salary by department, ordered by hire date
+-- 採用日順の、部門ごとの給与累計
 SELECT
   employee_id,
   last_name,
@@ -94,7 +94,7 @@ SELECT
   AVG(salary) OVER (
     PARTITION BY department_id
     ORDER BY hire_date
-    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW  -- 3-row moving average
+    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW  -- 3行移動平均
   ) AS moving_avg_3
 FROM employees
 ORDER BY department_id, hire_date;
@@ -103,22 +103,22 @@ ORDER BY department_id, hire_date;
 ### NTILE, PERCENT_RANK, CUME_DIST
 
 ```sql
--- Quartile grouping and percentile distribution
+-- 四分位数によるグルーピングとパーセンタイル分布
 SELECT
   employee_id,
   last_name,
   salary,
   NTILE(4)       OVER (ORDER BY salary) AS salary_quartile,
-  PERCENT_RANK() OVER (ORDER BY salary) AS pct_rank,       -- 0 to 1
-  CUME_DIST()    OVER (ORDER BY salary) AS cumulative_dist  -- 0 to 1
+  PERCENT_RANK() OVER (ORDER BY salary) AS pct_rank,       -- 0 から 1 まで
+  CUME_DIST()    OVER (ORDER BY salary) AS cumulative_dist  -- 0 から 1 まで
 FROM employees
 ORDER BY salary;
 ```
 
-### FIRST_VALUE and LAST_VALUE
+### FIRST_VALUE と LAST_VALUE
 
 ```sql
--- Show the highest salary in the dept alongside each employee's own salary
+-- 各従業員の給与とともに、部門内の最高給与額を表示
 SELECT
   employee_id,
   last_name,
@@ -127,24 +127,24 @@ SELECT
   FIRST_VALUE(salary) OVER (PARTITION BY department_id ORDER BY salary DESC) AS dept_max_salary,
   LAST_VALUE(salary)  OVER (
     PARTITION BY department_id ORDER BY salary DESC
-    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING  -- required for correct LAST_VALUE
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING  -- LAST_VALUE を正しく機能させるために必要
   ) AS dept_min_salary
 FROM employees
 ORDER BY department_id, salary DESC;
 ```
 
-Note: `LAST_VALUE` requires `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING` to override the default window frame, otherwise it only looks back to the start and up to the current row.
+注意: `LAST_VALUE` を使用する場合、デフォルトのウィンドウ・フレーム（先頭から現在行まで）を上書きするために、`ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING` を追加する必要がある。そうしないと、現在行までの範囲内でのみ評価されてしまう。
 
 ---
 
-## Common Table Expressions (WITH Clause)
+## 共通テーブル式 (WITH 句)
 
-CTEs define named subqueries that can be referenced multiple times within the main query. They improve readability and, when marked `MATERIALIZED`, can also improve performance by computing the subquery once.
+CTE (Common Table Expressions) は、メインクエリ内で複数回参照できる名前付きのサブクエリを定義する。可読性が向上し、`MATERIALIZED` ヒントを併用することで、サブクエリを一度だけ計算するように制御してパフォーマンスを向上させることも可能。
 
-### Basic CTE
+### 基本的な CTE
 
 ```sql
--- Named subquery computed once, referenced twice
+-- 一度計算して二度参照される名前付きサブクエリ
 WITH dept_payroll AS (
   SELECT
     department_id,
@@ -165,17 +165,17 @@ JOIN   departments   d ON dp.department_id = d.department_id
 ORDER BY dp.total_salary DESC;
 ```
 
-### Chained CTEs (Multiple WITH Clauses)
+### 重ね書き CTE (複数の WITH 句)
 
 ```sql
 WITH
--- Step 1: compute department stats
+-- ステップ 1: 部門統計を計算
 dept_stats AS (
   SELECT department_id, AVG(salary) AS avg_sal, MAX(salary) AS max_sal
   FROM   employees
   GROUP BY department_id
 ),
--- Step 2: identify employees earning above their dept average
+-- ステップ 2: 部門平均を上回る給与の従業員を特定
 above_avg AS (
   SELECT e.employee_id, e.last_name, e.department_id, e.salary,
          ds.avg_sal AS dept_avg
@@ -183,7 +183,7 @@ above_avg AS (
   JOIN   dept_stats ds ON e.department_id = ds.department_id
   WHERE  e.salary > ds.avg_sal
 ),
--- Step 3: join with departments for final output
+-- ステップ 3: 部門テーブルと結合して最終出力
 final_result AS (
   SELECT aa.last_name, d.department_name, aa.salary, aa.dept_avg,
          ROUND((aa.salary - aa.dept_avg) / aa.dept_avg * 100, 1) AS pct_above_avg
@@ -193,14 +193,14 @@ final_result AS (
 SELECT * FROM final_result ORDER BY pct_above_avg DESC;
 ```
 
-### Recursive CTEs
+### 再帰 CTE
 
-Oracle supports recursive CTEs (in addition to CONNECT BY) from 11gR2 with the `SEARCH` and `CYCLE` clauses:
+Oracleは、`CONNECT BY` に加えて 11gR2 から再帰 CTE をサポートしており、`SEARCH` および `CYCLE` 句も使用可能。
 
 ```sql
--- Recursive CTE: employee org chart
+-- 再帰 CTE: 従業員の組織図
 WITH org_chart (employee_id, manager_id, last_name, lvl, path) AS (
-  -- Anchor: top-level employees (no manager)
+  -- アンカー: 最上位の従業員 (マネージャーがいない)
   SELECT employee_id, manager_id, last_name, 1,
          CAST(last_name AS VARCHAR2(4000)) AS path
   FROM   employees
@@ -208,7 +208,7 @@ WITH org_chart (employee_id, manager_id, last_name, lvl, path) AS (
 
   UNION ALL
 
-  -- Recursive step: employees who report to someone already in the result
+  -- 再帰ステップ: すでに結果セットに含まれている者に報告する従業員
   SELECT e.employee_id, e.manager_id, e.last_name, oc.lvl + 1,
          oc.path || ' > ' || e.last_name
   FROM   employees e
@@ -222,11 +222,11 @@ WHERE  is_cycle = '0'
 ORDER BY order_seq;
 ```
 
-### Materialization Hint
+### マテリアライズ・ヒント
 
 ```sql
--- Force Oracle to compute the CTE once and materialize the result
--- Prevents the optimizer from inlining it into the main query multiple times
+-- CTE を一度だけ計算し、結果を一時表として保持するよう Oracle に強制する
+-- オプティマイザがメインクエリ内に複数回インライン展開するのを防ぐ
 WITH expensive_subquery AS (
   SELECT /*+ MATERIALIZE */ department_id, complex_calculation(salary) AS result
   FROM   employees
@@ -237,14 +237,14 @@ JOIN   expensive_subquery e2 ON e1.department_id != e2.department_id;
 
 ---
 
-## Hierarchical Queries (CONNECT BY)
+## 階層クエリ (CONNECT BY)
 
-`CONNECT BY` is Oracle's native hierarchical query syntax, predating SQL standard recursive CTEs. It is concise and supported by a rich set of Oracle-specific pseudocolumns and functions.
+`CONNECT BY` は、標準 SQL の再帰 CTE よりも前から存在する Oracle 固有の階層クエリ構文である。簡潔であり、Oracle 固有の擬似列や関数による豊富なサポートが特徴。
 
-### Basic Hierarchy Traversal
+### 基本的な階層走査
 
 ```sql
--- Employee org chart using CONNECT BY
+-- CONNECT BY を使用した従業員の組織図
 SELECT
   LEVEL,
   LPAD(' ', (LEVEL-1)*4) || last_name AS org_chart,
@@ -252,24 +252,24 @@ SELECT
   manager_id,
   SYS_CONNECT_BY_PATH(last_name, ' / ') AS full_path
 FROM   employees
-START WITH manager_id IS NULL        -- root nodes
-CONNECT BY PRIOR employee_id = manager_id  -- parent-child relationship
-ORDER SIBLINGS BY last_name;         -- sort within each level
+START WITH manager_id IS NULL        -- ルートノードの指定
+CONNECT BY PRIOR employee_id = manager_id  -- 親子の関連付け
+ORDER SIBLINGS BY last_name;         -- 同じ階層内でのソート
 ```
 
-### Key CONNECT BY Pseudocolumns and Functions
+### 主要な CONNECT BY 擬似列と関数
 
-| Feature | Description |
+| 機能 | 説明 |
 |---|---|
-| `LEVEL` | Depth in the tree (1 = root) |
-| `CONNECT_BY_ROOT expr` | Value of `expr` at the root of the current branch |
-| `CONNECT_BY_ISLEAF` | 1 if the current row has no children, 0 otherwise |
-| `CONNECT_BY_ISCYCLE` | 1 if a cycle was detected (requires `NOCYCLE` keyword) |
-| `SYS_CONNECT_BY_PATH(col, delim)` | Path from root to current row |
+| `LEVEL` | 階層の深さ (1 = ルート) |
+| `CONNECT_BY_ROOT expr` | 現在のブランチのルートにおける `expr` の値 |
+| `CONNECT_BY_ISLEAF` | 現在の行に子がいなければ 1、いれば 0 |
+| `CONNECT_BY_ISCYCLE` | 循環が検出された場合は 1 (`NOCYCLE` キーワードが必要) |
+| `SYS_CONNECT_BY_PATH(col, delim)` | ルートから現在行までのパス |
 
 ```sql
--- Find all direct and indirect reports under manager 101
--- Including the top manager's name on every row
+-- マネージャー 101 の部下（直接および間接）をすべて検索
+-- すべての行にトップ・マネージャーの名前を表示する
 SELECT
   LEVEL,
   employee_id,
@@ -282,10 +282,10 @@ START WITH employee_id = 101
 CONNECT BY PRIOR employee_id = manager_id;
 ```
 
-### Detecting and Handling Cycles
+### 循環の検出と処理
 
 ```sql
--- Data quality check: find circular references in a hierarchy
+-- データ品質チェック: 階層内の循環参照を特定する
 SELECT employee_id, last_name, manager_id
 FROM   employees
 WHERE  CONNECT_BY_ISCYCLE = 1
@@ -293,28 +293,28 @@ START WITH manager_id IS NULL
 CONNECT BY NOCYCLE PRIOR employee_id = manager_id;
 ```
 
-### Generating Rows with CONNECT BY LEVEL
+### CONNECT BY LEVEL による行生成
 
 ```sql
--- Generate a date series for a calendar table (no source table needed)
+-- カレンダー表用の日付データを生成 (ソーステーブル不要)
 SELECT TRUNC(SYSDATE, 'YEAR') + LEVEL - 1 AS calendar_date
 FROM   dual
 CONNECT BY LEVEL <= 365;
 
--- Generate a sequence of numbers
+-- 数値シーケンスの生成
 SELECT LEVEL AS n FROM dual CONNECT BY LEVEL <= 10;
 ```
 
 ---
 
-## PIVOT and UNPIVOT
+## PIVOT と UNPIVOT
 
-### PIVOT: Rows to Columns
+### PIVOT: 行から列へ
 
 ```sql
--- Summarize headcount per department per job category
--- Without PIVOT: requires CASE expressions per column
--- With PIVOT: clean and declarative
+-- 部門ごと、職種ごとの従業員数を集計
+-- PIVOT なしの場合: 列ごとに CASE 式が必要
+-- PIVOT ありの場合: 宣言的で簡潔
 
 SELECT *
 FROM (
@@ -333,20 +333,20 @@ PIVOT (
 )
 ORDER BY department_id;
 
--- Result columns: DEPARTMENT_ID, IT_PROG_TOTAL_SAL, IT_PROG_HEADCOUNT,
---                 SALES_REP_TOTAL_SAL, SALES_REP_HEADCOUNT, etc.
+-- 結果の列: DEPARTMENT_ID, IT_PROG_TOTAL_SAL, IT_PROG_HEADCOUNT, 
+--           SALES_REP_TOTAL_SAL, SALES_REP_HEADCOUNT など
 ```
 
-### Dynamic PIVOT (when column list is unknown at compile time)
+### 動的 PIVOT (コンパイル時に列リストが不明な場合)
 
-Dynamic PIVOT requires dynamic SQL since the column list must be specified at parse time:
+列リストは解析時に確定している必要があるため、動的な列リストには動的SQLが必要。
 
 ```plsql
 DECLARE
   v_cols  CLOB;
   v_sql   CLOB;
 BEGIN
-  -- Build the IN list from distinct values
+  -- 一意の値から IN リストを構築
   SELECT LISTAGG('''' || job_id || ''' AS ' || LOWER(REPLACE(job_id,'-','_')), ', ')
          WITHIN GROUP (ORDER BY job_id)
   INTO   v_cols
@@ -357,21 +357,21 @@ BEGIN
         || ') PIVOT (SUM(salary) FOR job_id IN (' || v_cols || '))'
         || ' ORDER BY department_id';
 
-  EXECUTE IMMEDIATE v_sql;  -- in practice, open a ref cursor
+  EXECUTE IMMEDIATE v_sql;  -- 実際には Ref Cursor を開いて返すことが多い
 END;
 /
 ```
 
-### UNPIVOT: Columns to Rows
+### UNPIVOT: 列から行へ
 
 ```sql
--- Normalize a wide table into a key-value structure
--- Source: quarterly_sales(product_id, q1_sales, q2_sales, q3_sales, q4_sales)
+-- 幅の広いテーブルをキー・値の構造に正規化する
+-- ソース: quarterly_sales(product_id, q1_sales, q2_sales, q3_sales, q4_sales)
 SELECT product_id, quarter, sales_amount
 FROM   quarterly_sales
 UNPIVOT (
-  sales_amount          -- name for the value column
-  FOR quarter           -- name for the key column
+  sales_amount          -- 値を格納する列の名前
+  FOR quarter           -- キーを格納する列の名前
   IN (
     q1_sales AS 'Q1',
     q2_sales AS 'Q2',
@@ -382,18 +382,18 @@ UNPIVOT (
 ORDER BY product_id, quarter;
 ```
 
-`INCLUDE NULLS` / `EXCLUDE NULLS` (default): controls whether rows where the value is NULL are included.
+`INCLUDE NULLS` / `EXCLUDE NULLS` (デフォルト): 値が NULL の行を含めるかどうかを制御。
 
 ---
 
-## MERGE Statement (Upsert)
+## MERGE 文 (Upsert)
 
-`MERGE` combines INSERT and UPDATE (and optionally DELETE) into a single atomic statement. It is efficient for incremental loads and synchronization patterns because it reads the target table only once.
+`MERGE` は、INSERT と UPDATE（およびオプションで DELETE）を単一のアトミックなステートメントに統合する。ターゲット・テーブルを一度しか読み取らないため、増分ロードや同期処理において効率的。
 
-### Basic MERGE (Upsert)
+### 基本的な MERGE (Upsert)
 
 ```sql
--- Synchronize a staging table into the employees table
+-- ステージング・テーブルから従業員テーブルへ同期
 MERGE INTO employees tgt
 USING (
   SELECT employee_id, first_name, last_name, salary, department_id, hire_date
@@ -406,32 +406,32 @@ WHEN MATCHED THEN
     tgt.last_name      = src.last_name,
     tgt.salary         = src.salary,
     tgt.department_id  = src.department_id
-  WHERE tgt.salary != src.salary   -- optional filter: only update if something changed
+  WHERE tgt.salary != src.salary   -- 変更があった場合のみ更新するオプションフィルタ
 WHEN NOT MATCHED THEN
   INSERT (employee_id, first_name, last_name, salary, department_id, hire_date)
-  VALUES (src.employee_id, src.first_name, src.last_name,
+  VALUES (src.employee_id, src.first_name, src.last_name, 
           src.salary, src.department_id, src.hire_date);
 ```
 
-### MERGE with DELETE
+### DELETE を伴う MERGE
 
 ```sql
--- Delete matched rows if they are marked as inactive in the source
+-- ソース側で非アクティブとマークされている一致行を削除
 MERGE INTO employees tgt
 USING employees_staging src
 ON (tgt.employee_id = src.employee_id)
 WHEN MATCHED THEN
   UPDATE SET tgt.salary = src.salary
-  DELETE WHERE src.status = 'TERMINATED'  -- DELETE applies to rows just updated
+  DELETE WHERE src.status = 'TERMINATED'  -- DELETE は更新されたばかりの行に適用される
 WHEN NOT MATCHED THEN
   INSERT (employee_id, last_name, salary, hire_date)
   VALUES (src.employee_id, src.last_name, src.salary, src.hire_date);
 ```
 
-### Conditional MERGE (INSERT-only if not exists)
+### 条件付き MERGE (存在しない場合のみ INSERT)
 
 ```sql
--- Insert only if the row doesn't exist — skip updates entirely
+-- 行が存在しない場合のみ挿入し、更新は一切行わない
 MERGE INTO order_lookup tgt
 USING (SELECT 101 AS order_id, 'PENDING' AS status FROM dual) src
 ON (tgt.order_id = src.order_id)
@@ -440,23 +440,23 @@ WHEN NOT MATCHED THEN
   VALUES (src.order_id, src.status, SYSDATE);
 ```
 
-### MERGE Best Practices
+### MERGE ベストプラクティス
 
-- Always include a unique/primary key in the `ON` clause to avoid non-deterministic results.
-- Add a `WHERE` clause in `WHEN MATCHED THEN UPDATE` to skip rows where nothing changed — this avoids unnecessary redo generation.
-- Be aware that `MERGE` can trigger both `INSERT` and `UPDATE` triggers on the target table.
-- If the source contains duplicate `ON` condition matches, Oracle raises `ORA-30926: unable to get a stable set of rows in the source tables`. Deduplicate the source before MERGE.
+- 結果が非決定論的になるのを避けるため、`ON` 句には常に一意キーまたは主キーを含める。
+- `WHEN MATCHED THEN UPDATE` に `WHERE` 句を追加して、変更のない行の更新をスキップする。これにより無駄な Redo 生成を回避できる。
+- `MERGE` は、ターゲット・テーブルに対して `INSERT` と `UPDATE` の両方のトリガーを起動する可能性があることに注意する。
+- ソース側に重複した `ON` 条件の一致がある場合、Oracle は `ORA-30926: ソース表の安定した行セットを取得できません` を発生させる。MERGE 前にソースの重複を除去しておくこと。
 
 ---
 
-## MODEL Clause
+## MODEL 句
 
-The `MODEL` clause enables spreadsheet-like calculations over a relational result set, allowing cells to be referenced and computed based on other cells using array-style notation. It is powerful for financial modeling, budget allocations, and sequential calculations that are difficult in standard SQL.
+`MODEL` 句は、リレーショナルな結果セットに対して表計算ソフトのような計算を可能にする。配列形式の記法を使用して、他のセルの値に基づいてセルを参照したり計算したりできる。財務モデリング、予算配分、および標準的な SQL では困難な逐次計算に強力な威力を発揮する。
 
-### Basic MODEL Syntax
+### 基本的な MODEL 構文
 
 ```sql
--- Project future sales based on historical growth rate
+-- 過去の成長率に基づいて将来の売上を予測
 SELECT year, region, sales_amount
 FROM (
   SELECT 2021 AS year, 'EAST' AS region, 150000 AS sales_amount FROM dual UNION ALL
@@ -467,95 +467,94 @@ FROM (
   SELECT 2023, 'WEST', 242000 FROM dual
 )
 MODEL
-  PARTITION BY (region)               -- one model grid per region
-  DIMENSION BY (year)                 -- row key within the grid
-  MEASURES     (sales_amount)         -- values to compute or reference
+  PARTITION BY (region)               -- 地域ごとに計算グリッドを分ける
+  DIMENSION BY (year)                 -- グリッド内の行キー
+  MEASURES     (sales_amount)         -- 計算または参照する値
   RULES (
-    -- Forecast years 2024 and 2025 based on 10% growth
+    -- 10% の成長率に基づき、2024年と2025年を予測
     sales_amount[2024] = sales_amount[2023] * 1.10,
-    sales_amount[2025] = sales_amount[2024] * 1.10,
-    -- Or reference across partitions: can't cross PARTITION BY in standard MODEL
-    -- Use REFERENCE MODEL for that
+    sales_amount[2025] = sales_amount[2024] * 1.10
+    -- 標準の MODEL では PARTITION BY を越えた参照はできない
+    -- その場合は REFERENCE MODEL を使用する
   )
 ORDER BY region, year;
 ```
 
-### MODEL with Iteration (ITERATE)
+### 反復を伴う MODEL (ITERATE)
 
 ```sql
--- Compound interest calculation: iterate until convergence or N times
+-- 複利計算: 収束するまで、または N 回反復
 SELECT period, balance
 FROM (SELECT 0 AS period, 10000 AS balance FROM dual)
 MODEL
   DIMENSION BY (period)
   MEASURES (balance)
-  RULES ITERATE (10) (   -- run 10 iterations
+  RULES ITERATE (10) (   -- 10 回反復実行
     balance[ITERATION_NUMBER + 1] = ROUND(balance[ITERATION_NUMBER] * 1.05, 2)
   )
 ORDER BY period;
 ```
 
-### MODEL Reference Rules
+### MODEL 参照ルール
 
-| Notation | Meaning |
+| 記法 | 意味 |
 |---|---|
-| `col[2024]` | Specific cell where dimension = 2024 |
-| `col[CV()]` | Cell in the current row (CV = current value) |
-| `col[CV()-1]` | Cell in the previous row |
-| `col[ANY]` | Wildcard — matches all cells |
-| `col[year BETWEEN 2020 AND 2025]` | Range of cells |
+| `col[2024]` | 次元 = 2024 の特定のセル |
+| `col[CV()]` | 現在行のセル (CV = Current Value) |
+| `col[CV()-1]` | 前の行のセル |
+| `col[ANY]` | すべてのセルにマッチするワイルドカード |
+| `col[year BETWEEN 2020 AND 2025]` | セルの範囲指定 |
 
 ```sql
--- Cumulative sum using MODEL (year-over-year running total)
+-- MODEL を使用した累計計算 (年ごとの累計売上)
 SELECT year, sales, cumulative_sales
 FROM   annual_sales
 MODEL
   DIMENSION BY (year)
   MEASURES (sales, 0 AS cumulative_sales)
   RULES (
-    cumulative_sales[year > 2019] ORDER BY year =
+    cumulative_sales[year > 2019] ORDER BY year = 
       cumulative_sales[CV()-1] + sales[CV()]
   )
 ORDER BY year;
 ```
 
-**When to use MODEL vs. analytic functions:** Analytic functions are almost always faster and clearer for standard running totals, rankings, and moving averages. Use `MODEL` when you need true cell-referencing semantics, cross-row assignments, or iterative calculations that cannot be expressed as a window function.
+**MODEL と分析関数の使い分け:** 標準的な累計、ランキング、移動平均には、分析関数の方がほぼ常に高速で明快である。真のセル参照セマンティクス、行をまたぐ代入、またはウィンドウ関数では表現できない反復計算が必要な場合にのみ、`MODEL` を使用する。
 
 ---
 
-## Best Practices
+## ベストプラクティス
 
-- **Use analytic functions instead of self-joins.** `LAG`/`LEAD` and `FIRST_VALUE`/`LAST_VALUE` replace expensive self-joins for most row-comparison needs.
-- **Use CTEs for readability, not necessarily performance.** Oracle's optimizer can inline CTEs. Use `/*+ MATERIALIZE */` or `/*+ INLINE */` to control behavior explicitly when it matters.
-- **Prefer `CONNECT BY` for simple hierarchies, recursive CTEs for portability.** `CONNECT BY` is more concise for Oracle-only code; recursive CTEs are SQL standard.
-- **Always handle cycles in hierarchical data.** Use `CONNECT BY NOCYCLE` or the `CYCLE` clause in recursive CTEs.
-- **MERGE is not always faster than separate INSERT/UPDATE.** For very high-volume loads, a direct-path INSERT followed by a targeted UPDATE is sometimes faster. Measure both.
-- **PIVOT column lists must be known at parse time.** Dynamic column lists require dynamic SQL.
-- **Use UNPIVOT instead of UNION ALL chains.** `UNPIVOT` is more readable and often faster than multiple `UNION ALL` branches for normalization.
+- **自己結合の代わりに分析関数を使用する。** 行比較が必要なほとんどのケースで、`LAG`/`LEAD` や `FIRST_VALUE`/`LAST_VALUE` を使うことで、コストの高い自己結合を回避できる。
+- **CTE は可読性のために使用するが、必ずしもパフォーマンスが向上するとは限らない。** オプティマイザは CTE をインライン展開することができる。挙動を明示的に制御するには `/*+ MATERIALIZE */` または `/*+ INLINE */` を検討する。
+- **シンプルな階層には CONNECT BY、ポータビリティを重視するなら再帰 CTE。** Oracle のみの環境では `CONNECT BY` の方が簡潔。再帰 CTE は SQL 標準準拠である。
+- **階層データでは必ず循環を処理する。** `CONNECT BY NOCYCLE` または再帰 CTE の `CYCLE` 句を必ず使用する。
+- **MERGE が常に個別の INSERT/UPDATE よりも速いわけではない。** 超大量のデータロードでは、ダイレクト・パス INSERT の後に特定の行のみ UPDATE する方が速い場合がある。両方を測定すること。
+- **PIVOT の列リストは解析時に既知である必要がある。** 動的な列リストが必要な場合は、動的SQLを使用する。
+- **UNION ALL の連鎖の代わりに UNPIVOT。** 正規化において、複数の `UNION ALL` ブランチを並べるよりも `UNPIVOT` の方が可読性が高く、多くの場合高速である。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Problem | Fix |
+| 間違い | 問題点 | 解決策 |
 |---|---|---|
-| Using `LAST_VALUE` without the full frame clause | Returns wrong value due to default frame ending at current row | Always add `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING` |
-| Duplicate `ON` key rows in MERGE source | `ORA-30926: unable to get a stable set of rows` | Deduplicate source with `SELECT DISTINCT` or `ROWID` partitioned row filtering |
-| Forgetting `SIBLINGS` in `CONNECT BY ORDER BY` | `ORDER BY` without `SIBLINGS` destroys the hierarchy ordering | Use `ORDER SIBLINGS BY` to sort within each level |
-| Using `LEVEL` in `WHERE` instead of `START WITH` | Filters on `LEVEL` still traverse the whole tree | Put root conditions in `START WITH` |
-| Over-using MODEL clause | Complex, slow, hard to maintain | Use analytic functions or PL/SQL for most problems; MODEL for genuine cell-reference needs |
-| CTEs with window functions on large intermediate sets | Materializing a large CTE can be expensive | Analyze the plan; consider pushing predicates or using `INLINE` hint |
+| フレーム句を指定せずに `LAST_VALUE` を使用 | デフォルトのフレームが現在行で終わるため、誤った値が返る | 必ず `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING` を追加する |
+| MERGE ソースに重複した `ON` キーの行が存在する | `ORA-30926: ソース表の安定した行セットを取得できません` | `SELECT DISTINCT` やパーティション化された行フィルタリング等でソースの重複を排除する |
+| `CONNECT BY ORDER BY` で `SIBLINGS` を忘れる | `SIBLINGS` なしの `ORDER BY` は階層構造を壊してしまう | 各階層内でソートするには `ORDER SIBLINGS BY` を使用する |
+| `START WITH` ではなく `WHERE` 句で `LEVEL` を絞り込む | `WHERE` 句で絞り込んでも、全ツリーを走査してしまう | ルートの条件は `START WITH` に記述する |
+| MODEL 句の過剰な使用 | 複雑になり、遅く、保守が困難になる | ほとんどの問題には分析関数や PL/SQL を使用し、真にセル参照が必要な場合にのみ MODEL を使用する |
+| 大規模な中間セットに対する分析関数を伴う CTE | 大規模な CTE のマテリアライズはコストが高くなる可能性がある | 実行計画を確認し、条件のプッシュダウンや `INLINE` ヒントの使用を検討する |
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ガイドの基本的な指針は、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- ハイブリッド環境では、デフォルトや非推奨がリリース更新によって異なる場合があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c SQL Language Reference (SQLRF)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/)
 - [Oracle Database 19c SQL Tuning Guide (TGSQL)](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgsql/)

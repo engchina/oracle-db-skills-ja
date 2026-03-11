@@ -1,383 +1,163 @@
-# Oracle Undo Management
+# Oracle undo管理
 
-## Overview
+## 概要
 
-Undo (also called rollback) is Oracle's mechanism for storing the "before image" of data that has been modified by an uncommitted transaction. Undo serves three critical purposes:
+undoデータは、トランザクションによって変更される前のデータのコピーである。Oracleは、トランザクションのロールバック、読取り一貫性の提供（問合せ開始時のデータの表示）、およびFlashback機能（過去のデータの参照）のためにundoを使用する。
 
-1. **Transaction rollback** — if a transaction is rolled back, Oracle uses undo to restore the rows to their previous state.
-2. **Read consistency** — queries see a snapshot of data as it existed at the start of the query (or transaction), regardless of concurrent modifications. Oracle reconstructs this snapshot from undo.
-3. **Flashback features** — Flashback Query, Flashback Table, and Flashback Database all rely on undo data.
-
-Oracle uses **Automatic Undo Management (AUM)**, which manages a dedicated undo tablespace automatically. Manual rollback segment management is deprecated and should not be used in modern Oracle databases.
+以前のバージョンのOracleでは「ロールバック・セグメント」を手動で管理していたが、現在のすべてのバージョンでは**自動undo管理 (AUM)**を使用する。AUMでは、Oracleが専用の**undo表領域**内のundoセグメントを自動的に作成、拡張、および調整する。
 
 ---
 
-## Automatic Undo Management
+## undoの主な目的
 
-### Key Parameters
+1. **トランザクションのロールバック:** ユーザーが `ROLLBACK` 命令を発行した際に、変更を取り消して元の状態に戻す。
+2. **読取り一貫性 (Read Consistency):** あるセッションがデータを更新中でも、別のセッションがそのデータの「クリーン」な（変更前の）コピーを読み取れるようにする。
+3. **トランザクションのリカバリ:** インスタンス・クラッシュ後、コミットされていないトランザクションをロールバックするために使用する。
+4. **Flashback機能:** `FLASHBACK QUERY` などの機能を使用して、過去のある時点のデータを表示する。
 
-**`UNDO_MANAGEMENT`**
-Must be set to `AUTO` for Automatic Undo Management. This is the default since Oracle 10g. When `AUTO`, Oracle manages a dedicated undo tablespace. Setting `MANUAL` enables old-style manual rollback segments (avoid in all production systems).
+---
+
+## 自動undo管理 (AUM) の構成
+
+自動undo管理を制御する主なパラメータは以下の通り。
+
+### 初期化パラメータ
 
 ```sql
--- Check current setting
-SHOW PARAMETER undo_management;
--- Should return: AUTO
+-- 現在のundo設定を確認
+SHOW PARAMETER undo;
+
+-- undo管理モード (必須: AUTO)
+ALTER SYSTEM SET undo_management = AUTO SCOPE=SPFILE;
+
+-- 使用するundo表領域の指定
+ALTER SYSTEM SET undo_tablespace = UNDOTBS1 SCOPE=BOTH;
+
+-- undoデータが上書きされずに保持される秒数 (目標値)
+ALTER SYSTEM SET undo_retention = 900 SCOPE=BOTH; -- 15分
 ```
 
-**`UNDO_TABLESPACE`**
-Specifies which undo tablespace is currently active. Only one undo tablespace is active per instance (per thread in RAC).
+### undo表領域の管理
+
+undo表領域は他の表領域と同様に管理されるが、undoデータのみを格納する。
 
 ```sql
-SHOW PARAMETER undo_tablespace;
+-- 新しいundo表領域の作成 (推奨: データファイルは自動拡張に設定)
+CREATE UNDO TABLESPACE undotbs_new
+  DATAFILE '/oradata/undo/undotbs_new01.dbf' SIZE 2G
+  AUTOEXTEND ON NEXT 512M MAXSIZE 32G;
 
--- Switch the active undo tablespace
-ALTER SYSTEM SET UNDO_TABLESPACE = undotbs2 SCOPE=BOTH;
+-- アクティブなundo表領域の切り替え
+ALTER SYSTEM SET undo_tablespace = undotbs_new;
+
+-- 古いundo表領域の削除 (すべてのトランザクションが終了した後に実行可能)
+DROP TABLESPACE undotbs_old INCLUDING CONTENTS AND DATAFILES;
 ```
 
-**`UNDO_RETENTION`**
-Specifies how long (in seconds) Oracle should *attempt* to retain undo information after a transaction commits. This is a target, not a guarantee. Oracle will overwrite old undo if space is needed.
+---
+
+## undo保持 (Undo Retention)
+
+`UNDO_RETENTION` パラメータは、Oracleがコミット済みエントリを再利用する前に、どれくらいの期間（秒単位）保持しようとするかを指定する。
+
+- **保証なし (デフォルト):** 領域が不足すると、Oracleは `UNDO_RETENTION` の期間を待たずにコミット済みデータを上書きすることがある。
+- **保証あり (RETENTION GUARANTEE):** 領域不足になっても、指定された期間は絶対に上書きしない。領域がなくなると、新しいトランザクションはエラー（ORA-30036）で失敗する。
 
 ```sql
-SHOW PARAMETER undo_retention;
--- Default: 900 seconds (15 minutes)
-
--- Increase to 1 hour
-ALTER SYSTEM SET UNDO_RETENTION = 3600 SCOPE=BOTH;
-```
-
-**`RETENTION GUARANTEE`**
-When enabled on the undo tablespace, Oracle will never overwrite unexpired undo even if space is needed. This guarantees read consistency for queries up to `UNDO_RETENTION` seconds old, but active transactions may fail with ORA-30036 ("unable to extend undo segment") if the tablespace is full.
-
-```sql
--- Enable retention guarantee
+-- 保持の「保証」を有効化
 ALTER TABLESPACE undotbs1 RETENTION GUARANTEE;
 
--- Disable retention guarantee
+-- 保持の「保証」を無効化 (デフォルト)
 ALTER TABLESPACE undotbs1 RETENTION NOGUARANTEE;
-
--- Check current setting
-SELECT tablespace_name, retention FROM dba_tablespaces
-WHERE contents = 'UNDO';
 ```
 
 ---
 
-## Undo Tablespace Sizing
+## 監視とトラブルシューティング
 
-### How Undo Space is Consumed
-
-Undo space consumption depends on:
-- **Number of concurrent transactions** — each active transaction holds undo space
-- **Transaction rate (rows changed per second)** — higher change rate generates more undo
-- **Transaction duration** — long-running transactions hold undo for their entire duration
-- **Undo retention target** — committed undo is kept for `UNDO_RETENTION` seconds if space permits
-- **Undo block size** — inherited from the database block size
-
-### Sizing Formula
-
-A practical sizing formula for undo tablespace:
-
-```
-Required undo (bytes) = UndoRetention (seconds)
-                      × DB_BLOCK_SIZE
-                      × Active undo block generation rate (blocks/sec)
-                      + overhead for active transactions
-```
-
-Use the Undo Advisor (see below) to get Oracle's recommendation, but as a rough manual estimate:
+### undo使用状況の確認
 
 ```sql
--- Check average undo block generation rate
-SELECT undoblks / ((end_time - begin_time) * 86400) AS undo_blocks_per_sec
-FROM v$undostat
-ORDER BY begin_time DESC
-FETCH FIRST 1 ROW ONLY;
-
--- Check max undo blocks generated in any 10-minute window
-SELECT MAX(undoblks) max_undo_blocks,
-       MAX(maxquerylen) max_query_sec,
-       AVG(undoblks) avg_undo_blocks
-FROM v$undostat;
-```
-
-### Creating and Sizing the Undo Tablespace
-
-```sql
--- Create a new undo tablespace with autoextend
-CREATE UNDO TABLESPACE undotbs2
-  DATAFILE '/oradata/undotbs2_01.dbf' SIZE 2G
-  AUTOEXTEND ON NEXT 512M MAXSIZE 20G;
-
--- Add a datafile to an existing undo tablespace
-ALTER TABLESPACE undotbs1
-  ADD DATAFILE '/oradata/undotbs1_02.dbf' SIZE 2G AUTOEXTEND ON;
-
--- Switch to the new undo tablespace
-ALTER SYSTEM SET UNDO_TABLESPACE = undotbs2 SCOPE=BOTH;
-
--- Drop the old undo tablespace once all transactions have migrated
--- (wait until no transactions reference it)
-DROP TABLESPACE undotbs1 INCLUDING CONTENTS AND DATAFILES;
-```
-
----
-
-## Monitoring Undo Usage
-
-### V$UNDOSTAT
-
-`V$UNDOSTAT` provides 10-minute snapshots of undo activity. It is the primary source for undo sizing decisions.
-
-```sql
--- Key undo statistics over recent history
-SELECT begin_time,
-       undoblks,           -- undo blocks consumed
-       txncount,           -- number of transactions
-       maxquerylen,        -- longest running query (seconds)
-       maxconcurrency,     -- peak concurrent transactions
-       ssolderrcnt,        -- ORA-01555 errors in this window
-       nospaceerrcnt,      -- ORA-30036 errors (undo space exhausted)
-       activeblks,         -- undo blocks currently active
-       unexpiredblks,      -- unexpired (retained) undo blocks
-       expiredblks         -- expired (reclaimable) undo blocks
-FROM v$undostat
-ORDER BY begin_time DESC
-FETCH FIRST 24 ROWS ONLY;
-```
-
-### V$TRANSACTION
-
-Shows undo usage for currently active transactions:
-
-```sql
--- Active transactions and their undo usage
-SELECT t.xidusn, t.xidslot, t.xidsqn,
-       t.ubafil, t.ubablk,
-       t.used_ublk * (SELECT block_size FROM dba_tablespaces WHERE contents='UNDO' AND rownum=1) / 1048576 AS undo_mb,
-       t.start_time,
-       s.username, s.sid, s.serial#,
-       s.sql_id
-FROM v$transaction t
-JOIN v$session s ON t.ses_addr = s.saddr
-ORDER BY t.used_ublk DESC;
-```
-
-### DBA_UNDO_EXTENTS
-
-Shows the current state of undo extents:
-
-```sql
--- Summary of undo extent status
-SELECT status, COUNT(*) cnt, SUM(blocks) total_blocks,
-       SUM(bytes)/1048576 total_mb
-FROM dba_undo_extents
-GROUP BY status;
-
--- Active = currently in use by a transaction
--- UNEXPIRED = committed but within UNDO_RETENTION window
--- EXPIRED = available for reuse
-```
-
-### Checking for ORA-01555 Errors
-
-```sql
--- Count of ORA-01555 errors from UNDOSTAT history
-SELECT SUM(ssolderrcnt) total_01555_errors,
-       MIN(begin_time) from_time,
-       MAX(end_time) to_time
-FROM v$undostat;
-
--- Alert log also records ORA-01555 errors; check there too
-```
-
----
-
-## ORA-01555: Snapshot Too Old
-
-### Cause
-
-ORA-01555 ("snapshot too old: rollback segment number N with name "..." too small") occurs when a query cannot reconstruct the read-consistent snapshot it needs because the undo data required has been overwritten.
-
-This happens when:
-- A long-running query started at SCN X, and while it was running, committed changes to blocks it needs to read were overwritten in the undo tablespace
-- The query must go back and read the "before image" of those blocks, but the undo data is gone
-
-### Typical Scenarios
-
-1. **Long-running batch queries** reading a table that is heavily modified during the query
-2. **Slow or delayed fetch** with a cursor — when a cursor is opened but rows are fetched slowly over a long period (common in JDBC applications that fetch rows one at a time with large result sets)
-3. **Undersized undo tablespace** with `RETENTION GUARANTEE` disabled — expired undo is overwritten quickly
-4. **Very low `UNDO_RETENTION`** — undo is discarded too quickly after commit
-
-### Fixes and Mitigations
-
-**1. Increase UNDO_RETENTION:**
-```sql
--- Increase to 2 hours
-ALTER SYSTEM SET UNDO_RETENTION = 7200 SCOPE=BOTH;
-```
-
-**2. Increase undo tablespace size:**
-More space means Oracle can retain undo longer before overwriting it.
-```sql
-ALTER TABLESPACE undotbs1
-  ADD DATAFILE '/oradata/undotbs1_02.dbf' SIZE 4G AUTOEXTEND ON;
-```
-
-**3. Enable RETENTION GUARANTEE:**
-Prevents undo overwrite. Use only if you can tolerate ORA-30036 instead.
-```sql
-ALTER TABLESPACE undotbs1 RETENTION GUARANTEE;
-```
-
-**4. Reduce fetch delays in applications:**
-For JDBC applications, use `setFetchSize()` to fetch rows in larger batches. Close cursors promptly after use.
-
-**5. Schedule conflicting operations separately:**
-If a long-running report conflicts with heavy DML, schedule them at different times.
-
-**6. Use `AS OF` queries for auditing instead of keeping cursors open:**
-```sql
--- Flashback Query to read consistent historical data
-SELECT * FROM employees AS OF TIMESTAMP (SYSTIMESTAMP - INTERVAL '2' HOUR)
-WHERE department_id = 10;
-```
-
-**7. Use parallel query for large scans:**
-Parallel query finishes scans faster, reducing the time window where undo must be retained.
-
----
-
-## Undo Advisor
-
-Oracle's Undo Advisor (part of the Automatic Database Diagnostic Monitor, ADDM) analyzes `V$UNDOSTAT` to recommend optimal `UNDO_RETENTION` and tablespace size.
-
-### Using DBMS_UNDO_ADV
-
-```sql
--- Calculate the minimum undo tablespace size required for a given retention
--- Parameters: retention_seconds, start_time, end_time
-SELECT DBMS_UNDO_ADV.MIN_RETENTION(
-         p_lotime  => SYSDATE - 7,    -- analyze last 7 days
-         p_hitime  => SYSDATE
-       ) AS recommended_retention_seconds
-FROM DUAL;
-
--- Calculate minimum tablespace size for a target retention
-SELECT DBMS_UNDO_ADV.MIN_UNDO_SIZE(
-         p_undo_retention => 3600,    -- 1 hour target
-         p_lotime         => SYSDATE - 7,
-         p_hitime         => SYSDATE
-       ) / 1048576 AS required_mb
-FROM DUAL;
-```
-
-### Using OEM / Enterprise Manager
-
-In OEM, navigate to: **Database -> Advisor Central -> Undo Advisor**
-
-The Undo Advisor provides a graphical analysis showing:
-- Current undo usage patterns
-- Recommended `UNDO_RETENTION` based on workload
-- Recommended tablespace size for a user-specified analysis period
-- ORA-01555 risk assessment
-
----
-
-## Common Undo-Related Queries
-
-```sql
--- Overall undo tablespace usage
-SELECT a.tablespace_name,
-       a.total_mb,
-       b.free_mb,
-       a.total_mb - b.free_mb used_mb,
-       ROUND((a.total_mb - b.free_mb) / a.total_mb * 100, 1) pct_used
-FROM (
-  SELECT tablespace_name, SUM(bytes)/1048576 total_mb
-  FROM dba_data_files
-  WHERE tablespace_name IN (
-    SELECT tablespace_name FROM dba_tablespaces WHERE contents = 'UNDO')
-  GROUP BY tablespace_name
-) a
-JOIN (
-  SELECT tablespace_name, SUM(bytes)/1048576 free_mb
-  FROM dba_free_space
-  GROUP BY tablespace_name
-) b ON a.tablespace_name = b.tablespace_name;
-
--- Sessions with oldest active undo (likely candidates for ORA-01555 causing queries)
-SELECT s.sid, s.serial#, s.username, s.status,
-       s.sql_id, t.start_time,
-       ROUND((SYSDATE - TO_DATE(t.start_time,'MM/DD/YY HH24:MI:SS')) * 86400) sec_active
-FROM v$session s
-JOIN v$transaction t ON s.taddr = t.addr
-ORDER BY sec_active DESC;
-
--- Check if undo autoextend is enabled
-SELECT file_name, bytes/1048576 size_mb,
-       autoextensible, maxbytes/1048576 max_mb
+-- undo表領域の使用率
+SELECT tablespace_name,
+       SUM(bytes)/1024/1024 size_mb,
+       SUM(maxbytes)/1024/1024 max_size_mb
 FROM dba_data_files
-WHERE tablespace_name IN (
-  SELECT tablespace_name FROM dba_tablespaces WHERE contents = 'UNDO');
+WHERE tablespace_name LIKE 'UNDO%'
+GROUP BY tablespace_name;
+
+-- アクティブなトランザクションによるundo使用量
+SELECT s.username, t.used_ublk, t.used_urec, t.start_time
+FROM v$session s, v$transaction t
+WHERE s.saddr = t.ses_addr;
 ```
 
+### ORA-01555: snapshot too old
+
+このエラーは、問合せに必要な古いデータ（undo）が、問合せが終わる前に他のトランザクションによって上書きされた場合に発生する。
+
+**原因:**
+- undo表領域が小さすぎる。
+- `UNDO_RETENTION` の設定値が短すぎる。
+- 非常に長い時間がかかる問合せが大量に実行されている間に、別のセッションが大量の更新・コミットを繰り返している。
+
+**対策:**
+- undo表領域のサイズを大きくする。
+- `UNDO_RETENTION` を問合せの実行時間より長く設定する。
+- `RETENTION GUARANTEE` の使用を検討する。
+
+### ORA-30036: unable to extend segment by %s in undo tablespace
+
+これは、undo表領域がいっぱいになり、新しいトランザクションのためのスペースを確保できなかった場合に発生する。
+
+**原因:**
+- undo表領域の自動拡張がオフになっている、または最大サイズ（MAXSIZE）に達した。
+- 保持期間（GUARANTEE）が長すぎて、古いデータが解放されない。
+- 巨大なトランザクションが実行されている。
+
 ---
 
-## Best Practices
+## undoアドバイザ (Undo Advisor)
 
-- **Always use Automatic Undo Management** (`UNDO_MANAGEMENT = AUTO`). Manual rollback segments are deprecated and unreliable.
-
-- **Enable AUTOEXTEND on undo datafiles** but cap `MAXSIZE` to prevent runaway transactions from consuming all disk space.
-
-- **Set `UNDO_RETENTION` based on your longest expected query runtime**, not a fixed number. Run `V$UNDOSTAT` analysis during peak workload to determine the right value.
-
-- **Use the Undo Advisor** before resizing or tuning undo. It provides data-driven recommendations.
-
-- **Monitor `SSOLDERRCNT` in `V$UNDOSTAT`** as part of daily health checks. A non-zero value means users are experiencing ORA-01555 errors.
-
-- **Do not enable RETENTION GUARANTEE** unless the undo tablespace is large enough to absorb peak workloads. It shifts the failure mode from ORA-01555 to ORA-30036.
-
-- **Size for peak, not average.** Undo consumption during month-end batch processing can be 10-100x the normal rate.
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Setting UNDO_RETENTION to a small value and wondering why ORA-01555 occurs**
-The default of 900 seconds (15 minutes) is insufficient for any environment with batch reports or ETL queries running longer than 15 minutes. Size it to cover your longest expected query.
-
-**Relying on AUTOEXTEND without a MAXSIZE limit**
-A runaway transaction (e.g., an accidental `UPDATE` of millions of rows) will consume all available disk space. Always set `MAXSIZE`.
-
-**Switching undo tablespaces while transactions are active**
-You can switch `UNDO_TABLESPACE` at any time, but the old tablespace cannot be dropped until all active and unexpired undo in it has aged out. Use `DBA_UNDO_EXTENTS` to check.
+Oracleは、過去の負荷に基づいて適切なundo表領域のサイズをアドバイスしてくれる。
 
 ```sql
--- Check if old undo tablespace still has active extents
-SELECT COUNT(*) FROM dba_undo_extents
-WHERE tablespace_name = 'UNDOTBS_OLD'
-  AND status IN ('ACTIVE', 'UNEXPIRED');
+-- V$UNDOSTAT を参照して過去7日間の履歴を確認
+SELECT begin_time, end_time, undoblks, txncount, maxquerylen, unexpiredblks
+FROM v$undostat
+ORDER BY begin_time DESC;
+
+-- 必要な最小サイズを見積もる (例: 保持期間1800秒の場合)
+-- 式: (Max Undo Blocks Per Second * Undo Retention) * DB Block Size
 ```
-
-**Ignoring `NOSPACEERRCNT` in V$UNDOSTAT**
-A non-zero `NOSPACEERRCNT` means transactions are failing with ORA-30036. This often indicates the undo tablespace is too small or RETENTION GUARANTEE is enabled with insufficient space.
-
-**Manually deleting undo extents or segments**
-Never manually drop or alter undo segments in an AUM environment. Oracle manages them automatically. Manual interference causes corruption.
 
 ---
 
+## ベスト・プラクティス
 
-## Oracle Version Notes (19c vs 26ai)
+- **自動拡張 (AUTOEXTEND) を使用する:** 予期せぬ巨大なトランザクションや、LOBデータの更新に対応するため。ただし、ディスク容量を使い果たさないよう `MAXSIZE` を設定すること。
+- **適切なサイズ設定:** 少なくとも、ピーク時の最大問合せ実行時間 (`MAXQUERYLEN`) 以上の `UNDO_RETENTION` を確保できるサイズに設定する。
+- **1つのDBに1つのUNDO表領域:** 基本的な構成では、インスタンスごとに1つのアクティブなundo表領域を割り当てる（RACの場合はインスタンスごとに1つ）。
+- **LOBデータの考慮:** LOB（CLOB/BLOB）のundoは、専用の領域管理（SecureFilesなど）で行われるため、通常の `UNDO_RETENTION` とは異なる動作をすることがある。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+---
 
-## Sources
+## よくある間違い
 
-- [Oracle Database Administrator's Guide 19c — Managing Undo](https://docs.oracle.com/en/database/oracle/oracle-database/19/admin/managing-undo.html)
-- [Oracle Database 19c Reference — V$UNDOSTAT](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-UNDOSTAT.html)
-- [Oracle Database 19c Reference — DBA_UNDO_EXTENTS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/DBA_UNDO_EXTENTS.html)
+- **巨大なトランザクションを1つで実行する:** 何百万行もの更新を一気にコミットすると、undo表領域を急激に消費する。必要に応じてバッチ（小分け）処理を検討する。
+- **古い「ロールバック・セグメント」のスクリプトを使用する:** 現代のOracleでは手動管理（Manual Undo Management）は非推奨（将来的に廃止）である。必ず `undo_management=AUTO` を使用する。
+- **監視を怠る:** ORA-01555が頻発してから対処するのではなく、`V$UNDOSTAT` を定期的にチェックして、`MAXQUERYLEN` が `UNDO_RETENTION` に近づいていないか確認する。
+
+---
+
+## Oracleバージョンに関する注意 (19c vs 26ai)
+
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 19cでは「Flashback Data Archive」などの機能がundoを補完するが、23ai以降ではベクター・データ型のundo管理など、AI機能に関連する内部的な拡張が含まれる場合がある。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
+
+## ソース
+
+- [Oracle Database 管理者ガイド 19c — undoの管理](https://docs.oracle.com/en/database/oracle/oracle-database/19/admin/managing-undo.html)
+- [Oracle Database 19c リファレンス — V$UNDOSTAT](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-UNDOSTAT.html)
+- [Oracle Database 23ai — New Features Guide](https://docs.oracle.com/en/database/oracle/oracle-database/23/nfcvw/)

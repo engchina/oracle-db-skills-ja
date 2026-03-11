@@ -1,44 +1,44 @@
-# ORDS Installation and Configuration
+# ORDS のインストールと構成
 
-## Overview
+## 概要
 
-Installing Oracle REST Data Services (ORDS) involves downloading the software, preparing the Oracle Database, running the installation command to create/update the ORDS metadata schema, configuring database connection pools, and optionally setting up HTTPS. This guide covers self-managed ORDS installation — on-premises, OCI Compute, or in containers. For Autonomous Database, ORDS is pre-installed and this guide does not apply.
+Oracle REST Data Services (ORDS) のインストールには、ソフトウェアのダウンロード、Oracle Database の準備、ORDS メタデータ・スキーマを作成または更新するためのインストール・コマンドの実行、データベース接続プールの構成、およびオプションでの HTTPS のセットアップが含まれる。このガイドでは、オンプレミス、OCI Compute、またはコンテナ環境における、セルフマネージド（自己管理型）の ORDS インストールについて説明する。Autonomous Database の場合は ORDS がプリインストールされているため、このガイドの内容は適用されない。
 
 ---
 
-## Prerequisites
+## 前提条件
 
-### Software Requirements
+### ソフトウェア要件
 
-| Component | Minimum Version |
+| コンポーネント | 最小プログラム。 |
 |---|---|
-| Java (JDK/JRE) | 11 (17+ recommended for ORDS 23+) |
-| Oracle Database | 11.2.0.4 (12c+ strongly recommended) |
-| ORDS | 22.x or later (use latest) |
-| OS | Linux x86-64, Windows, macOS (dev only) |
+| Java (JDK/JRE) | 11 (ORDS 23+ では 17 以上を推奨) |
+| Oracle Database | 11.2.0.4 (12c 以上を強く推奨) |
+| ORDS | 22.x 以降 (最新版の使用を推奨) |
+| OS | Linux x86-64, Windows, macOS (開発用のみ) |
 
-Check Java version before proceeding:
+続行する前に Java のバージョンを確認すること。
 
 ```shell
 java -version
-# Expected output example:
+# 出力例:
 # java version "17.0.8" 2023-07-18 LTS
 # Java(TM) SE Runtime Environment (Oracle) ...
 ```
 
-### Database Prerequisites
+### データベースの前提条件
 
-ORDS installation requires a database user with DBA or equivalent privileges to create the ORDS_METADATA schema and ORDS_PUBLIC_USER account. Prepare:
+ORDS のインストールには、ORDS_METADATA スキーマと ORDS_PUBLIC_USER アカウントを作成するために、DBA または同等の権限を持つデータベース・ユーザーが必要である。以下の準備を行うこと。
 
-1. A PDB (Pluggable Database) or a non-CDB to install ORDS into.
-2. The SYS or a DBA-privileged account credentials for the initial install.
-3. Sufficient tablespace: ORDS_METADATA schema requires ~50MB.
+1. ORDS をインストールするための PDB (プラグ可能データベース) または非 CDB。
+2. 初回インストール用の SYS または DBA 権限を持つアカウントの資格証明。
+3. 十分な表領域: ORDS_METADATA スキーマには約 50MB が必要。
 
 ```sql
--- Verify you're connecting to the correct PDB
+-- 正しい PDB に接続していることを確認
 SHOW CON_NAME;
 
--- Check available tablespace
+-- 利用可能な表領域を確認
 SELECT tablespace_name, bytes/1024/1024 AS mb_free
 FROM dba_free_space
 WHERE tablespace_name = 'SYSAUX'
@@ -47,88 +47,88 @@ ORDER BY 1;
 
 ---
 
-## Downloading ORDS
+## ORDS のダウンロード
 
-ORDS is available from:
+ORDS は以下の場所から入手可能である。
 - [Oracle Technology Network (OTN)](https://www.oracle.com/database/sqldeveloper/technologies/db-actions/download/)
-- Oracle Maven Repository (for CI/CD pipelines)
-- Oracle Container Registry (Docker image)
+- Oracle Maven リポジトリ（CI/CD パイプライン用）
+- Oracle Container Registry（Docker イメージ）
 
 ```shell
-# After downloading ords-latest.zip, extract it
+# ords-latest.zip をダウンロード後、解凍する
 unzip ords-latest.zip -d /opt/oracle/ords
 ls /opt/oracle/ords
 # ords.war   ords   docs/   ...
 
-# Add ORDS bin to PATH
+# ORDS の bin ディレクトリを PATH に追加
 export PATH=$PATH:/opt/oracle/ords/bin
 echo 'export PATH=$PATH:/opt/oracle/ords/bin' >> ~/.bashrc
 
-# Verify
+# 確認
 ords --version
 # Oracle REST Data Services 24.x.x ...
 ```
 
 ---
 
-## Configuration Directory Structure
+## 構成ディレクトリの構造
 
-ORDS uses a configuration directory (separate from the software installation) to store all settings. This directory must persist across upgrades.
+ORDS は、すべての設定を保存するために（ソフトウェアのインストール先とは別の）構成ディレクトリを使用する。このディレクトリはアップグレード後も維持する必要がある。
 
 ```shell
-# Create config directory
+# 構成ディレクトリの作成
 mkdir -p /opt/oracle/ords/config
 export ORDS_CONFIG=/opt/oracle/ords/config
 ```
 
-After installation, the config directory looks like:
+インストール後の構成ディレクトリは以下のようになる。
 
 ```
 /opt/oracle/ords/config/
 ├── databases/
 │   └── default/
-│       └── pool.json         # Connection pool settings (managed by CLI — do not hand-edit)
+│       └── pool.json         # 接続プールの設定 (CLI で管理。直接編集しないこと)
 ├── global/
-│   └── settings.json         # Global ORDS settings (managed by CLI)
-└── credentials              # Oracle Wallet directory — passwords stored here, never in JSON
+│   └── settings.json         # グローバルな ORDS 設定 (CLI で管理)
+└── credentials              # Oracle ウォレット・ディレクトリ。パスワードはここに保存される (JSON には保存されない)
 ```
 
-> All configuration files are managed by the `ords config set` CLI. Do not hand-edit JSON files. Passwords are stored in the Oracle Wallet (`credentials/`) and never appear in any config file.
+> すべての設定ファイルは、`ords config set` CLI によって管理される。JSON ファイルを手動で編集しないこと。パスワードは Oracle ウォレット (`credentials/`) に保存され、構成ファイルには一切表示されない。
 
 ---
 
-## The `ords install` Command Walkthrough
+## `ords install` コマンドの手順
 
-### Interactive Installation
+### 対話型インストール
 
-Run the installer interactively for the first install:
+初回インストール時は、対話形式でインストーラーを実行する。
 
 ```shell
 ords --config /opt/oracle/ords/config install
 ```
 
-The interactive installer prompts for:
+対話型インストーラーでは、以下の入力を求められる。
 
-1. **Connection type**: Basic (hostname/port/service) or TNS name or custom JDBC URL
-2. **Database host**: e.g., `mydb.example.com`
-3. **Database port**: e.g., `1521`
-4. **Database service name**: e.g., `mypdb.example.com`
-5. **ORDS administrator user**: typically `SYS AS SYSDBA` for initial install
-6. **SYS password**
-7. **ORDS runtime user** (ORDS_PUBLIC_USER password): set a strong password
-8. **Tablespace for ORDS metadata**: default is SYSAUX
-9. **Features to enable**: Database Actions, REST Enabled SQL, etc.
+1. **接続タイプ**: 基本 (ホスト名/ポート/サービス名)、TNS 名、またはカスタム JDBC URL
+2. **データベース・ホスト**: 例: `mydb.example.com`
+3. **データベース・ポート**: 例: `1521`
+4. **データベース・サービス名**: 例: `mypdb.example.com`
+5. **ORDS 管理ユーザー**: 通常、初回インストール時は `SYS AS SYSDBA`
+6. **SYS パスワード**
+7. **ORDS ランタイム・ユーザー** (ORDS_PUBLIC_USER のパスワード): 強力なパスワードを設定する
+8. **ORDS メタデータ用の表領域**: デフォルトは SYSAUX
+9. **有効にする機能**: Database Actions、REST Enabled SQL など
 
-After install, ORDS creates:
-- `ORDS_METADATA` schema in the database
-- `ORDS_PUBLIC_USER` database account
-- The pool configuration file in the config directory
+インストール後、ORDS は以下を作成する。
+- データベース内の `ORDS_METADATA` スキーマ
+- `ORDS_PUBLIC_USER` データベース・アカウント
+- 構成ディレクトリ内のプール構成ファイル
 
-### Silent/Non-Interactive Installation for Automation
+### 自動化のためのサイレント/非対話型インストール
 
-For CI/CD pipelines, automated provisioning, or Ansible/Terraform workflows, use a silent install with a response file or environment variables.
+CI/CD パイプライン、自動プロビジョニング、または Ansible/Terraform ワークフローの場合、レスポンス・ファイルや環境変数を使用したサイレント・インストールを使用する。
 
-**Method 1: Pipe responses via stdin**
+**方法 1: 標準入力 (stdin) 経由でパスワードを渡す**
 
 ```shell
 ords --config /opt/oracle/ords/config install \
@@ -146,7 +146,7 @@ OrdsPublicUserPwd456!
 EOF
 ```
 
-**Method 2: Use `ords install --interactive false`**
+**方法 2: `ords install --interactive false` を使用する**
 
 ```shell
 ords --config /opt/oracle/ords/config install \
@@ -157,19 +157,19 @@ ords --config /opt/oracle/ords/config install \
   --db-username ORDS_PUBLIC_USER \
   --admin-user SYS \
   --feature-sdw true
-# Passwords prompted separately or via env vars
+# パスワードは別途、または環境変数経由で入力を求められる
 ```
 
-**Method 3: Pre-write pool configuration, then install with `--db-only`**
+**方法 3: 事前にプール構成を作成し、`--db-only` でインストールする**
 
-Write the pool config first, then run the DB install phase only:
+最初にプール構成を書き込み、次にデータベースのインストール・フェーズのみを実行する。
 
 ```shell
 ords --config /opt/oracle/ords/config config set db.hostname mydb.example.com
 ords --config /opt/oracle/ords/config config set db.port 1521
 ords --config /opt/oracle/ords/config config set db.servicename mypdb.example.com
 
-# Set passwords via stdin
+# 標準入力経由でパスワードを設定
 echo "SysPassword123!" | ords --config /opt/oracle/ords/config install \
   --admin-user "SYS AS SYSDBA" \
   --password-stdin
@@ -177,50 +177,50 @@ echo "SysPassword123!" | ords --config /opt/oracle/ords/config install \
 
 ---
 
-## Pool Configuration Reference
+## プール構成リファレンス
 
-All pool settings are managed exclusively via the `ords config set` CLI. **Passwords are stored in an Oracle Wallet** in the `credentials/` directory — they never appear in any configuration file. Do not hand-edit the JSON config files ORDS generates.
+すべてのプール設定は、`ords config set` CLI を介してのみ管理される。**パスワードは `credentials/` ディレクトリ内の Oracle ウォレットに保存される**ため、いかなる構成ファイルにも表示されない。ORDS が生成する JSON 構成ファイルを手動で編集してはならない。
 
 ```shell
-# Set connection parameters
+# 接続パラメータの設定
 ords --config /opt/oracle/ords/config config set db.hostname mydb.example.com
 ords --config /opt/oracle/ords/config config set db.port 1521
 ords --config /opt/oracle/ords/config config set db.servicename mypdb.example.com
 ords --config /opt/oracle/ords/config config set db.username ORDS_PUBLIC_USER
 
-# Set password — stored in Oracle Wallet, never in a config file
+# パスワードの設定 — Oracle ウォレットに保存され、設定ファイルには非表示
 ords --config /opt/oracle/ords/config config secret set db.password \
   --password-stdin <<< "MySecurePassword123!"
 
-# UCP pool sizing
+# UCP プール・サイズの設定
 ords --config /opt/oracle/ords/config config set jdbc.InitialLimit 5
 ords --config /opt/oracle/ords/config config set jdbc.MinLimit 5
 ords --config /opt/oracle/ords/config config set jdbc.MaxLimit 30
 
-# Feature flags
+# 機能フラグの設定
 ords --config /opt/oracle/ords/config config set feature.sdw true
 ```
 
-Key parameters:
+主要なパラメータ:
 
-| Parameter | Description | Recommended |
+| パラメータ | 説明 | 推奨値 |
 |---|---|---|
-| `jdbc.InitialLimit` | Connections created at startup | 5-10 |
-| `jdbc.MinLimit` | Minimum pool size maintained | 5-10 |
-| `jdbc.MaxLimit` | Maximum connections (hard cap) | 20-50 (tune to DB max) |
-| `jdbc.statementTimeout` | Seconds before idle statement closed | 900 |
-| `jdbc.InactivityTimeout` | Seconds before idle connection closed | 1800 |
+| `jdbc.InitialLimit` | 起動時に作成される接続数 | 5-10 |
+| `jdbc.MinLimit` | 維持される最小プール・サイズ | 5-10 |
+| `jdbc.MaxLimit` | 最大接続数 (ハード制限) | 20-50 (DB の上限に合わせる) |
+| `jdbc.statementTimeout` | アイドルなステートメントが閉じられるまでの秒数 | 900 |
+| `jdbc.InactivityTimeout` | アイドルな接続が閉じられるまでの秒数 | 1800 |
 | `db.connectionType` | basic / tns / customurl | basic |
 
 ---
 
-## Oracle Wallet Setup for mTLS (ATP/ADW)
+## mTLS 用の Oracle ウォレット・セットアップ (ATP/ADW)
 
-When connecting ORDS to Autonomous Database (ATP or ADW), mTLS requires a wallet. This applies when running self-managed ORDS against ADB.
+ORDS を Autonomous Database (ATP または ADW) に接続する場合、mTLS にはウォレットが必要である。これはセルフパネージドな ORDS を ADB に対して実行する場合に適用される。
 
-### Step 1: Download the Wallet
+### ステップ 1: ウォレットのダウンロード
 
-Download `Wallet_<DBName>.zip` from OCI Console → Autonomous Database → DB Connection.
+OCI コンソール → Autonomous Database → DB 接続 から `Wallet_<DBName>.zip` をダウンロードする。
 
 ```shell
 mkdir -p /opt/oracle/ords/wallet
@@ -230,22 +230,22 @@ ls /opt/oracle/ords/wallet
 # sqlnet.ora   tnsnames.ora  truststore.jks
 ```
 
-### Step 2: Configure ORDS Pool for mTLS
+### ステップ 2: mTLS 用の ORDS プール構成
 
 ```shell
-# Set connection type to TNS
+# 接続タイプを TNS に設定
 ords --config /opt/oracle/ords/config config set db.connectionType tns
 
-# Point to wallet directory (contains tnsnames.ora and sqlnet.ora)
+# ウォレット・ディレクトリ (tnsnames.ora と sqlnet.ora を含む) を指定
 ords --config /opt/oracle/ords/config config set db.tnsAliasName myatp_high
 ords --config /opt/oracle/ords/config config set \
   db.wallet.zip.path /opt/oracle/ords/wallet/Wallet_MYATP.zip
 
-# Or set TNS_ADMIN environment variable
+# または TNS_ADMIN 環境変数を設定
 export TNS_ADMIN=/opt/oracle/ords/wallet
 ```
 
-Configure the pool for wallet-based connection via CLI:
+CLI を使用してウォレットベースの接続プールを構成する:
 
 ```shell
 ords --config /opt/oracle/ords/config config set db.connectionType tns
@@ -259,12 +259,12 @@ ords --config /opt/oracle/ords/config config secret set db.password \
 
 ---
 
-## Configuring HTTPS/TLS
+## HTTPS/TLS の構成
 
-### Option A: ORDS Standalone with Self-Signed Certificate (Dev)
+### オプション A: 自己署名証明書を使用した ORDS スタンドアロン (開発用)
 
 ```shell
-# Generate self-signed cert
+# 自己署名証明書の生成
 keytool -genkeypair \
   -alias ords-ssl \
   -keyalg RSA \
@@ -276,7 +276,7 @@ keytool -genkeypair \
 ```
 
 ```shell
-# Configure standalone to use it
+# スタンドアロン・モードで使用するように構成
 ords --config /opt/oracle/ords/config config set \
   standalone.https.port 8443
 ords --config /opt/oracle/ords/config config set \
@@ -285,9 +285,9 @@ ords --config /opt/oracle/ords/config config set \
   standalone.https.cert.secret changeit
 ```
 
-### Option B: ORDS behind a Reverse Proxy (Recommended for Production)
+### オプション B: リバース・プロキシの背後にある ORDS (本番環境推奨)
 
-Run ORDS on HTTP (port 8080) behind Nginx or Apache HTTPD which terminates TLS. ORDS receives plain HTTP internally.
+TLS を終端する Nginx や Apache HTTPD の背後で、ORDS を HTTP (ポート 8080) で実行する。ORDS は内部でプレーンな HTTP を受信する。
 
 ```nginx
 # /etc/nginx/conf.d/ords.conf
@@ -310,7 +310,7 @@ server {
 }
 ```
 
-Set ORDS to trust the forwarded-proto header:
+転送されたプロトコル・ヘッダーを信頼するように ORDS を設定する:
 
 ```shell
 ords --config /opt/oracle/ords/config config set \
@@ -319,16 +319,16 @@ ords --config /opt/oracle/ords/config config set \
 
 ---
 
-## Starting and Stopping ORDS
+## ORDS の開始と停止
 
 ```shell
-# Start in foreground (dev)
+# フォアグラウンドで開始 (開発用)
 ords --config /opt/oracle/ords/config serve
 
-# Start with specific port
+# 特定のポートを指定して開始
 ords --config /opt/oracle/ords/config serve --port 8080
 
-# Run as background service (Linux systemd)
+# バックグラウンド・サービスとして実行 (Linux systemd)
 ```
 
 ```ini
@@ -360,69 +360,68 @@ systemctl status ords
 
 ---
 
-## Upgrading ORDS
+## ORDS のアップグレード
 
-ORDS upgrades are two-phase: update the software, then upgrade the database metadata schema.
+ORDS のアップグレードは 2 つのフェーズで行われる。ソフトウェアの更新と、それに続くデータベース・メタデータ・スキーマのアップグレードである。
 
 ```shell
-# 1. Stop ORDS
+# 1. ORDS の停止
 systemctl stop ords
 
-# 2. Download and extract new ORDS version
+# 2. 新しい ORDS バージョンのダウンロードと解凍
 unzip ords-24.x.x.zip -d /opt/oracle/ords_new
 
-# 3. Update PATH to point to new version
+# 3. 新しいバージョンを指すように PATH を更新
 export PATH=/opt/oracle/ords_new/bin:$PATH
 
-# 4. Upgrade the ORDS schema in the database
-# (uses existing pool config — no re-install needed)
+# 4. データベース内の ORDS スキーマをアップグレード
+# (既存のプール構成を使用するため、再インストールは不要)
 ords --config /opt/oracle/ords/config install \
   --admin-user "SYS AS SYSDBA" \
   --db-hostname mydb.example.com \
   --db-port 1521 \
   --db-servicename mypdb.example.com
 
-# 5. Start new ORDS version
+# 5. 新しいバージョンの ORDS を開始
 systemctl start ords
 
-# 6. Verify
+# 6. 確認
 ords --version
 curl http://localhost:8080/ords/_/db-api/stable/metadata-catalog/
 ```
 
-The `ords install` command is idempotent — re-running it upgrades the schema if already present and creates it fresh if not.
+`ords install` コマンドはべき等（同じ結果を保証）である。すでにスキーマが存在する場合はアップグレードが行われ、存在しない場合は新規に作成される。
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Separate config directory from software directory**: The config dir should persist across software upgrades. Store in `/opt/oracle/ords/config` (not inside the ORDS software directory).
-- **Use ORDS CLI for all config changes**: Avoid manually editing XML files. The CLI handles wallet management, schema validation, and config refresh.
-- **Passwords live in the Oracle Wallet**: ORDS stores all passwords in an Oracle Wallet (`credentials/` in the config directory). Passwords never appear in any config file. Always use `ords config secret set db.password` to set or rotate credentials — never attempt to write a password directly into a config file.
-- **Use TNS aliases for ADB**: Wallet-based connections via TNS aliases are more maintainable than custom JDBC URLs.
-- **Test with `ords validate`** before starting after a config change: `ords --config /path/config validate` checks pool connectivity and reports issues.
-- **Set `jdbc.MaxLimit` based on DB max sessions**: Too high a limit can exhaust DB connections. Use `SELECT * FROM v$resource_limit WHERE resource_name = 'sessions'` to check limits.
-- **Keep ORDS log directory on fast storage**: High-throughput ORDS servers write significant log volume. Use SSD-backed volumes for log directories.
+- **構成ディレクトリをソフトウェア・ディレクトリから分離する**: 構成ディレクトリは、ソフトウェアのアップグレード後も保持される必要がある。`/opt/oracle/ords/config` などに保存し、ソフトウェア・インストール・ディレクトリ内には置かないこと。
+- **すべての構成変更には ORDS CLI を使用する**: XML ファイルの手動編集は避ける。CLI がウォレット管理、スキーマ検証、および構成のリフレッシュを処理する。
+- **パスワードは Oracle ウォレットに保存する**: ORDS は、構成ディレクトリ内の Oracle ウォレット (`credentials/`) にすべてのパスワードを保存する。パスワードが構成ファイルに表示されることは一切ない。資格証明の設定やローテーションには、常に `ords config secret set db.password` を使用すること。構成ファイルにパスワードを直接書き込もうとしてはならない。
+- **ADB には TNS 別名を使用する**: TNS 別名を使用したウォレットベースの接続は、カスタム JDBC URL よりも保守性が高い。
+- **構成変更後は `ords validate` でテストする**: `ords --config /path/config validate` を実行すると、プールの接続性がチェックされ、問題が報告される。
+- **DB の最大セッション数に基づいて `jdbc.MaxLimit` を設定する**: 制限が高すぎると DB 接続を使い果たす可能性がある。`SELECT * FROM v$resource_limit WHERE resource_name = 'sessions'` で制限を確認すること。
+- **ORDS ログ・ディレクトリを高速なストレージに配置する**: 高スループットの ORDS サーバーは大量のログを出力する。ログ・ディレクトリには SSD ベースのボリュームを使用すること。
 
-## Common Mistakes
+## よくある間違い
 
-- **Not upgrading the DB schema after upgrading ORDS software**: Running new ORDS against old schema causes errors. Always run `ords install` after upgrading the binary.
-- **Setting `jdbc.MaxLimit` too low (default 10)**: The default is appropriate for development. Production needs 20-100+ depending on concurrency.
-- **Using TNS without setting `TNS_ADMIN`**: If the wallet directory path is set but `TNS_ADMIN` is not, Oracle JDBC cannot find `tnsnames.ora`.
-- **Running ORDS as root**: Always run ORDS as a dedicated OS user (`oracle` or `ords`) with no unnecessary privileges.
-- **Forgetting to open firewall ports**: ORDS standalone defaults to port 8080 (HTTP) and 8443 (HTTPS). Ensure these are allowed through OS firewall and cloud security groups.
-- **Installing into the CDB root**: Always install ORDS into a PDB, not the CDB root. ORDS_METADATA in CDB root causes schema resolution issues.
+- **ORDS ソフトウェアのアップグレード後に DB スキーマをアップグレードしていない**: 新しい ORDS を古いスキーマで実行するとエラーが発生する。バイナリをアップグレードした後は、必ず `ords install` を実行すること。
+- **`jdbc.MaxLimit` の設定が低すぎる (デフォルトは 10)**: デフォルト値は開発用には適切だが、本番環境では同時実行数に応じて 20 以上、場合によっては 100 以上が必要になる。
+- **`TNS_ADMIN` を設定せずに TNS を使用している**: ウォレット・ディレクトリのパスが設定されていても `TNS_ADMIN` が設定されていない場合、Oracle JDBC は `tnsnames.ora` を見つけることができない。
+- **root ユーザーで ORDS を実行している**: 不要な権限を持たない専用の OS ユーザー (`oracle` や `ords`) で常に実行すること。
+- **ファイアウォール・ポートの開放を忘れている**: ORDS スタンドアロンのデフォルト・ポートは 8080 (HTTP) と 8443 (HTTPS) である。OS のファイアウォールやクラウドのセキュリティ・グループでこれらの通過が許可されていることを確認すること。
+- **CDB ルートにインストールしている**: ORDS は常に PDB にインストールし、CDB ルートへはインストールしないこと。CDB ルートの ORDS_METADATA は、スキーマ解決の問題を引き起こす。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。混在環境では 19c 互換の代替手段を維持すること。
+- 19c と 26ai の両方をサポートする環境では、リリース・アップデートによってデフォルトや非推奨が異なる場合があるため、両方のバージョンで構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle REST Data Services Installation and Configuration Guide](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/ordig/index.html)
 - [ORDS CLI Reference — ords install](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/ordig/installing-oracle-rest-data-services.html)

@@ -1,83 +1,83 @@
-# AWR Reports — Automatic Workload Repository
+# AWR レポート — Automatic Workload Repository
 
-## Overview
+## 概要
 
-The Automatic Workload Repository (AWR) is Oracle's built-in performance data collection and analysis framework. It automatically captures snapshots of performance statistics at regular intervals (default: every 60 minutes) and stores them in the SYSAUX tablespace. AWR data is the foundation for diagnosing performance problems, understanding workload trends, and validating the impact of tuning changes.
+**Automatic Workload Repository (AWR)** は、Oracle に組み込まれたパフォーマンス・データの収集および分析フレームワークである。デフォルトでは 60 分ごとにパフォーマンス統計のスナップショットを自動的に取得し、SYSAUX 表領域に保存する。AWR データは、パフォーマンス問題の診断、ワークロード傾向の把握、および調整による変更の影響を検証するための基礎となる。
 
-AWR reports compare two snapshots and summarize the activity between them. They are the first tool most DBAs reach for when investigating a performance incident.
+AWR レポートは 2 つのスナップショットを比較し、その間のアクティビティを要約する。これは、ほとんどの DBA がパフォーマンス・インシデントを調査する際に最初に使用するツールである。
 
-**Licensing Note:** AWR is part of the Oracle Diagnostics Pack. It requires a license in addition to the base database license. Verify your license before using AWR in production.
+**ライセンスに関する注意:** AWR は Oracle Diagnostics Pack の一部である。ベースのデータベース・ライセンスに加えてライセンスが必要である。本番環境で AWR を使用する前に、ライセンスを確認すること。
 
 ---
 
-## Key Concepts
+## 主要な概念
 
-### Snapshots
+### スナップショット (Snapshots)
 
-A snapshot is a point-in-time capture of all cumulative statistics from V$ views (db block gets, parse counts, wait event totals, etc.). The AWR report computes deltas between two snapshots to show activity during the interval.
+スナップショットは、V$ ビュー（DB ブロック取得数、解析回数、待機イベント合計など）からのすべての累積統計を、ある一時点で取得したものである。AWR レポートは 2 つのスナップショット間の増分（デルタ）を計算し、その期間中のアクティビティを表示する。
 
-- Default retention: 8 days
-- Default interval: 60 minutes
-- Stored in: `SYSAUX` tablespace under the `SYS` schema (WRM$ and WRH$ tables)
+- デフォルトの保持期間: 8 日間
+- デフォルトの取得間隔: 60 分
+- 保存場所: `SYS` スキーマ下の `SYSAUX` 表領域（WRM$ および WRH$ 表）
 
 ### DB Time
 
-**DB Time** is the single most important metric in an AWR report. It represents the total elapsed time spent by all foreground sessions executing database calls (including wait time). It does NOT include idle wait time.
+**DB Time** は、AWR レポートにおいて最も重要な単一のメトリックである。これは、データベース・コールを実行しているすべてのフォアグラウンド・セッションが費やした合計経過時間（待機時間を含む）を表す。アイドル待機時間は含まれない。
 
 ```
-DB Time = CPU Time + Non-Idle Wait Time
+DB Time = CPU Time + 非アイドル待機時間
 ```
 
-If DB Time per second exceeds the number of CPUs, you have a capacity or efficiency problem.
+1 秒あたりの DB Time が物理 CPU 数を超えている場合、キャパシティや効率性の問題が発生している。
 
-### Elapsed Time
+### 経過時間 (Elapsed Time)
 
-The wall-clock duration of the snapshot interval. Dividing DB Time by Elapsed Time gives the average number of active sessions (AAS):
+スナップショット間隔の実時間。DB Time を経過時間で割ることで、平均アクティブ・セッション数 (AAS) が得られる：
 
 ```
-AAS = DB Time (seconds) / Elapsed Time (seconds)
+AAS = DB Time (秒) / 経過時間 (秒)
 ```
 
-An AAS near or above your CPU count often signals saturation.
+AAS が物理 CPU 数に近いかそれを超えている場合、多くの場合サチュレーション（飽和状態）を示している。
 
 ---
 
-## Snapshot Management with DBMS_WORKLOAD_REPOSITORY
+## DBMS_WORKLOAD_REPOSITORY によるスナップショット管理
 
-### Create a Manual Snapshot
+### 手動スナップショットの作成
 
 ```sql
--- Create a snapshot immediately (useful before/after a change)
+-- すぐにスナップショットを作成（変更の前後などで有用）
 EXEC DBMS_WORKLOAD_REPOSITORY.CREATE_SNAPSHOT();
 
--- Verify it was created
+-- 作成されたか確認
 SELECT snap_id, begin_interval_time, end_interval_time
 FROM   dba_hist_snapshot
 ORDER  BY snap_id DESC
 FETCH  FIRST 5 ROWS ONLY;
 ```
 
-### Modify AWR Settings
+### AWR 設定の変更
 
 ```sql
--- Change interval to 30 minutes, retain 14 days
+-- 間隔を 30 分に変更し、保持期間を 14 日間に設定
 BEGIN
   DBMS_WORKLOAD_REPOSITORY.MODIFY_SNAPSHOT_SETTINGS(
-    retention => 14 * 24 * 60,  -- minutes
-    interval  => 30             -- minutes
+    retention => 14 * 24 * 60,  -- 分単位
+    interval  => 30             -- 分単位
   );
 END;
 /
 
--- Check current settings
+-- 現在の設定を確認
 SELECT snap_interval, retention
 FROM   dba_hist_wr_control;
 ```
 
-### Drop Snapshots
+### スナップショットの削除
 
 ```sql
--- Drop snapshots in a range to reclaim SYSAUX space
+-- SYSAUX 領域を解放するために、範囲を指定してスナップショットを削除
 BEGIN
   DBMS_WORKLOAD_REPOSITORY.DROP_SNAPSHOT_RANGE(
     low_snap_id  => 100,
@@ -87,7 +87,7 @@ END;
 /
 ```
 
-### Find Snapshot IDs for a Time Window
+### 特定の時間枠のスナップショット ID を探す
 
 ```sql
 SELECT snap_id,
@@ -100,27 +100,27 @@ ORDER  BY snap_id;
 
 ---
 
-## Generating AWR Reports
+## AWR レポートの生成
 
-### Text Report (SQL*Plus)
+### テキスト形式レポート (SQL*Plus)
 
 ```sql
--- Interactive: prompts for snap IDs and instance
+-- 対話型: スナップショット ID とインスタンスの入力を求められる
 @$ORACLE_HOME/rdbms/admin/awrrpt.sql
 
--- Non-interactive using the PL/SQL function directly
+-- PL/SQL 関数を直接使用した非対話型
 SELECT output
 FROM   TABLE(
          DBMS_WORKLOAD_REPOSITORY.AWR_REPORT_TEXT(
            l_dbid      => (SELECT dbid FROM v$database),
            l_inst_num  => 1,
-           l_bid       => 200,   -- begin snap ID
-           l_eid       => 201    -- end snap ID
+           l_bid       => 200,   -- 開始スナップ ID
+           l_eid       => 201    -- 終了スナップ ID
          )
        );
 ```
 
-### HTML Report (preferred for readability)
+### HTML 形式レポート (可読性が高いため推奨)
 
 ```sql
 SELECT output
@@ -134,13 +134,13 @@ FROM   TABLE(
        );
 ```
 
-### RAC Global AWR Report
+### RAC グローバル AWR レポート
 
 ```sql
 @$ORACLE_HOME/rdbms/admin/awrgrpt.sql
 ```
 
-### Compare Period Report (baseline vs. current)
+### 期間比較レポート (ベースライン vs 現在)
 
 ```sql
 @$ORACLE_HOME/rdbms/admin/awrddrpt.sql
@@ -148,32 +148,32 @@ FROM   TABLE(
 
 ---
 
-## Reading Key Sections
+## 主要セクションの読み方
 
-### 1. Report Header
+### 1. レポート・ヘッダー
 
-Confirms the database version, instance name, host, CPUs, and the snapshot window. Always verify these match your target environment before drawing conclusions.
+データベースのバージョン、インスタンス名、ホスト、CPU、およびスナップショットの時間枠を確認できる。結論を出す前に、これらが対象の環境と一致していることを必ず確認すること。
 
 ### 2. Load Profile
 
-Shows per-second and per-transaction rates for key metrics:
+主要なメトリックの 1 秒あたりおよび 1 トランザクションあたりのレートが表示される：
 
-| Metric | What it Means |
+| メトリック | 意味 |
 |---|---|
-| DB Time(s) | Average active sessions (divide by elapsed seconds) |
-| DB CPU(s) | CPU actually consumed per second |
-| Redo size | Write-heavy workload indicator |
-| Logical reads | Buffer cache I/O |
-| Block changes | DML activity |
-| Physical reads | Actual disk I/O |
-| Hard parses | Cursor reuse problems |
-| Parses | Total parse calls (hard + soft) |
-| Logons | Connection churn |
+| DB Time(s) | 平均アクティブ・セッション（経過秒数で割る） |
+| DB CPU(s) | 1 秒あたりに実際に消費された CPU |
+| Redo size | 書き込み負荷の指標 |
+| Logical reads | バッファ・キャッシュ I/O |
+| Block changes | DML アクティビティ |
+| Physical reads | 実際のディスク I/O |
+| Hard parses | カーソル再利用の問題 |
+| Parses | 合計解析コール（ハード + ソフト） |
+| Logons | 接続の変動（チャーン） |
 
-**Hard parse rate above 100/sec** almost always indicates missing bind variables or connection pool issues.
+**ハード解析率が 100/秒を超える場合**、ほとんどの場合、バインド変数の欠如や接続プールの問題を意味する。
 
 ```sql
--- Validate hard parse rates from AWR history
+-- AWR 履歴からハード解析率を検証する
 SELECT snap_id,
        hard_parses,
        hard_parses / elapsed_time_delta * 1e6 AS hard_parses_per_sec
@@ -192,19 +192,19 @@ WHERE prev_val IS NOT NULL;
 
 ### 3. Instance Efficiency Percentages
 
-| Metric | Target | Concern If |
+| メトリック | 目標 | 懸念される値 |
 |---|---|---|
 | Buffer Cache Hit % | > 95% | < 90% |
 | Library Cache Hit % | > 99% | < 95% |
 | In-memory Sort % | > 95% | < 90% |
 | Soft Parse % | > 95% | < 90% |
-| Execute to Parse % | > 50% | Very low value |
+| Execute to Parse % | > 50% | 極端に低い値 |
 
-**Buffer Nowait %** and **Redo Nowait %** should both be near 100%.
+**Buffer Nowait %** と **Redo Nowait %** は、どちらも 100% に近い必要がある。
 
 ### 4. Top 10 Foreground Wait Events
 
-This section lists the events consuming the most DB Time. Focus on non-idle events:
+このセクションには、DB Time を最も多く消費したイベントがリストされる。非アイドル・イベントに注目すること：
 
 ```
 Event                           Waits    Time(s)  Avg wait  % DB time
@@ -214,33 +214,33 @@ log file sync                    89,234    412.1     4.62ms     4.1%
 buffer busy waits                12,456    234.5    18.83ms     2.3%
 ```
 
-Events to watch:
+注意すべきイベント:
 
-| Event | Typical Cause |
+| イベント名 | 一般的な原因 |
 |---|---|
-| `db file sequential read` | Single-block I/O; index scans, row fetch |
-| `db file scattered read` | Full table/index scans (multiblock reads) |
-| `log file sync` | COMMIT frequency; redo log I/O |
-| `buffer busy waits` | Hot blocks; segment header contention |
-| `enq: TX - row lock contention` | Row-level locking; application design |
-| `library cache: mutex X` | Hard parsing; cursor sharing issues |
-| `latch: cache buffers chains` | Hot blocks in buffer cache |
+| `db file sequential read` | シングル・ブロック I/O、索引スキャン、行の取得 |
+| `db file scattered read` | 全表/索引スキャン（マルチブロック読み込み） |
+| `log file sync` | COMMIT の頻度、Redo ログ I/O |
+| `buffer busy waits` | ホット・ブロック、セグメント・ヘッダーの競合 |
+| `enq: TX - row lock contention` | 行レベルのロック、アプリケーションの設計問題 |
+| `library cache: mutex X` | ハード解析、カーソル共有の問題 |
+| `latch: cache buffers chains` | バッファ・キャッシュ内のホット・ブロック |
 
 ### 5. SQL Statistics
 
-AWR breaks down Top SQL into several sub-sections:
+AWR は Top SQL をいくつかのサブセクションに分解して表示する：
 
-- **SQL ordered by Elapsed Time** — best starting point
-- **SQL ordered by CPU Time** — CPU-heavy queries
-- **SQL ordered by Gets** — logical I/O heavy
-- **SQL ordered by Reads** — physical I/O heavy
-- **SQL ordered by Executions** — frequency; even cheap SQL can matter at scale
-- **SQL ordered by Parse Calls** — cursor reuse problems
+- **SQL ordered by Elapsed Time** — 調査の開始点として最適。
+- **SQL ordered by CPU Time** — CPU 負荷の高いクエリ。
+- **SQL ordered by Gets** — 論理 I/O 負荷が高いクエリ。
+- **SQL ordered by Reads** — 物理 I/O 負荷が高いクエリ。
+- **SQL ordered by Executions** — 実行頻度。コストの低い SQL でも大規模環境では重要。
+- **SQL ordered by Parse Calls** — カーソル再利用の問題。
 
-For each SQL entry, note the SQL ID, executions, elapsed time per execution, and the first few lines of the SQL text.
+各 SQL 項目について、SQL ID、実行回数、実行あたりの経過時間、および SQL テキストの冒頭を確認すること。
 
 ```sql
--- Pull top SQL from AWR history programmatically
+-- AWR 履歴からプログラムで Top SQL を取得する
 SELECT sql_id,
        ROUND(elapsed_time_total / 1e6, 2)          AS total_elapsed_sec,
        executions_total,
@@ -255,14 +255,14 @@ FETCH  FIRST 20 ROWS ONLY;
 
 ### 6. Segments Statistics
 
-Shows which segments are consuming the most I/O and buffer gets. Useful for identifying hot tables and indexes.
+どのセグメントが最も多くの I/O やバッファ取得を消費しているかを示す。ホットな表や索引を特定するのに役立つ。
 
-### 7. Dictionary Cache and Library Cache
+### 7. Dictionary Cache と Library Cache
 
-High miss ratios here indicate shared pool pressure.
+ここでのミス率が高い場合は、共有プール（Shared Pool）の圧迫を示している。
 
 ```sql
--- Current library cache performance
+-- 現在のライブラリ・キャッシュのパフォーマンス
 SELECT namespace,
        gets,
        gethits,
@@ -273,9 +273,9 @@ SELECT namespace,
        reloads,
        invalidations
 FROM   v$librarycache
-ORDER  BY gets DESC;
+ORDER  BY gets DESC; intermission
 
--- Dictionary cache misses (should be < 2%)
+-- ディクショナリ・キャッシュのミス (2% 未満であるべき)
 SELECT parameter,
        gets,
        getmisses,
@@ -288,64 +288,64 @@ FETCH  FIRST 15 ROWS ONLY;
 
 ---
 
-## Identifying Bottlenecks from AWR
+## AWR によるボトルネックの特定
 
-### CPU Bound
+### CPU バウンド (CPU Bound)
 
-- DB CPU close to or exceeding DB Time
-- High Parse CPU, high execute CPU
-- Check for full table scans, missing indexes, inefficient SQL
+- DB CPU が DB Time に近いか、それを超えている。
+- 解析 CPU (Parse CPU) や実行 CPU (Execute CPU) が高い。
+- 全表スキャン、索引の不足、非効率な SQL を確認すること。
 
-### I/O Bound
+### I/O バウンド (I/O Bound)
 
-- `db file sequential read` or `db file scattered read` near top of wait events
-- High physical reads in Load Profile
-- Investigate Top SQL by Reads; consider indexes, storage optimization
+- 待機イベントの上位に `db file sequential read` や `db file scattered read` がある。
+- Load Profile の物理読み込み回数が高い。
+- Reads 順の Top SQL を調査する。索引の追加やストレージの最適化を検討すること。
 
-### Contention Bound
+### 競合バウンド (Contention Bound)
 
-- `buffer busy waits`, `enq:` waits, latch waits dominate
-- Often application design issues (hot sequences, reverse-key index needs)
+- `buffer busy waits`、`enq:` 待機、ラッチ待機が支配的である。
+- 多くの場合、アプリケーションの設計上の問題（ホットなシーケンス、反転キー索引の必要性など）である。
 
-### Memory Pressure
+### メモリ圧迫 (Memory Pressure)
 
-- High soft parse miss, library cache misses > 1%
-- `free buffer waits` appearing in wait events (buffer cache too small)
-- High `paged-in` values in OS stats section
+- ソフト解析ミス率が高い、またはライブラリ・キャッシュのミス率が 1% を超えている。
+- 待機イベントに `free buffer waits` が現れる（バッファ・キャッシュが不足している）。
+- OS 統計セクションで高い `paged-in` 値が見られる。
 
-### Redo / Commit Overhead
+### Redo / コミットのオーバーヘッド
 
-- `log file sync` in top wait events
-- High Redo size per second in Load Profile
-- Consider async commit, batching commits, or faster storage
+- 待機イベントの上位に `log file sync` がある。
+- Load Profile で 1 秒あたりの Redo サイズが高い。
+- 非同期コミット、コミットのバッチ化、またはより高速なストレージを検討すること。
 
 ---
 
-## AWR Baselines
+## AWR ベースライン
 
-Baselines preserve snapshot ranges so they are not subject to normal retention purging. They enable period comparison reports.
+ベースラインはスナップショットの範囲を保存し、通常の保持期間による削除の対象外とする。これにより、期間比較レポートが可能になる。
 
 ```sql
--- Create a fixed baseline
+-- 固定ベースラインの作成
 BEGIN
   DBMS_WORKLOAD_REPOSITORY.CREATE_BASELINE(
     start_snap_id => 200,
     end_snap_id   => 210,
     baseline_name => 'PRE_PATCH_BASELINE',
-    expiration    => 30  -- days; NULL = never expire
+    expiration    => 30  -- 日数、NULL は期限なし
   );
 END;
 /
 
--- List existing baselines
+-- 既存のベースラインを確認
 SELECT baseline_name, start_snap_id, end_snap_id, expiration
 FROM   dba_hist_baseline;
 
--- Drop a baseline
+-- ベースラインの削除
 BEGIN
   DBMS_WORKLOAD_REPOSITORY.DROP_BASELINE(
     baseline_name => 'PRE_PATCH_BASELINE',
-    cascade       => FALSE  -- TRUE also drops the snapshots
+    cascade       => FALSE  -- TRUE の場合、スナップショットも削除される
   );
 END;
 /
@@ -353,18 +353,18 @@ END;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Always take a snapshot before and after any change** (patch, schema change, parameter change) so you can generate a precise before/after report.
-- **Use the HTML report** for interactive analysis; the text version is useful for automated parsing.
-- **Focus on DB Time contribution**, not absolute wait counts. An event with millions of waits but tiny elapsed time is not your problem.
-- **Correlate AWR with OS stats.** CPU utilization, memory paging, and disk I/O from the OS section can confirm or contradict in-database metrics.
-- **Increase retention for critical systems** to at least 30 days. Keep baselines for major milestones (before/after upgrades).
-- **Do not run AWR snapshots too frequently** (< 15 minutes) on busy systems; it adds overhead to SYSAUX writes.
-- **Monitor SYSAUX space.** AWR data grows with retention and snapshot frequency. Query `v$sysaux_occupants` to see AWR's footprint.
+- **変更（パッチ、スキーマ変更、パラメータ変更）の前後で必ずスナップショットを取得する。** これにより、正確な前後比較レポートを生成できる。
+- **対話型分析には HTML レポートを使用し**、テキスト版は自動解析に使用するのが適している。
+- **DB Time への寄与度に注目する。** 待機回数は数百万回でも、合計経過時間が非常に短いイベントは問題ではない。
+- **AWR を OS 統計と関連付ける。** OS セクションの CPU 使用率、メモリ・ページング、およびディスク I/O は、データベース内の指標を裏付ける、あるいは矛盾を指摘する材料となる。
+- **重要なシステムでは保持期間を少なくとも 30 日間に増やす。** 主要なマイルストーン（アップグレードの前後など）ではベースラインを保持すること。
+- **忙しいシステムで AWR スナップショットを頻繁に（15 分未満）実行しない。** SYSAUX への書き込みオーバーヘッドが増大するためである。
+- **SYSAUX 領域を監視する。** AWR データは保持期間とスナップショット頻度に応じて増大する。`v$sysaux_occupants` をクエリして AWR の使用状況を確認すること。
 
 ```sql
--- Check AWR space usage in SYSAUX
+-- SYSAUX 内の AWR の使用量を確認する
 SELECT occupant_name,
        schema_name,
        ROUND(space_usage_kbytes / 1024, 2) AS space_mb
@@ -375,28 +375,27 @@ ORDER  BY space_usage_kbytes DESC;
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Problem | Correction |
+| 間違い | 問題点 | 対策 |
 |---|---|---|
-| Comparing snapshots across DST change | Elapsed time appears wrong | Note timezone transitions; use UTC-based timestamps |
-| Analyzing a 1-hour snapshot for a 5-minute spike | Spike is diluted | Capture a targeted manual snapshot; use ASH for sub-minute analysis |
-| Ignoring the "per transaction" column | Misses workload characterization changes | Compare both per-second and per-transaction rates |
-| Focusing on wait count, not wait time | Misleading conclusions | Always use Time(s) column as primary sort |
-| Not checking SQL execution count | A "slow" SQL may run 1 million times cheaply | Multiply avg elapsed × executions for total impact |
-| Treating Buffer Cache Hit % as gospel | A 99% hit ratio can still have I/O problems if the workload is huge | Check physical reads per second in absolute terms |
-| Using AWR for sub-minute incidents | Insufficient granularity | Use ASH (V$ACTIVE_SESSION_HISTORY) for real-time drilldown |
+| 夏時間 (DST) の変更をまたいでスナップショットを比較する | 経過時間の計算が正しくなくなる | タイムゾーンの遷移に注意する。可能であれば UTC ベースのタイムスタンプを使用する |
+| 5 分間のスパイクを調査するために 1 時間のスナップショットを分析する | スパイクが希釈されてしまう | ターゲットを絞った手動スナップショットを取得するか、秒単位の分析には ASH を使用する |
+| 「1 トランザクションあたり」の列を無視する | ワークロードの特性の変化を見逃す | 1 秒あたりと 1 トランザクションあたりの両方のレートを比較する |
+| 待機時間ではなく、待機回数に注目する | 誤った結論を導く | 常に Time(s) 列を最優先のソート基準とする |
+| SQL の実行回数を確認しない | 低コストでも 100 万回実行される SQL は「遅い」可能性がある | 「平均経過時間 × 実行回数」で全体への影響を算出する |
+| バッファ・キャッシュ・ヒット率を絶対視する | ヒット率が 99% でも、ワークロードが膨大であれば I/O 問題は発生し得る | 物理読み込み回数を絶対的な数値で確認する |
+| 1 分未満のインシデントに AWR を使用する | 解像度が不足している | リアルタイムのドリルダウンには ASH (V$ACTIVE_SESSION_HISTORY) を使用する |
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。混在環境では 19c 互換の代替策を保持すること。
+- 19c と 26ai の両方をサポートする環境では、リリース更新によってデフォルトや非推奨が異なる場合があるため、両方のバージョンで構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c Performance Tuning Guide (TGDBA)](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgdba/)
 - [DBMS_WORKLOAD_REPOSITORY — Oracle Database 19c PL/SQL Packages and Types Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_WORKLOAD_REPOSITORY.html)

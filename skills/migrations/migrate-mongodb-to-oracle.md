@@ -1,20 +1,20 @@
-# Migrating MongoDB to Oracle
+# MongoDB から Oracle への移行
 
-## Overview
+## 概要
 
-Migrating from MongoDB to Oracle represents a fundamental shift in data modeling philosophy: from a document-oriented, schema-flexible NoSQL approach to a relational, schema-enforced model. However, Oracle has invested significantly in bridging this gap. Oracle Database 21c introduced native JSON storage with binary-encoded OSON format, and Oracle 23c introduced **JSON Relational Duality Views**, which allow document-style access over relational tables — reducing the friction between the two worlds considerably.
+MongoDB から Oracle への移行は、データ・モデリングの哲学における根本的な転換を意味する。すなわち、ドキュメント指向でスキーマ・フレキシブルな NoSQL アプローチから、リレーショナルでスキーマ制約のあるモデルへの転換である。しかし、Oracle はこのギャップを埋めるために多大な投資を行ってきた。Oracle Database 21c ではバイナリ エンコードされた OSON 形式によるネイティブ JSON ストレージが導入され、Oracle 23c では **JSON リレーショナル・デュアリティ・ビュー (JSON Relational Duality Views)** が導入された。これにより、リレーショナル表に対してドキュメント・スタイルのアクセスが可能になり、両者の間の摩擦は大幅に軽減されている。
 
-This guide covers document-to-relational mapping strategies, Oracle's JSON capabilities, aggregation pipeline translation, BSON type mapping, and data extraction from MongoDB.
+本ガイドでは、ドキュメント・モデルからリレーショナルへのマッピング戦略、Oracle の JSON 機能、集計パイプラインの変換、BSON 型のマッピング、および MongoDB からのデータ抽出について解説する。
 
 ---
 
-## Document Model to Relational Mapping Strategies
+## ドキュメント・モデルからリレーショナルへのマッピング戦略
 
-### Strategy 1 — Full Normalization (Classic Relational)
+### 戦略 1 — 完全な正規化（伝統的なリレーショナル）
 
-Convert each MongoDB collection to a table. Decompose embedded documents and arrays into child tables with foreign keys. This approach gives maximum query flexibility and referential integrity.
+各 MongoDB コレクションをテーブルに変換する。埋め込みドキュメントや配列を、外部キーを持つ子テーブルに分解する。このアプローチにより、クエリの柔軟性と参照整合性が最大化される。
 
-**MongoDB document:**
+**MongoDB ドキュメント：**
 ```json
 {
   "_id": ObjectId("65a1234567890abcdef12345"),
@@ -29,11 +29,11 @@ Convert each MongoDB collection to a table. Decompose embedded documents and arr
 }
 ```
 
-**Oracle normalized schema:**
+**Oracle 正規化スキーマ：**
 ```sql
 CREATE TABLE customers (
     customer_id   NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    mongo_id      VARCHAR2(24) UNIQUE NOT NULL,  -- preserve original _id
+    mongo_id      VARCHAR2(24) UNIQUE NOT NULL,  -- 元の _id を保持
     customer_name VARCHAR2(500) NOT NULL,
     email         VARCHAR2(255),
     created_by    VARCHAR2(100),
@@ -58,19 +58,19 @@ CREATE TABLE customer_tags (
 );
 ```
 
-### Strategy 2 — Store as JSON in Oracle (Hybrid)
+### 戦略 2 — Oracle 内に JSON として保存（ハイブリッド）
 
-Keep the document structure in Oracle's native JSON column. Best for documents with highly variable or nested structures where relational normalization would be cumbersome.
+Oracle のネイティブ JSON 列にドキュメント構造をそのまま保持する。構造が非常に多様な場合や、ネストが深くリレーショナルな正規化が煩雑になるドキュメントに最適である。
 
 ```sql
--- Oracle 21c+ native JSON type
+-- Oracle 21c 以降のネイティブ JSON 型
 CREATE TABLE customers (
     customer_id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     mongo_id    VARCHAR2(24) UNIQUE NOT NULL,
     doc         JSON NOT NULL
 );
 
--- Oracle 12c-20c using CLOB with IS JSON check constraint
+-- Oracle 12c ～ 20c での CLOB と IS JSON 制約の使用
 CREATE TABLE customers (
     customer_id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     mongo_id    VARCHAR2(24) UNIQUE NOT NULL,
@@ -78,18 +78,18 @@ CREATE TABLE customers (
     CONSTRAINT chk_customers_json CHECK (doc IS JSON)
 );
 
--- Insert a document
+-- ドキュメントのインサート
 INSERT INTO customers (mongo_id, doc)
 VALUES ('65a1234567890abcdef12345',
         '{"customer_name":"Acme Corp","email":"contact@acme.com"}');
 ```
 
-### Strategy 3 — Oracle JSON Duality Views (23c) — Best of Both Worlds
+### 戦略 3 — Oracle JSON デュアリティ・ビュー (23c) — 両方のメリットを享受
 
-JSON Relational Duality Views in Oracle 23c let you treat a relational schema as a document store. Applications can read and write JSON documents while Oracle stores data relationally. This is the most powerful approach for new Oracle-target migrations.
+Oracle 23c の JSON リレーショナル・デュアリティ・ビューを使用すると、リレーショナル・スキーマをドキュメント・ストアとして扱うことができる。アプリケーションは JSON ドキュメントとして読み書きを行い、Oracle はデータをリレーショナルに保存する。これは、Oracle への新規移行において最も強力なアプローチである。
 
 ```sql
--- Underlying relational tables
+-- 基盤となるリレーショナル表
 CREATE TABLE customers (
     customer_id   NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     customer_name VARCHAR2(500) NOT NULL,
@@ -106,7 +106,7 @@ CREATE TABLE addresses (
     CONSTRAINT fk_addr FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
 );
 
--- JSON Duality View — exposes relational data as documents
+-- JSON デュアリティ・ビュー — リレーショナル・データをドキュメントとして公開
 CREATE OR REPLACE JSON RELATIONAL DUALITY VIEW customers_dv AS
 SELECT JSON {
     '_id'           : c.customer_id,
@@ -125,56 +125,54 @@ SELECT JSON {
 }
 FROM customers c WITH INSERT UPDATE DELETE;
 
--- Applications can now query and update via the duality view as if it were MongoDB:
+-- アプリケーションは、MongoDB であるかのようにデュアリティ・ビュー経由でクエリや更新が可能：
 SELECT doc FROM customers_dv WHERE json_value(doc, '$._id') = '42';
 ```
 
 ---
 
-## BSON Types to Oracle Types
+## BSON 型から Oracle 型への変換
 
-| MongoDB BSON Type | Oracle Type | Notes |
+| MongoDB BSON 型 | Oracle 型 | 備考 |
 |---|---|---|
-| `ObjectId` | `VARCHAR2(24)` or `RAW(12)` | 24-char hex string; store as VARCHAR2 for readability |
-| `String` | `VARCHAR2(4000)` or `CLOB` | Depends on length |
+| `ObjectId` | `VARCHAR2(24)` または `RAW(12)` | 24 文字の 16 進文字列。可読性のために VARCHAR2 を推奨 |
+| `String` | `VARCHAR2(4000)` または `CLOB` | 長さに依存 |
 | `Number (int32)` | `NUMBER(10)` | |
 | `Number (int64)` | `NUMBER(19)` | |
-| `Number (double)` | `BINARY_DOUBLE` | IEEE 754 64-bit |
-| `Number (Decimal128)` | `NUMBER(38,18)` | High-precision decimal |
-| `Boolean` | `NUMBER(1)` with CHECK (0,1) | Or Oracle 23c BOOLEAN |
-| `Date` | `TIMESTAMP WITH TIME ZONE` | BSON Date is UTC milliseconds since epoch |
+| `Number (double)` | `BINARY_DOUBLE` | IEEE 754 64 ビット |
+| `Number (Decimal128)` | `NUMBER(38,18)` | 高精度 10 進数 |
+| `Boolean` | CHECK (0,1) 付き `NUMBER(1)` | または Oracle 23c BOOLEAN |
+| `Date` | `TIMESTAMP WITH TIME ZONE` | BSON Date は UTC エポックからのミリ秒 |
 | `Null` | `NULL` | |
-| `Array` | Child table (normalized) or JSON array in JSON column | |
-| `Embedded document` | Separate table (normalized) or JSON object in JSON column | |
-| `Binary data (BinData)` | `BLOB` or `RAW(n)` | |
-| `ObjectId as _id` | `VARCHAR2(24)` + primary key | |
-| `UUID (BinData subtype 3/4)` | `RAW(16)` or `VARCHAR2(36)` | |
-| `Regular expression` | `VARCHAR2(500)` | Store pattern and flags separately |
-| `JavaScript code` | `CLOB` | Store as text; not executable in Oracle |
-| `Timestamp (internal)` | `TIMESTAMP` | Internal BSON type; map to standard TIMESTAMP |
-| `MinKey / MaxKey` | No equivalent | Internal MongoDB comparison values |
-| `Symbol` (deprecated) | `VARCHAR2(500)` | |
+| `Array` | 子テーブル（正規化）または JSON 列内の JSON 配列 | |
+| `Embedded document` | 別テーブル（正規化）または JSON 列内の JSON オブジェクト | |
+| `Binary data (BinData)` | `BLOB` または `RAW(n)` | |
+| `ObjectId as _id` | `VARCHAR2(24)` + 主キー | |
+| `UUID (subtype 3/4)` | `RAW(16)` または `VARCHAR2(36)` | |
+| `Regular expression` | `VARCHAR2(500)` | プロパティとフラグを分けて保存 |
+| `JavaScript code` | `CLOB` | テキストとして保存（Oracle 内での実行は不可） |
+| `Timestamp (internal)` | `TIMESTAMP` | 内部的な BSON 型。標準の TIMESTAMP にマップ |
 
-### Date Conversion
+### 日付の変換
 
-MongoDB BSON Date is stored as milliseconds since Unix epoch (UTC). Converting to Oracle TIMESTAMP WITH TIME ZONE:
+MongoDB BSON Date は、Unix エポックからの経過ミリ秒 (UTC) として保存される。これを Oracle の TIMESTAMP WITH TIME ZONE に変換する例：
 
 ```sql
--- Given mongo_ts as milliseconds since epoch (stored as NUMBER)
+-- mongo_ts が文字列としてのエポックミリ秒（NUMBER として格納）の場合
 SELECT TIMESTAMP '1970-01-01 00:00:00 UTC' +
        NUMTODSINTERVAL(mongo_ts / 1000, 'SECOND') AS oracle_ts
 FROM staging_raw;
 
--- Reverse: Oracle TIMESTAMP to MongoDB epoch ms (for comparison)
+-- 逆方向：Oracle TIMESTAMP から MongoDB のエポックミリ秒（比較用）
 SELECT (oracle_ts - TIMESTAMP '1970-01-01 00:00:00 UTC') * 86400000 AS mongo_ms
 FROM orders;
 ```
 
 ---
 
-## Aggregation Pipeline to Oracle SQL
+## 集計パイプラインから Oracle SQL への変換
 
-MongoDB's aggregation pipeline is a sequence of stages that transform documents. Each stage has an Oracle SQL equivalent.
+MongoDB の集計パイプラインは、ドキュメントを変換する一連のステージである。各ステージには、対応する Oracle SQL が存在する。
 
 ### $match → WHERE
 
@@ -190,7 +188,7 @@ db.orders.aggregate([
 SELECT * FROM orders WHERE status = 'shipped' AND total >= 100;
 ```
 
-### $group → GROUP BY / Aggregate Functions
+### $group → GROUP BY / 集計関数
 
 ```javascript
 // MongoDB
@@ -216,7 +214,7 @@ FROM orders
 GROUP BY customer_id;
 ```
 
-### $project → SELECT column list
+### $project → SELECT 列リスト
 
 ```javascript
 // MongoDB
@@ -259,7 +257,7 @@ SELECT * FROM orders OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY;
 ### $lookup → JOIN
 
 ```javascript
-// MongoDB $lookup (left outer join)
+// MongoDB $lookup (左外結合)
 db.orders.aggregate([
   {
     $lookup: {
@@ -279,15 +277,15 @@ FROM orders o
 LEFT JOIN customers c ON o.customer_id = c.customer_id;
 ```
 
-### $unwind → JSON_TABLE or Lateral Join
+### $unwind → JSON_TABLE または Lateral 結合
 
 ```javascript
-// MongoDB $unwind (expand array into separate documents)
+// MongoDB $unwind (配列を個別のドキュメントに展開)
 db.orders.aggregate([{ $unwind: "$line_items" }])
 ```
 
 ```sql
--- Oracle: if line_items is a JSON array in a JSON column
+-- Oracle: line_items が JSON 列内の JSON 配列である場合
 SELECT o.order_id, o.order_date, li.*
 FROM orders o,
      JSON_TABLE(o.line_items, '$[*]'
@@ -298,106 +296,26 @@ FROM orders o,
          )
      ) li;
 
--- Oracle: if line_items is a child table (normalized approach)
+-- Oracle: line_items が子テーブルである場合 (正規化アプローチ)
 SELECT o.order_id, o.order_date, li.product_id, li.qty, li.price
 FROM orders o
 JOIN order_line_items li ON li.order_id = o.order_id;
 ```
 
-### $addFields → SELECT with computed columns or CTE
-
-```javascript
-// MongoDB
-db.orders.aggregate([
-  { $addFields: { tax_amount: { $multiply: ["$subtotal", 0.08] } } }
-])
-```
-
-```sql
--- Oracle
-SELECT o.*, subtotal * 0.08 AS tax_amount FROM orders o;
--- Or with CTE to carry the field forward:
-WITH enriched AS (
-    SELECT o.*, subtotal * 0.08 AS tax_amount FROM orders o
-)
-SELECT * FROM enriched WHERE tax_amount > 10;
-```
-
-### $facet → Multiple Aggregations
-
-```javascript
-// MongoDB $facet runs parallel aggregations
-db.products.aggregate([
-  {
-    $facet: {
-      byCategory: [{ $group: { _id: "$category", count: { $sum: 1 } } }],
-      priceStats: [{ $group: { _id: null, avg: { $avg: "$price" }, max: { $max: "$price" } } }]
-    }
-  }
-])
-```
-
-```sql
--- Oracle: run as separate queries or combine with UNION
--- In a single query using GROUPING SETS:
-SELECT category, COUNT(*) AS count, NULL AS avg_price, NULL AS max_price, 'CATEGORY' AS facet_type
-FROM products
-GROUP BY category
-UNION ALL
-SELECT NULL, NULL, AVG(price), MAX(price), 'PRICE_STATS'
-FROM products;
-```
-
-### $bucket / $bucketAuto → WIDTH_BUCKET
-
-```javascript
-// MongoDB $bucket
-db.orders.aggregate([
-  { $bucket: {
-      groupBy: "$amount",
-      boundaries: [0, 100, 500, 1000, 5000],
-      default: "Other"
-  }}
-])
-```
-
-```sql
--- Oracle
-SELECT
-    CASE
-        WHEN amount < 100   THEN '0-100'
-        WHEN amount < 500   THEN '100-500'
-        WHEN amount < 1000  THEN '500-1000'
-        WHEN amount < 5000  THEN '1000-5000'
-        ELSE 'Other'
-    END AS bucket,
-    COUNT(*) AS count
-FROM orders
-GROUP BY
-    CASE
-        WHEN amount < 100   THEN '0-100'
-        WHEN amount < 500   THEN '100-500'
-        WHEN amount < 1000  THEN '500-1000'
-        WHEN amount < 5000  THEN '1000-5000'
-        ELSE 'Other'
-    END
-ORDER BY MIN(amount);
-```
-
 ---
 
-## JSON_TABLE for Document Querying
+## ドキュメント照会のための JSON_TABLE
 
-`JSON_TABLE` is Oracle's most powerful tool for working with JSON data that has been stored in JSON or CLOB columns.
+`JSON_TABLE` は、JSON または CLOB 列に保存された JSON データを操作するための Oracle の最も強力なツールである。
 
 ```sql
--- Sample data
+-- サンプル・データ
 CREATE TABLE mongo_import (
     id   NUMBER GENERATED ALWAYS AS IDENTITY,
     doc  JSON
 );
 
--- Query nested document fields
+-- ネストされたドキュメント・フィールドへのクエリ
 SELECT jt.*
 FROM mongo_import mi,
      JSON_TABLE(mi.doc, '$'
@@ -418,19 +336,19 @@ FROM mongo_import mi,
 
 ---
 
-## Data Extraction from MongoDB
+## MongoDB からのデータ抽出
 
-### Method 1 — mongoexport (JSON)
+### 方法 1 — mongoexport (JSON)
 
 ```bash
-# Export collection to JSON (one document per line)
+# コレクションを JSON にエクスポート (1 行 1 ドキュメント)
 mongoexport \
   --host localhost:27017 \
   --db myapp \
   --collection orders \
   --out orders.json
 
-# Export with query filter
+# クエリ・フィルタを使用してエクスポート
 mongoexport \
   --host localhost:27017 \
   --db myapp \
@@ -439,50 +357,33 @@ mongoexport \
   --out shipped_orders.json
 ```
 
-### Method 2 — mongoexport (CSV)
+### 方法 2 — Python ETL (pymongo と oracledb)
 
-```bash
-# Export specific fields as CSV
-mongoexport \
-  --host localhost:27017 \
-  --db myapp \
-  --collection customers \
-  --type csv \
-  --fields _id,customer_name,email,created_at \
-  --out customers.csv
-```
-
-### Method 3 — Python ETL with pymongo and cx_Oracle
-
-For complex document structures requiring transformation:
+変換が必要な複雑なドキュメント構造に：
 
 ```python
 from pymongo import MongoClient
-import oracledb  # python-oracledb (successor to cx_Oracle; install with: pip install oracledb)
+import oracledb
 import json
-from bson import ObjectId
-from datetime import datetime
 
-# Source
+# ソース
 mongo = MongoClient("mongodb://localhost:27017/")
 db = mongo["myapp"]
 
-# Target (thin mode — no Oracle Client libs required)
+# ターゲット (Thin モード)
 ora = oracledb.connect(user="user", password="pass", dsn="localhost:1521/ORCL")
 ora_cur = ora.cursor()
 
-# Stage 1: Load raw documents into staging JSON table
+# ステージ 1: 生ドキュメントをステージング用 JSON 表にロード
 ora_cur.execute("DELETE FROM mongo_staging")
-
 insert_sql = "INSERT INTO mongo_staging (mongo_id, raw_doc) VALUES (:1, :2)"
+
 batch = []
 for doc in db.orders.find():
     mongo_id = str(doc['_id'])
-    # Convert ObjectId and datetime objects to serializable types
     doc['_id'] = str(doc['_id'])
-    if 'created_at' in doc:
-        doc['created_at'] = doc['created_at'].isoformat()
-    batch.append((mongo_id, json.dumps(doc)))
+    # 日付などの変換を事前に行う
+    batch.append((mongo_id, json.dumps(doc, default=str)))
     if len(batch) >= 1000:
         ora_cur.executemany(insert_sql, batch)
         batch = []
@@ -491,102 +392,71 @@ if batch:
     ora_cur.executemany(insert_sql, batch)
 ora.commit()
 
-# Stage 2: Transform and insert into target tables
+# ステージ 2: 正規化テーブルへの変換とインサート
 ora_cur.execute("""
-    INSERT INTO orders (mongo_id, customer_id, status, total, created_at)
-    SELECT
-        jt.mongo_id,
-        TO_NUMBER(jt.customer_id),
-        jt.status,
-        TO_NUMBER(jt.total),
-        TO_TIMESTAMP(jt.created_at, 'YYYY-MM-DD"T"HH24:MI:SS')
+    INSERT INTO orders (mongo_id, customer_id, status, total)
+    SELECT jt.mongo_id, jt.customer_id, jt.status, TO_NUMBER(jt.total)
     FROM mongo_staging ms,
          JSON_TABLE(ms.raw_doc, '$' COLUMNS (
              mongo_id    VARCHAR2(24) PATH '$._id',
              customer_id VARCHAR2(50) PATH '$.customer_id',
              status      VARCHAR2(50) PATH '$.status',
-             total       VARCHAR2(50) PATH '$.total',
-             created_at  VARCHAR2(50) PATH '$.created_at'
+             total       VARCHAR2(50) PATH '$.total'
          )) jt
 """)
 ora.commit()
-
-mongo.close()
-ora.close()
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Preserve MongoDB _id values during migration.** Store the original MongoDB ObjectId in a `mongo_id` column on the Oracle side. This allows reconciliation and simplifies rollback if needed.
+1. **移行中に MongoDB の _id 値を保持する。** Oracle 側で `mongo_id` 列に元の MongoDB ObjectId を保存する。これによりデータの照合が可能になり、必要に応じたロールバックも容易になる。
 
-2. **Use a staging JSON table as an intermediate step.** Load raw MongoDB JSON documents into an Oracle JSON staging table first, then transform to the relational target schema using SQL and JSON_TABLE. This separates the extraction and transformation phases.
+2. **中間ステップとしてステージング JSON 表を使用する。** まず MongoDB の生 JSON ドキュメントを Oracle の JSON ステージング表にロードし、その後 SQL と `JSON_TABLE` を使用してリレーショナルなターゲット・スキーマに変換する。これにより、抽出フェーズと変換フェーズを分離できる。
 
-3. **Profile your collections before normalizing.** MongoDB's schema flexibility means documents in the same collection may have very different structures. Query your collections to understand the actual field distribution:
-   ```javascript
-   // MongoDB: find all distinct top-level keys in a collection
-   db.orders.aggregate([
-     { $project: { keys: { $objectToArray: "$$ROOT" } } },
-     { $unwind: "$keys" },
-     { $group: { _id: "$keys.k", count: { $sum: 1 } } },
-     { $sort: { count: -1 } }
-   ])
-   ```
+3. **正規化前にコレクションをプロファイリングする。** MongoDB のスキーマ柔軟性により、同じコレクション内のドキュメントでも構造が大きく異なる場合がある。コレクションを照会し、実際のフィールド構成を把握すること。
 
-4. **Consider Oracle JSON Duality Views for applications needing document-style access.** If your application was written expecting MongoDB's document API, Duality Views (Oracle 23c) allow you to keep the JSON interface while storing data relationally.
+4. **ドキュメント・スタイルのアクセスが必要なアプリには Duality ビューを検討する。** MongoDB ドキュメント API を前提としたアプリケーションの場合、Oracle 23c のデュアリティ・ビューを使用することで、JSON インターフェースを維持したままリレーショナルにデータを格納できる。
 
-5. **Handle missing fields gracefully.** MongoDB documents may be missing fields that others have. In Oracle, these become NULL. Use `JSON_VALUE(doc, '$.field' DEFAULT NULL ON ERROR)` for safe extraction.
+5. **欠落しているフィールドを適切に処理する。** MongoDB でフィールドが欠落している場合、Oracle では NULL となる。安全な抽出のために、`JSON_VALUE(doc, '$.field' DEFAULT NULL ON ERROR)` を使用すること。
 
-6. **Index frequently queried JSON fields.** If using the hybrid JSON storage approach, create JSON Search Indexes or function-based indexes on frequently queried JSON paths:
-   ```sql
-   -- Function-based index on a JSON field
-   CREATE INDEX idx_orders_status ON orders (JSON_VALUE(doc, '$.status'));
-
-   -- Full JSON search index (Oracle Text based)
-   CREATE SEARCH INDEX idx_orders_json ON orders (doc) FOR JSON;
-   ```
+6. **頻繁に照会される JSON フィールドに索引を作成する。** ハイブリッド JSON ストレージを使用する場合、頻繁に照会される JSON パスに対して JSON Search インデックスや関数ベースのインデックスを作成する。
 
 ---
 
-## Common Migration Pitfalls
+## よくある移行の落とし穴
 
-**Pitfall 1 — Polymorphic collections:**
-MongoDB collections often contain documents of mixed shapes (e.g., an "events" collection with different fields per event type). In Oracle, use a base table with common fields plus a JSON column for variable fields, or use table-per-type with a discriminator column.
+**落とし穴 1 — ポリモーフィックなコレクション：**
+MongoDB のコレクションには、イベントの種類ごとに異なるフィールドを持つ「混合形状」のドキュメントが含まれることがよくある。Oracle では、共通フィールドをベース・テーブルに、可変フィールドを JSON 列に保持するか、判別列 (Discriminator Column) を持つテーブル継承パターンの使用を検討すること。
 
-**Pitfall 2 — _id type assumptions:**
-Not all MongoDB _id fields are ObjectIds. Applications sometimes use custom strings, integers, or compound values. Check the actual _id types in each collection:
-```javascript
-db.orders.aggregate([{ $group: { _id: { $type: "$_id" }, count: { $sum: 1 } } }])
-```
+**落とし穴 2 — _id 型の前提：**
+すべての MongoDB _id フィールドが ObjectId とは限らない。カスタム文字列や数値、複合値が使用されている場合がある。各コレクションの実際の _id 型を確認すること。
 
-**Pitfall 3 — Embedded arrays with updates:**
-MongoDB allows efficient array element updates (`$push`, `$pull`, `$set.array.0`). Oracle relational requires DELETE + INSERT on child tables for equivalent operations. Review all array mutation patterns in your application code.
+**落とし穴 3 — 埋め込み配列の更新：**
+MongoDB は配列要素の効率的な更新 (`$push`, `$pull` 等) をサポートしている。Oracle リレーショナルでは、子テーブルに対する DELETE + INSERT が必要になる。アプリケーション・コード内の配列変更パターンをすべて確認すること。
 
-**Pitfall 4 — MongoDB transactions vs Oracle transactions:**
-MongoDB only supports multi-document ACID transactions from version 4.0 (replica sets) and 4.2 (sharded clusters). Oracle has always had full ACID transactions. Applications that worked around MongoDB's historical lack of transactions may have complex compensation logic that can be simplified in Oracle.
+**落とし穴 4 — MongoDB トランザクション vs Oracle トランザクション：**
+MongoDB は v4.0 以降でマルチドキュメント ACID トランザクションをサポートしている。Oracle は常に完全な ACID トランザクションを提供してきた。MongoDB の過去のトランザクション制限を補完するために作成された複雑なロジックは、Oracle 移行時に簡素化できる場合がある。
 
-**Pitfall 5 — Field name case sensitivity:**
-MongoDB field names are case-sensitive. Oracle column names are case-insensitive (folded to uppercase) unless double-quoted. Map MongoDB camelCase field names to Oracle SNAKE_CASE column names to avoid quoting requirements:
-- MongoDB: `customerName` → Oracle: `CUSTOMER_NAME`
-- MongoDB: `createdAt` → Oracle: `CREATED_AT`
+**落とし穴 5 — フィールド名の大文字小文字の区別：**
+MongoDB のフィールド名はケース・センシティブである。Oracle の列名は（二重引用符で囲まない限り）自動的に大文字に変換される。MongoDB の camelCase を Oracle の SNAKE_CASE にマッピングすることで、引用符の要件を回避することを推奨する。
 
-**Pitfall 6 — Date timezone handling:**
-MongoDB BSON Date is always UTC. Oracle TIMESTAMP stores without timezone; TIMESTAMP WITH TIME ZONE stores the offset. Load as `TIMESTAMP WITH TIME ZONE` to preserve UTC intent, then let the application convert to local time as needed.
+**落とし穴 6 — 日付のタイムゾーン処理：**
+BSON Date は常に UTC である。Oracle の TIMESTAMP WITH TIME ZONE にロードして UTC の意図を保持し、必要に応じてアプリケーション側でローカル時間に変換すること。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ファイル内の基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c, 23c, または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 複数バージョンをサポートする環境では、リリース更新（RU）によってデフォルト値や非推奨機能が異なる場合があるため、19c と 26ai の両方で動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c SQL Language Reference — JSON_TABLE](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/JSON_TABLE.html)
 - [Oracle Database 19c SQL Language Reference — JSON_VALUE](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/JSON_VALUE.html)
-- [Oracle Database 19c JSON Developer's Guide — Overview of Oracle Database Support for JSON](https://docs.oracle.com/en/database/oracle/oracle-database/19/adjsn/json-in-oracle-database.html)
-- [Oracle Database 19c SQL Language Reference — CREATE TABLE (JSON column)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-TABLE.html)
+- [Oracle Database 23c — JSON Relational Duality Views](https://www.oracle.com/database/23c/technologies/json-relational-duality-views/)
+- [Oracle Database 19c JSON Developer's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/19/adjsn/json-in-oracle-database.html)
 - [python-oracledb documentation](https://python-oracledb.readthedocs.io/en/latest/)

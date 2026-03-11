@@ -1,60 +1,57 @@
-# PL/SQL Debugging
+# PL/SQL デバッグ (Debugging)
 
-## Overview
+## 概要
 
-Debugging PL/SQL requires a range of techniques from simple output utilities to full interactive debuggers. Understanding the strengths and limitations of each approach enables faster issue isolation in both development and production environments.
+PL/SQL のデバッグには、単純な出力ユーティリティから、フル機能のインタラクティブ・デバッガまで、さまざまな手法があります。それぞれの方法の長所と制限を理解することで、開発環境と本番環境の両方で迅速に問題を特定できるようになります。
 
 ---
 
 ## DBMS_OUTPUT
 
-`DBMS_OUTPUT` is the simplest debugging tool — it writes messages to a server-side buffer that is displayed to the client after the PL/SQL block completes.
+`DBMS_OUTPUT` は最もシンプルなデバッグ・ツールです。メッセージをサーバー側のバッファに書き込み、PL/SQL ブロックの完了後にクライアントに表示します。
 
-### Basic Usage
+### 基本的な使い方
 
 ```sql
--- Enable output in SQL*Plus / SQLcl
+-- SQL*Plus / SQLcl で出力を有効にする
 SET SERVEROUTPUT ON SIZE UNLIMITED
 
--- Enable in SQL Developer: View > DBMS Output panel > click the green +
+-- SQL Developer では: [表示] > [DBMS出力] パネルを開き、緑の「+」をクリック
 
 BEGIN
-  DBMS_OUTPUT.PUT_LINE('Starting process');
-  DBMS_OUTPUT.PUT('Partial line ');  -- no newline
-  DBMS_OUTPUT.PUT_LINE('continues here');
-  DBMS_OUTPUT.NEW_LINE;  -- blank line
-  DBMS_OUTPUT.PUT_LINE('Done');
+  DBMS_OUTPUT.PUT_LINE('処理開始');
+  DBMS_OUTPUT.PUT('行の途中 ');  -- 改行なし
+  DBMS_OUTPUT.PUT_LINE('ここへ続く');
+  DBMS_OUTPUT.NEW_LINE;  -- 空行
+  DBMS_OUTPUT.PUT_LINE('完了');
 END;
 /
 ```
 
-### Buffer Management
+### バッファ管理
 
 ```sql
--- Default buffer is 20,000 bytes in older releases
--- In 10g+, set to UNLIMITED in SQL*Plus
+-- 古いリリースではデフォルトのバッファは 20,000 バイト
+-- 10g 以降、SQL*Plus では UNLIMITED に設定可能
 SET SERVEROUTPUT ON SIZE UNLIMITED
 
--- In PL/SQL: explicitly enable and set buffer size
-DBMS_OUTPUT.ENABLE(buffer_size => NULL);  -- NULL = unlimited
-
--- Flush buffer manually (rarely needed; happens automatically at block end)
-DBMS_OUTPUT.GET_LINES(lines_array, numlines);  -- programmatic read
+-- PL/SQL 内で明示的に有効化しバッファ・サイズを設定
+DBMS_OUTPUT.ENABLE(buffer_size => NULL);  -- NULL = 無制限
 ```
 
-### Limitations of DBMS_OUTPUT
+### DBMS_OUTPUT の制限事項
 
-| Limitation | Detail |
+| 制限事項 | 詳細 |
 |---|---|
-| Not real-time | Output appears only AFTER the entire block completes |
-| Buffer overflow | With bounded size, ORA-20000 if buffer full |
-| Not visible in production | Applications don't read DBMS_OUTPUT |
-| Alters session state | ENABLE/DISABLE affects buffer availability |
-| Multi-session | Only visible in the originating session |
-| Not for high-frequency loops | Performance overhead per call |
+| リアルタイムではない | ブロック全体が**完了した後**にのみ出力が表示される |
+| バッファ・オーバーフロー | サイズ制限がある場合、バッファが一杯になると ORA-20000 が発生する |
+| 本番環境で不可視 | アプリケーションが DBMS_OUTPUT を読み取ることは通常ない |
+| セッション状態の変化 | ENABLE/DISABLE 操作がバッファの可用性に影響する |
+| 複数セッションにまたがらない | 出力を行ったセッション内でのみ閲覧可能 |
+| 高頻度ループに不向き | 呼び出しごとのパフォーマンス・オーバーヘッドがある |
 
 ```sql
--- Pattern: conditional debug output using package flag
+-- パターン: パッケージ・フラグを使用した条件付きデバッグ出力
 CREATE OR REPLACE PACKAGE debug_pkg AS
   g_debug BOOLEAN := FALSE;
 
@@ -77,7 +74,7 @@ CREATE OR REPLACE PACKAGE BODY debug_pkg AS
 END debug_pkg;
 /
 
--- Usage: enable temporarily, then disable
+-- 使用例: 一時的に有効にしてから無効化する
 BEGIN
   debug_pkg.enable;
   process_orders;
@@ -90,7 +87,7 @@ END;
 
 ## DBMS_APPLICATION_INFO
 
-`DBMS_APPLICATION_INFO` sets the `MODULE`, `ACTION`, and `CLIENT_INFO` fields visible in `V$SESSION`. This is valuable for monitoring long-running operations in production without modifying the business logic significantly.
+`DBMS_APPLICATION_INFO` は、`V$SESSION` で確認できる `MODULE`、`ACTION`、`CLIENT_INFO` フィールドを設定します。これは、ビジネス・ロジックを大幅に変更することなく、本番環境で長時間実行される操作を監視するのに非常に役立ちます。
 
 ```sql
 CREATE OR REPLACE PROCEDURE process_month_end_close(
@@ -98,7 +95,7 @@ CREATE OR REPLACE PROCEDURE process_month_end_close(
 ) IS
   l_count NUMBER := 0;
 BEGIN
-  -- Set module/action visible in V$SESSION
+  -- V$SESSION で確認できるモジュール名とアクション名を設定
   DBMS_APPLICATION_INFO.SET_MODULE(
     module_name => 'MONTH_END_CLOSE',
     action_name => 'INITIALIZING'
@@ -106,42 +103,38 @@ BEGIN
 
   DBMS_APPLICATION_INFO.SET_CLIENT_INFO('period_id=' || p_period_id);
 
-  -- Phase 1
+  -- フェーズ 1
   DBMS_APPLICATION_INFO.SET_ACTION('VALIDATE_OPEN_ITEMS');
   validate_open_items(p_period_id);
 
-  -- Phase 2
+  -- フェーズ 2
   DBMS_APPLICATION_INFO.SET_ACTION('POST_JOURNAL_ENTRIES');
   FOR rec IN (SELECT * FROM pending_journals WHERE period_id = p_period_id) LOOP
     post_journal(rec.journal_id);
     l_count := l_count + 1;
 
-    -- Update progress visible in V$SESSION
+    -- V$SESSION で確認できる進捗を更新
     DBMS_APPLICATION_INFO.SET_ACTION(
-      'POSTING_JOURNALS (' || l_count || ' done)'
+      'POSTING_JOURNALS (' || l_count || ' 完了)'
     );
   END LOOP;
 
-  -- Phase 3
-  DBMS_APPLICATION_INFO.SET_ACTION('GENERATE_REPORTS');
-  generate_period_reports(p_period_id);
-
-  -- Clear on completion
+  -- 完了時にクリア
   DBMS_APPLICATION_INFO.SET_MODULE(NULL, NULL);
 
 END process_month_end_close;
 /
 
--- Monitor progress from another session (DBA)
+-- 別のセッション (DBA 等) から進捗を監視
 SELECT sid, module, action, client_info, last_call_et AS seconds_running
 FROM   v$session
 WHERE  module = 'MONTH_END_CLOSE';
 ```
 
-### Long Operations Tracking
+### 長時間操作の追跡 (Long Operations Tracking)
 
 ```sql
--- Register a long operation visible in V$SESSION_LONGOPS
+-- V$SESSION_LONGOPS で確認できる長時間操作を登録
 DECLARE
   l_rindex   BINARY_INTEGER;
   l_slno     BINARY_INTEGER;
@@ -151,136 +144,107 @@ BEGIN
   l_rindex := DBMS_APPLICATION_INFO.SET_SESSION_LONGOPS_NOHINT;
 
   FOR i IN 1..l_total LOOP
-    -- ... process row i ...
+    -- ... 処理 ...
     l_sofar := i;
 
-    IF MOD(i, 100) = 0 THEN  -- update every 100 rows
+    IF MOD(i, 100) = 0 THEN  -- 100行ごとに更新
       DBMS_APPLICATION_INFO.SET_SESSION_LONGOPS(
         rindex      => l_rindex,
         slno        => l_slno,
-        op_name     => 'Process Employee Records',
+        op_name     => '従業員レコード処理',
         target      => 0,
         context     => 0,
         sofar       => l_sofar,
         totalwork   => l_total,
-        target_desc => 'employees table',
-        units       => 'rows'
+        target_desc => 'employees 表',
+        units       => '行'
       );
     END IF;
   END LOOP;
 END;
 /
 
--- Monitor from another session
+-- 別のセッションから監視
 SELECT opname, sofar, totalwork,
        ROUND(sofar/totalwork * 100, 1) AS pct_complete,
        elapsed_seconds
 FROM   v$session_longops
 WHERE  sofar < totalwork
-  AND  opname = 'Process Employee Records';
+  AND  opname = '従業員レコード処理';
 ```
 
 ---
 
-## SQL Developer PL/SQL Debugger
+## SQL Developer PL/SQL デバッガ
 
-SQL Developer provides an interactive debugger with breakpoints, watches, and step execution.
+SQL Developer は、ブレークポイント、ウォッチ式、ステップ実行が可能なインタラクティブ・デバッガを提供します。
 
-### Setup
+### セットアップ
 
-1. **Grant debug privilege to your user**:
+1. **デバッグ権限をユーザーに付与**:
 ```sql
--- Required before debugging
+-- デバッグの前に必要
 GRANT DEBUG CONNECT SESSION TO my_dev_user;
-GRANT DEBUG ANY PROCEDURE TO my_dev_user;  -- or specific objects
+GRANT DEBUG ANY PROCEDURE TO my_dev_user;  -- または特定のオブジェクト
 ```
 
-2. **Compile with debug info** (required for line-level debugging):
+2. **デバッグ情報付きでコンパイル** (行レベルのデバッグに必要):
 ```sql
--- Compile with debug symbols
-ALTER SESSION SET PLSQL_OPTIMIZE_LEVEL = 1;  -- disable optimizer for accurate line tracking
+-- デバッグ用シンボルを付けてコンパイル
+ALTER SESSION SET PLSQL_OPTIMIZE_LEVEL = 1;  -- 正確な行追跡のため、最適化を無効化
 
 ALTER PROCEDURE my_procedure COMPILE DEBUG;
--- or via SQL Developer: right-click > Compile for Debug
+-- または SQL Developer で：右クリック > [デバッグ用にコンパイル]
 ```
 
-### Debugging Steps
+### デバッグの手順
 
-```
-1. Open the procedure in SQL Developer editor
-2. Click in the left margin to set a breakpoint (red dot appears)
-3. Right-click the procedure > Run (or click the debug icon)
-4. In the Run PL/SQL dialog, set input parameter values
-5. Execution pauses at the breakpoint
-6. Use the debugger toolbar:
-   - Step Into (F7): enter called procedures
-   - Step Over (F8): execute current line, stay in current procedure
-   - Step Out (Shift+F7): run to end of current procedure, return to caller
-   - Resume (F9): continue until next breakpoint
-7. Inspect variables in the Data panel
-8. Modify variable values during execution to test branches
-9. Use Watches to monitor specific expressions continuously
-```
-
-### Common Debugger Techniques
-
-```sql
--- Conditional breakpoint: pause only when condition is true
--- (Set in SQL Developer breakpoint properties)
--- Condition example: employee_id = 12345
-
--- Smart watch: evaluate expression at each pause
--- Example watch expression: l_salary * 1.1
-
--- Compile all dependent objects with debug info
-BEGIN
-  FOR obj IN (
-    SELECT object_name, object_type
-    FROM   user_objects
-    WHERE  object_type IN ('PROCEDURE', 'FUNCTION', 'PACKAGE BODY')
-  ) LOOP
-    EXECUTE IMMEDIATE
-      'ALTER ' || obj.object_type || ' ' || obj.object_name || ' COMPILE DEBUG';
-  END LOOP;
-END;
-/
-```
+1. SQL Developer のエディタでプロシージャを開く。
+2. 左端の余白をクリックしてブレークポイントを設定（赤い点が表示される）。
+3. プロシージャを右クリック > [実行]（またはデバッグ・アイコンをクリック）。
+4. [PL/SQLの実行] ダイアログで入力パラメータの値を設定し実行。
+5. ブレークポイントで実行が一時停止する。
+6. デバッガ・ツールバーを使用：
+   - **ステップ・イン (F7)**: 呼び出されたプロシージャの中に入る。
+   - **ステップ・オーバー (F8)**: 現在の行を実行して、現在のプロシージャに留まる。
+   - **ステップ・アウト (Shift+F7)**: 現在のプロシージャの最後まで実行し、呼び出し元に戻る。
+   - **再開 (F9)**: 次のブレークポイントまで続行。
+7. [データ] パネルで変数の内容を確認。
+8. 実行中に変数の値を書き換えて条件分岐をテストする。
+9. [ウォッチ] を使用して、特定の式を継続的に監視する。
 
 ---
 
-## Enabling and Reading Compile Warnings
+## コンパイル警告の有効化と確認
 
-Oracle can emit compile-time warnings about potential issues in PL/SQL code.
+Oracle は、PL/SQL コード内の潜在的な問題についてコンパイル時に警告を出すことができます。
 
-### PLSQL_WARNINGS Parameter
+### PLSQL_WARNINGS パラメータ
 
 ```sql
--- Enable all warnings for current session
+-- 現在のセッションですべての警告を有効にする
 ALTER SESSION SET PLSQL_WARNINGS = 'ENABLE:ALL';
 
--- Enable specific categories
+-- カテゴリを絞って有効にする (パフォーマンス、情報)
 ALTER SESSION SET PLSQL_WARNINGS = 'ENABLE:PERFORMANCE, ENABLE:INFORMATIONAL';
 
--- Enable all, but treat specific warning as error
+-- すべて有効にするが、特定の警告をエラーとして扱う
 ALTER SESSION SET PLSQL_WARNINGS = 'ENABLE:ALL, ERROR:06002';
 
--- Disable specific warning (suppress)
-ALTER SESSION SET PLSQL_WARNINGS = 'ENABLE:ALL, DISABLE:07204';
-
--- Disable all warnings
+-- すべて無効にする
 ALTER SESSION SET PLSQL_WARNINGS = 'DISABLE:ALL';
 ```
 
-### Warning Categories
+### 警告カテゴリ
 
-| Category | Code Range | Description |
+| カテゴリ | コード範囲 | 説明 |
 |---|---|---|
-| `SEVERE` | PLW-05xxx | Likely errors (e.g., unreachable code) |
-| `PERFORMANCE` | PLW-07xxx | Code likely to cause performance problems |
-| `INFORMATIONAL` | PLW-06xxx | Style or design improvement suggestions |
+| `SEVERE` | PLW-05xxx | エラーの可能性が高い (例: 到達不能なコード) |
+| `PERFORMANCE` | PLW-07xxx | パフォーマンス上の問題を引き起こす可能性のあるコード |
+| `INFORMATIONAL` | PLW-06xxx | スタイルや設計上の改善提案 |
 
 ```sql
--- After enabling, recompile to see warnings
+-- 有効化した後、再コンパイルして警告を確認
 ALTER SESSION SET PLSQL_WARNINGS = 'ENABLE:ALL';
 
 CREATE OR REPLACE FUNCTION risky_function(p_val IN NUMBER) RETURN NUMBER IS
@@ -291,13 +255,13 @@ BEGIN
   ELSE
     RETURN 0;
   END IF;
-  l_result := 99;  -- PLW-06002: Unreachable code
+  l_result := 99;  -- PLW-06002: 到達不能なコード
   RETURN l_result;
 END risky_function;
 /
--- Warning: PLW-06002: Unreachable code
+-- 警告: PLW-06002: 到達不能なコード
 
--- Read warnings after compilation
+-- コンパイル後の警告を確認
 SELECT line, position, text, attribute
 FROM   user_errors
 WHERE  name = 'RISKY_FUNCTION'
@@ -305,31 +269,14 @@ WHERE  name = 'RISKY_FUNCTION'
 ORDER BY line;
 ```
 
-### DBMS_WARNING Package (Programmatic Control)
-
-```sql
--- Save and restore warning settings
-DECLARE
-  l_saved_setting VARCHAR2(100);
-BEGIN
-  l_saved_setting := DBMS_WARNING.GET_WARNING_SETTING_STRING;
-  DBMS_WARNING.SET_WARNING_SETTING_STRING('ENABLE:ALL', 'SESSION');
-
-  -- compile some code...
-
-  DBMS_WARNING.SET_WARNING_SETTING_STRING(l_saved_setting, 'SESSION');
-END;
-/
-```
-
 ---
 
-## UTL_FILE for Log Files
+## UTL_FILE によるログ・ファイル出力
 
-`UTL_FILE` writes to server-side OS files — useful for logging in batch jobs where DBMS_OUTPUT is impractical.
+`UTL_FILE` はサーバー側の OS ファイルに書き込みます。DBMS_OUTPUT が実用的でないバッチ・ジョブ等のログ記録に便利です。
 
 ```sql
--- First: DBA must create a DIRECTORY object pointing to an OS path
+-- まず、DBA が OS パスを指す DIRECTORY オブジェクトを作成する必要がある
 -- CREATE OR REPLACE DIRECTORY app_log_dir AS '/opt/oracle/logs';
 -- GRANT READ, WRITE ON DIRECTORY app_log_dir TO my_schema;
 
@@ -340,9 +287,9 @@ CREATE OR REPLACE PROCEDURE write_log(
   l_logfile VARCHAR2(50) := 'process_' || TO_CHAR(SYSDATE, 'YYYYMMDD') || '.log';
 BEGIN
   l_file := UTL_FILE.FOPEN(
-    location     => 'APP_LOG_DIR',  -- DIRECTORY object name (uppercase)
+    location     => 'APP_LOG_DIR',  -- DIRECTORYオブジェクト名 (大文字)
     filename     => l_logfile,
-    open_mode    => 'a',             -- 'a' = append, 'w' = write, 'r' = read
+    open_mode    => 'a',             -- 'a' = 追記, 'w' = 書き込み, 'r' = 読み取り
     max_linesize => 32767
   );
 
@@ -356,10 +303,6 @@ BEGIN
   UTL_FILE.FCLOSE(l_file);
 
 EXCEPTION
-  WHEN UTL_FILE.INVALID_DIRECTORY THEN
-    RAISE_APPLICATION_ERROR(-20100, 'Invalid log directory: APP_LOG_DIR');
-  WHEN UTL_FILE.WRITE_ERROR THEN
-    RAISE_APPLICATION_ERROR(-20101, 'Write error to log file');
   WHEN OTHERS THEN
     IF UTL_FILE.IS_OPEN(l_file) THEN
       UTL_FILE.FCLOSE(l_file);
@@ -371,138 +314,105 @@ END write_log;
 
 ---
 
-## Tracing with DBMS_TRACE
+## DBMS_TRACE によるトレース
 
-`DBMS_TRACE` enables server-side PL/SQL execution tracing. Trace data is written to the `PLSQL_TRACE_EVENTS` and `PLSQL_TRACE_RUNS` tables.
+`DBMS_TRACE` は、サーバー側の PL/SQL 実行トレースを有効にします。トレース・データは `PLSQL_TRACE_EVENTS` 表と `PLSQL_TRACE_RUNS` 表に書き込まれます。
 
 ```sql
--- Setup (DBA task, one-time)
--- @?/rdbms/admin/tracetab.sql  -- creates trace tables
+-- セットアップ (DBAによる一回限りの実行)
+-- @?/rdbms/admin/tracetab.sql  -- トレース表の作成
 
--- Grant execute (DBA)
--- GRANT EXECUTE ON DBMS_TRACE TO my_user;
-
--- Start tracing in your session
+-- トレースの開始
 DBMS_TRACE.SET_PLSQL_TRACE(DBMS_TRACE.TRACE_ALL_CALLS);
--- Options:
---   TRACE_ALL_CALLS    -- trace every call
---   TRACE_ENABLED_CALLS -- trace only procedures compiled with debug
---   TRACE_ALL_EXCEPTIONS -- trace all exceptions
---   TRACE_ENABLED_EXCEPTIONS -- trace exceptions in debug-compiled units
---   TRACE_ALL_SQL      -- trace SQL statements
+-- オプション:
+--   TRACE_ALL_CALLS    -- すべての呼び出しをトレース
+--   TRACE_ALL_EXCEPTIONS -- すべての例外をトレース
+--   TRACE_ALL_SQL      -- SQL 文をトレース
 
--- Run the code you want to trace
+-- トレースしたいコードを実行
 BEGIN
   process_orders;
 END;
 /
 
--- Stop tracing
+-- トレースの停止
 DBMS_TRACE.CLEAR_PLSQL_TRACE;
 
--- Read trace data
+-- トレース・データの確認
 SELECT r.runid, r.run_date, r.run_comment,
        e.event_seq, e.event_kind, e.proc_name, e.line#
 FROM   plsql_trace_runs  r
 JOIN   plsql_trace_events e ON e.runid = r.runid
-WHERE  r.run_date > SYSDATE - 1/24  -- last hour
 ORDER BY r.runid, e.event_seq;
 ```
 
 ---
 
-## Reading SQL Trace Files
+## SQL トレース・ファイルの読み取り
 
-Enable SQL trace to capture all SQL and PL/SQL execution details including waits and bind values.
+SQL トレースを有効にすると、待機イベントやバインド変数を含む、すべての SQL および PL/SQL の実行詳細をキャプチャできます。
 
 ```sql
--- Enable trace for current session
-ALTER SESSION SET SQL_TRACE = TRUE;
--- or for more detail with waits and binds:
+-- 現在のセッションでトレースを有効にする (待機イベント、バインド変数を含むレベル 12)
 ALTER SESSION SET EVENTS '10046 trace name context forever, level 12';
--- Level 1: basic, 4: bind variables, 8: wait events, 12: binds + waits
 
--- Run the problematic code
+-- 実行
 BEGIN
   process_orders;
 END;
 /
 
--- Disable trace
-ALTER SESSION SET SQL_TRACE = FALSE;
--- or: ALTER SESSION SET EVENTS '10046 trace name context off';
+-- トレースを無効にする
+ALTER SESSION SET EVENTS '10046 trace name context off';
 
--- Find the trace file location
+-- トレース・ファイルの場所を特定
 SELECT value FROM v$diag_info WHERE name = 'Default Trace File';
-
--- Or find by session info
-SELECT s.sid, s.serial#, s.username,
-       p.tracefile
-FROM   v$session s
-JOIN   v$process p ON p.addr = s.paddr
-WHERE  s.audsid = SYS_CONTEXT('USERENV', 'SESSIONID');
 ```
 
-### Processing Trace Files
+### トレース・ファイルの処理
 
 ```bash
-# On the database server OS:
-# tkprof formats the raw trace file into readable output
-tkprof /path/to/trace.trc output.txt explain=myuser/mypass sys=no sort=prsela,exeela,fchela
-
-# Key sections in tkprof output:
-# - call count, cpu, elapsed, disk, query, current, rows
-# - Rows: actual rows processed
-# - Elapsed: wall clock time
-# - CPU: CPU time
-# - Disk: physical reads
+# データベース・サーバーの OS 上で tkprof を実行して可読化
+tkprof /path/to/trace.trc output.txt explain=myuser/mypass sys=no
 ```
 
 ---
 
-## Debugging Best Practices
+## デバッグのベスト・プラクティス
 
-- Use `DBMS_APPLICATION_INFO` in all long-running procedures — it costs almost nothing and makes monitoring easy.
-- Structure debug output with timestamps: `TO_CHAR(SYSTIMESTAMP, 'HH24:MI:SS.FF3')`.
-- Use a package-level debug flag to enable/disable output without changing business logic.
-- Always compile with `DEBUG` during development; compile with normal optimization for production.
-- Remove or disable `DBMS_OUTPUT` calls in production code paths — replace with proper logging.
-- Use SQL trace (level 12) to diagnose unexpected SQL execution behavior including bind values.
-- `UTL_FILE` log files should be in a dedicated directory with controlled permissions.
-- Test with `PLSQL_WARNINGS = 'ENABLE:ALL'` regularly to catch unreachable code and performance issues.
+- 長時間実行されるすべてのプロシージャで `DBMS_APPLICATION_INFO` を使用する。コストはほぼゼロで、監視が容易になる。
+- デバッグ出力には `TO_CHAR(SYSTIMESTAMP, 'HH24:MI:SS.FF3')` でタイムスタンプを付ける。
+- パッケージ・レベルのデバッグ・フラグを使用して、ビジネス・ロジックを変更せずに有効/無効を切り替えられるようにする。
+- 開発中は常に `DEBUG` 指定でコンパイルし、本番環境では通常の最適化でコンパイルする。
+- 本番コード・パスでは `DBMS_OUTPUT` を削除または無効化し、適切なロギング機能に置き換える。
+- `PLSQL_WARNINGS = 'ENABLE:ALL'` で定期的にテストし、到達不能コードやパフォーマンスの問題を早期に発見する。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Problem | Fix |
+| 間違い | 問題点 | 解決策 |
 |---|---|---|
-| Relying on DBMS_OUTPUT in production | Not visible to applications | Use proper logging tables with autonomous transactions |
-| Not checking IS_OPEN before FCLOSE | Raises exception if file was never opened | Always `IF UTL_FILE.IS_OPEN(l_file) THEN CLOSE; END IF` |
-| Compiling DEBUG for production | Performance overhead, exposes source | Compile normally for production (`ALTER PROCEDURE ... COMPILE`) |
-| Not clearing DBMS_APPLICATION_INFO on exit | Module/Action remain set for next user of pooled connection | Always clear in exception handler and normal exit |
-| Setting PLSQL_WARNINGS system-wide without testing | Floods compile errors on existing code | Set at session level first, fix warnings, then promote |
-| Large debug strings in tight loops | Memory and CPU overhead | Conditionally log only every N iterations |
+| 本番環境で DBMS_OUTPUT に頼る | アプリケーションから見えず、出力量も制限される | 自律型トランザクションを使用したログ・テーブルを使用する |
+| FCLOSE 前に IS_OPEN を確認しない | ファイルが開かれなかった場合に例外が発生する | 常に `IF UTL_FILE.IS_OPEN(l_file) THEN CLOSE; END IF` |
+| 本番環境で DEBUG コンパイルしたままにする | パフォーマンス低下やソースコード露出のリスク | 本番用には通常コンパイルを行う |
+| 終了時に DBMS_APPLICATION_INFO をクリアしない | プールされた接続の次の利用者に前のモジュール/アクションが残る | 例外ハンドラおよび正常終了時に必ずクリアする |
+| タイトなループ内での大量のデバッグ出力 | メモリと CPU のオーバーヘッド | 条件を付けて N 回に 1 回だけ出力するようにする |
 
 ---
 
-## Oracle Version Notes (19c vs 26ai)
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-- **Oracle 11g+**: `DBMS_APPLICATION_INFO.SET_SESSION_LONGOPS` with better granularity.
-- **Oracle 12c+**: Improved SQL Developer debugger with better handling of 12c features.
-- **Oracle 18c+**: Cloud-compatible tracing with Automatic Diagnostic Repository (ADR) improvements.
-- **All versions**: `DBMS_OUTPUT.ENABLE(NULL)` for unlimited buffer available since 10g.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- ハイブリッドな環境では、19c と 26ai の両方で構文とパッケージの動作をテストすること。
 
 ---
 
-## Sources
+## ソース
 
-- [DBMS_OUTPUT (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_OUTPUT.html) — PUT_LINE, PUT, NEW_LINE, ENABLE
-- [DBMS_APPLICATION_INFO (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_APPLICATION_INFO.html) — SET_MODULE, SET_ACTION, SET_SESSION_LONGOPS
-- [UTL_FILE (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/UTL_FILE.html) — FOPEN, PUT_LINE, FCLOSE, IS_OPEN, exception types
-- [DBMS_TRACE (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_TRACE.html) — SET_PLSQL_TRACE, CLEAR_PLSQL_TRACE, trace constants
-- [Oracle Database SQL Trace Guide](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgsql/performing-application-tracing.html) — event 10046, tkprof
+- [DBMS_OUTPUT (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_OUTPUT.html)
+- [DBMS_APPLICATION_INFO (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_APPLICATION_INFO.html)
+- [UTL_FILE (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/UTL_FILE.html)
+- [DBMS_TRACE (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_TRACE.html)
+- [Oracle Database SQL Trace Guide](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgsql/performing-application-tracing.html)

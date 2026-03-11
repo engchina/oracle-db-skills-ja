@@ -1,107 +1,107 @@
-# Transaction Management in Oracle Database
+# Oracle Databaseにおけるトランザクション管理
 
-## Overview
+## 概要
 
-A transaction is a logical unit of work that consists of one or more SQL statements. Oracle's transaction model is one of the most robust in the relational database world, providing full ACID guarantees while enabling high concurrency through its multi-version concurrency control (MVCC) implementation.
+トランザクションは、1つ以上のSQL文で構成される論理的な作業単位である。Oracleのトランザクション・モデルはリレーショナル・データベースの世界で最も堅牢なものの1つであり、マルチバージョン並行性制御（MVCC）の実装を通じて高い並行性を可能にしながら、完全なACID特性を保証する。
 
-Understanding how Oracle manages transactions is essential for writing correct, performant applications. Subtle mistakes — uncommitted transactions held too long, improper use of savepoints, or misunderstanding autonomous transactions — are among the most common sources of data corruption, lock contention, and deadlocks.
+Oracleがどのようにトランザクションを管理するかを理解することは、正しくパフォーマンスの高いアプリケーションを書くために不可欠である。コミットされていないトランザクションを長く保持しすぎたり、セーブポイントを不適切に使用したり、自律型トランザクションを誤解したりといった微妙な間違いは、データ破損、ロック競合、およびデッドロックの最も一般的な原因となる。
 
 ---
 
-## ACID Properties in Oracle
+## OracleにおけるACID特性
 
-### Atomicity
+### 原子性 (Atomicity)
 
-Every statement in a transaction either fully succeeds or fully fails. If a statement fails mid-execution (e.g., a unique constraint violation), Oracle automatically rolls back that single statement's changes via **statement-level rollback** — the transaction itself remains open with prior changes intact.
+トランザクション内のすべての文は、完全に成功するか、完全に失敗するかのどちらかである。文の実行途中で失敗が発生した場合（例：一意制約違反）、Oracleは自動的にその単一の文の変更を**文レベルのロールバック**を介して取り消すが、トランザクション自体はそれ以前の変更を保持したままオープンの状態を維持する。
 
 ```sql
--- Statement-level rollback demonstration
-INSERT INTO orders (order_id, customer_id) VALUES (1, 101);  -- succeeds
-INSERT INTO orders (order_id, customer_id) VALUES (1, 102);  -- fails: duplicate PK
--- At this point, the first INSERT is still pending (transaction still open)
--- The second INSERT was rolled back automatically
-COMMIT;  -- only the first INSERT is committed
+-- 文レベルのロールバックのデモンストレーション
+INSERT INTO orders (order_id, customer_id) VALUES (1, 101);  -- 成功
+INSERT INTO orders (order_id, customer_id) VALUES (1, 102);  -- 失敗: 主キーの重複
+-- この時点で、最初の INSERT はまだ保留中（トランザクションはオープン）
+-- 2番目の INSERT は自動的にロールバックされた
+COMMIT;  -- 最初の INSERT だけがコミットされる
 ```
 
-### Consistency
+### 一貫性 (Consistency)
 
-Oracle enforces all integrity constraints at transaction commit time (by default). You can defer constraint checking within a transaction:
+Oracleは（デフォルトで）トランザクションのコミット時にすべての整合性制約を適用する。トランザクション内で制約チェックを遅延させることができる：
 
 ```sql
--- Defer constraint checking until commit
+-- コミットまで制約チェックを遅延させる
 ALTER TABLE child_table
     MODIFY CONSTRAINT fk_parent DEFERRABLE INITIALLY DEFERRED;
 
--- Within a session, you can enable deferred checking
+-- セッション内で遅延チェックを有効にする
 SET CONSTRAINTS ALL DEFERRED;
 
--- Now you can insert child before parent within the same transaction
+-- これで、同一トランザクション内で親の前に子を挿入できる
 INSERT INTO child_table (id, parent_id) VALUES (1, 999);
 INSERT INTO parent_table (id) VALUES (999);
-COMMIT;  -- constraints checked here; if parent doesn't exist, rollback
+COMMIT;  -- ここで制約がチェックされる。親が存在しなければロールバックされる
 ```
 
-### Isolation
+### 分離性 (Isolation)
 
-Oracle implements isolation through **MVCC (Multi-Version Concurrency Control)**. Readers do not block writers; writers do not block readers. Each query sees a consistent snapshot of data as of its start time (or the transaction's start time in serializable mode).
+Oracleは**MVCC (マルチバージョン並行性制御)**を通じて分離性を実装している。読取り側が書込み側をブロックすることはなく、書込み側が読取り側をブロックすることもない。各クエリは、その開始時点（またはシリアライザブル・モードの場合はトランザクション開始時点）の一貫したデータのスナップショットを参照する。
 
-Oracle supports two standard isolation levels:
+Oracleは2つの標準的な分離レベルをサポートしている：
 
-| Level | Description | Oracle Default? |
+| 分離レベル | 説明 | Oracleのデフォルト? |
 |---|---|---|
-| `READ COMMITTED` | Each statement sees data committed before the statement began | Yes |
-| `SERIALIZABLE` | Transaction sees data as of its start; errors if data changed since then | No (must set explicitly) |
+| `READ COMMITTED` | 各文は、その文が開始される前にコミットされたデータを参照する | はい |
+| `SERIALIZABLE` | トランザクションは開始時点のデータを参照する。開始後にデータが変更されているとエラーになる | いいえ (明示的設定が必要) |
 
 ```sql
--- Set serializable isolation for the current transaction
+-- 現在のトランザクションに SERIALIZABLE 分離レベルを設定
 SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 
--- Or for the session
+-- またはセッション全体に設定
 ALTER SESSION SET ISOLATION_LEVEL = SERIALIZABLE;
 ```
 
-Note: Oracle does **not** support `READ UNCOMMITTED` (dirty reads). This is by design — MVCC eliminates the need for it.
+注：Oracleは `READ UNCOMMITTED`（ダーティ・リード）をサポートして**いない**。これは設計によるものであり、MVCCによってその必要性が排除されているためである。
 
-### Durability
+### 永続性 (Durability)
 
-Once `COMMIT` returns successfully, Oracle guarantees the data is written to the redo log on disk. The redo log writer (LGWR) must flush log entries to disk before COMMIT returns.
+`COMMIT` が正常に返されると、Oracleはそのデータがディスク上のredoログに書き込まれたことを保証する。ログ・ライター (LGWR) は、COMMITが返る前にログ・エントリをディスクにフラッシュする必要がある。
 
 ```sql
--- Force a synchronous redo write (default behavior)
+-- 同期的なredo書込みを強制する (デフォルトの動作)
 COMMIT WRITE IMMEDIATE WAIT;
 
--- Asynchronous commit (higher throughput, slightly reduced durability window)
+-- 非同期コミット (スループットは向上するが、永続性の窓がわずかに減少する)
 COMMIT WRITE IMMEDIATE NOWAIT;
 
--- Batch commit (best for bulk loads where some loss is acceptable)
+-- バッチ・コミット (多少の損失が許容される大量ロードに最適)
 COMMIT WRITE BATCH NOWAIT;
 ```
 
 ---
 
-## Starting, Committing, and Rolling Back
+## 開始、コミット、およびロールバック
 
-Oracle starts a transaction implicitly with the first DML statement. There is no explicit `BEGIN TRANSACTION` in SQL*Plus or most tools (PL/SQL has `BEGIN ... END` blocks, but that is not a transaction boundary).
+Oracleでは、最初のDML文でトランザクションが暗黙的に開始される。SQL*Plusやほとんどのツールにおいて、明示的な `BEGIN TRANSACTION` は存在しない（PL/SQLには `BEGIN ... END` ブロックがあるが、これはトランザクションの境界ではない）。
 
 ```sql
--- Transaction starts implicitly with first DML
+-- 最初のDMLでトランザクションが暗黙的に開始される
 INSERT INTO accounts (account_id, balance) VALUES (1001, 5000);
 UPDATE accounts SET balance = balance - 500 WHERE account_id = 1001;
 UPDATE accounts SET balance = balance + 500 WHERE account_id = 2001;
 
--- Commit makes changes permanent and releases all locks
+-- COMMIT により変更を確定し、すべてのロックを解放する
 COMMIT;
 
--- Rollback discards all changes since last commit and releases locks
+-- ROLLBACK により前回のコミット以降のすべての変更を破棄し、ロックを解放する
 ROLLBACK;
 ```
 
-### Commit Best Practices
+### コミットのベスト・プラクティス
 
 ```sql
--- Good: commit after a logical unit of work
+-- 良い例: 論理的な作業単位の後にコミットする
 BEGIN
-    -- Transfer funds atomically
+    -- 資金を原子的に移動
     UPDATE accounts SET balance = balance - p_amount
     WHERE  account_id = p_from_account;
 
@@ -111,19 +111,19 @@ BEGIN
     INSERT INTO transfer_log (from_acct, to_acct, amount, transfer_date)
     VALUES (p_from_account, p_to_account, p_amount, SYSDATE);
 
-    COMMIT;  -- all three changes committed together
+    COMMIT;  -- これら3つの変更はまとめてコミットされる
 EXCEPTION
     WHEN OTHERS THEN
-        ROLLBACK;  -- all three changes discarded
+        ROLLBACK;  -- これら3つの変更はすべて破棄される
         RAISE;
 END;
 ```
 
 ---
 
-## Savepoints
+## セーブポイント (Savepoints)
 
-Savepoints allow partial rollbacks within a transaction. A `ROLLBACK TO savepoint_name` undoes all changes made after the savepoint was established, but does **not** end the transaction — prior changes and the savepoint itself remain.
+セーブポイントを使用すると、トランザクション内で部分的なロールバックが可能になる。`ROLLBACK TO savepoint_name` は、セーブポイント確立後のすべての変更を取り消すが、トランザクションを終了させることはない。それ以前の変更とセーブポイント自体は維持される。
 
 ```sql
 INSERT INTO orders (order_id, status) VALUES (1001, 'PENDING');
@@ -133,14 +133,14 @@ INSERT INTO order_items (order_id, item_id, qty) VALUES (1001, 'WIDGET', 5);
 SAVEPOINT after_first_item;
 
 INSERT INTO order_items (order_id, item_id, qty) VALUES (1001, 'GADGET', 2);
--- Suppose this item is out of stock, remove it but keep the order and first item
+-- このアイテムが在庫切れだと仮定し、これだけを取り消すが、注文と最初のアイテムは保持する
 ROLLBACK TO after_first_item;
 
--- Transaction still open; order and first item are still pending
-COMMIT;  -- commits order + first item only
+-- トランザクションはまだオープン。注文と最初のアイテムは保留中のまま
+COMMIT;  -- 注文と最初のアイテムのみをコミット
 ```
 
-### Savepoints in PL/SQL Error Handling
+### PL/SQLエラー処理におけるセーブポイント
 
 ```plpgsql
 DECLARE
@@ -158,7 +158,7 @@ BEGIN
                     get_current_price(item.product_id));
         EXCEPTION
             WHEN OTHERS THEN
-                -- Skip bad items, keep good ones
+                -- 不正なアイテムはスキップし、正常なものは保持する
                 ROLLBACK TO order_created;
                 log_error('Failed to insert item: ' || item.product_id);
         END;
@@ -168,24 +168,24 @@ BEGIN
 END;
 ```
 
-**Important:** `ROLLBACK TO savepoint` releases row locks acquired after the savepoint, but does NOT release locks acquired before it.
+**重要:** `ROLLBACK TO savepoint` は、そのセーブポイント以降に取得された行ロックを解放するが、それ以前に取得されたロックは解放**しない**。
 
 ---
 
-## Autonomous Transactions
+## 自律型トランザクション (Autonomous Transactions)
 
-An **autonomous transaction** is an independent transaction spawned from within a calling transaction. It has its own commit/rollback scope — completely independent of the parent transaction. Changes made by an autonomous transaction are visible to other sessions immediately after its commit, even if the calling transaction has not committed.
+**自律型トランザクション**は、呼び出し元のトランザクション内から生成される独立したトランザクションである。独自のコミット/ロールバック・スコープを持ち、親トランザクションとは完全に独立している。自律型トランザクションによる変更は、呼び出し元のトランザクションがコミットされる前であっても、コミット直後に他のセッションから参照可能になる。
 
-Enable with the `PRAGMA AUTONOMOUS_TRANSACTION` compiler directive.
+`PRAGMA AUTONOMOUS_TRANSACTION` コンパイラ・ディレクティブを使用して有効にする。
 
-### Primary Use Cases
+### 主なユースケース
 
-1. **Error logging** — record errors even when the calling transaction rolls back
-2. **Audit trails** — insert audit records that must survive a rollback
-3. **Sequence number generation** — in rare cases where gaps must be tracked
+1. **エラー・ログの記録** — 呼び出し元のトランザクションがロールバックされてもエラーを記録する
+2. **監査証跡（Audit Trails）** — ロールバックを生き残る必要がある監査レコードを挿入する
+3. **シーケンス番号の生成** — 欠番を追跡する必要がある稀なケース
 
 ```sql
--- Audit/logging procedure using autonomous transaction
+-- 自律型トランザクションを使用した監査/ログ用プロシージャ
 CREATE OR REPLACE PROCEDURE log_audit_event (
     p_action   IN VARCHAR2,
     p_table    IN VARCHAR2,
@@ -197,20 +197,20 @@ BEGIN
     INSERT INTO audit_log (log_id, action, table_name, row_id, details, log_time, logged_by)
     VALUES (seq_audit.NEXTVAL, p_action, p_table, p_row_id, p_details, SYSTIMESTAMP, USER);
 
-    COMMIT;  -- REQUIRED: autonomous transaction must be explicitly committed or rolled back
+    COMMIT;  -- 必須: 自律型トランザクションは明示的にコミットまたはロールバックする必要がある
 END log_audit_event;
 /
 
--- Usage: even if the outer transaction rolls back, the audit record persists
+-- 使用例: 外部トランザクションがロールバックされても、監査レコードは残る
 BEGIN
     UPDATE sensitive_data SET value = 'changed' WHERE id = 42;
     log_audit_event('UPDATE', 'SENSITIVE_DATA', '42', 'Value changed');
-    -- If we rollback here, log_audit_event's INSERT is already committed
-    ROLLBACK;  -- sensitive_data change is undone, but audit record remains
+    -- ここでロールバックしても、log_audit_event の INSERT は既にコミットされている
+    ROLLBACK;  -- sensitive_data の変更は取り消されるが、監査レコードは残る
 END;
 ```
 
-### Error Logging Table Pattern
+### エラー・ログ表パターン
 
 ```sql
 CREATE TABLE error_log (
@@ -235,17 +235,17 @@ BEGIN
 END log_error;
 ```
 
-### Autonomous Transaction Gotchas
+### 自律型トランザクションの注意点
 
 ```sql
--- WRONG: Autonomous transaction reading uncommitted data from parent
--- Parent inserts a row but hasn't committed
--- Autonomous transaction CANNOT see parent's uncommitted changes
+-- 誤り: 親からの未コミット・データを読み取ろうとする自律型トランザクション
+-- 親が1行挿入したが、まだコミットしていない
+-- 自律型トランザクションは親の未コミットの変更を参照できない
 CREATE OR REPLACE PROCEDURE bad_autonomous AS
     PRAGMA AUTONOMOUS_TRANSACTION;
     v_count NUMBER;
 BEGIN
-    -- This reads the COMMITTED state of the table, not parent's pending inserts
+    -- これは、親の保留中の挿入ではなく、テーブルの「コミット済み」状態を読み取る
     SELECT COUNT(*) INTO v_count FROM orders WHERE status = 'PENDING';
     COMMIT;
 END;
@@ -253,53 +253,53 @@ END;
 
 ---
 
-## Distributed Transactions (XA)
+## 分散トランザクション (XA)
 
-Oracle supports the X/Open XA protocol for distributed transactions spanning multiple databases or resource managers (databases + message queues).
+Oracleは、複数のデータベースまたはリソース・マネージャ（データベース + メッセージ・キュー）にまたがる分散トランザクションのためのX/Open XAプロトコルをサポートしている。
 
-### Two-Phase Commit (2PC)
+### 2フェーズ・コミット (2PC)
 
-Oracle acts as either a **coordinator** or a **participant** in 2PC:
+Oracleは2PCにおいて、**コーディネータ**または**参加者**として動作する：
 
 ```sql
--- Phase 1: Prepare (coordinator asks all participants to prepare)
--- Each participant writes prepared state to its redo log
+-- フェーズ 1: Prepare (準備。コーディネータが全参加者に準備を要求する)
+-- 各参加者は準備完了状態を自らのredoログに書き込む
 
--- Phase 2: Commit or Rollback (coordinator decision)
--- All participants commit or all rollback
+-- フェーズ 2: Commit または Rollback (コーディネータの決定)
+-- 全参加者がコミットするか、全参加者がロールバックする
 
--- Monitoring in-doubt distributed transactions
+-- 未確定の（in-doubt）分散トランザクションの監視
 SELECT local_tran_id, global_tran_id, state, mixed, advice, tran_comment
 FROM   dba_2pc_pending;
 
--- Force commit of an in-doubt transaction (after network recovery)
+-- 未確定トランザクションを強制的にコミットする（ネットワーク復旧後など）
 COMMIT FORCE 'local_tran_id';
 
--- Force rollback of an in-doubt transaction
+-- 未確定トランザクションを強制的にロールバックする
 ROLLBACK FORCE 'local_tran_id';
 ```
 
-### Database Links in Transactions
+### トランザクション内でのデータベース・リンク
 
 ```sql
--- Transactions automatically become distributed when they touch a DB link
+-- DBリンクに触れると、トランザクションは自動的に分散トランザクションになる
 UPDATE orders@remote_db SET status = 'SHIPPED' WHERE order_id = :id;
 UPDATE local_inventory SET qty = qty - 1 WHERE product_id = :prod;
-COMMIT;  -- Oracle automatically performs 2PC with remote_db
+COMMIT;  -- Oracleは自動的に remote_db との間で2PCを実行する
 ```
 
-### JDBC XA Example
+### JDBC XA の例
 
 ```java
 import javax.sql.XADataSource;
 import javax.transaction.xa.XAResource;
 import javax.transaction.xa.Xid;
 
-// XA with JTA transaction manager (e.g., Atomikos, Bitronix, Narayana)
+// JTAトランザクション・マネージャ (Atomikos, Bitronix, Narayana 等) を使用したXA
 XAConnection xaConn = xaDataSource.getXAConnection("user", "password");
 XAResource xaResource = xaConn.getXAResource();
 
-Xid xid = createXid();  // application-defined transaction ID
+Xid xid = createXid();  // アプリケーション定義のトランザクションID
 
 xaResource.start(xid, XAResource.TMNOFLAGS);
 try (Connection conn = xaConn.getConnection()) {
@@ -316,19 +316,19 @@ if (prepareResult == XAResource.XA_OK) {
 
 ---
 
-## Avoiding Long-Running Transactions
+## 長時間実行されるトランザクションの回避
 
-Long-running transactions are the most common source of performance problems in Oracle applications. They:
+長時間実行されるトランザクションは、Oracleアプリケーションにおけるパフォーマンス問題の最も一般的な原因である。これらは以下の影響を及ぼす：
 
-- Hold row locks that block other sessions
-- Generate undo data that must be retained until the transaction completes
-- Can cause `ORA-01555: snapshot too old` for other long-running queries
-- Consume undo tablespace, potentially causing ORA-30036
+- 他のセッションをブロックする行ロックを保持し続ける
+- トランザクションが完了するまで保持する必要のあるundoデータを生成し続ける
+- 他の長時間実行されるクエリに対して `ORA-01555: snapshot too old` を引き起こす可能性がある
+- undo表領域を消費し、ORA-30036の原因となる可能性がある
 
-### Detecting Long-Running Transactions
+### 長時間実行されるトランザクションの検出
 
 ```sql
--- Find sessions with open transactions
+-- オープンなトランザクションを持つセッションを特定
 SELECT s.sid, s.serial#, s.username, s.status, s.program,
        t.start_time, t.used_ublk AS undo_blocks_used,
        ROUND((SYSDATE - TO_DATE(t.start_time,'MM/DD/YY HH24:MI:SS')) * 24 * 60, 1)
@@ -337,25 +337,25 @@ FROM   v$session s
 JOIN   v$transaction t ON s.taddr = t.addr
 ORDER  BY minutes_open DESC;
 
--- Check undo usage
+-- undo使用状況の確認
 SELECT usn, xacts, rssize/1024/1024 AS mb_used, status
 FROM   v$rollstat rs
 JOIN   v$rollname rn ON rs.usn = rn.usn
 ORDER  BY mb_used DESC;
 ```
 
-### Batch Processing Pattern — Commit in Batches
+### バッチ処理パターン — バッチごとにコミット
 
 ```plpgsql
--- WRONG: one commit for millions of rows
+-- 誤り: 何百万行に対しても1回のコミット
 BEGIN
     FOR r IN (SELECT id FROM large_table WHERE needs_processing = 'Y') LOOP
         UPDATE large_table SET processed_date = SYSDATE WHERE id = r.id;
     END LOOP;
-    COMMIT;  -- holds all locks for the entire loop duration
+    COMMIT;  -- ループ中ずっとすべてのロックを保持してしまう
 END;
 
--- RIGHT: commit every N rows
+-- 正解: N行ごとにコミット
 DECLARE
     v_batch_size CONSTANT PLS_INTEGER := 1000;
     v_count      PLS_INTEGER := 0;
@@ -368,11 +368,11 @@ BEGIN
             COMMIT;
         END IF;
     END LOOP;
-    COMMIT;  -- final batch
+    COMMIT;  -- 最後のバッチ
 END;
 ```
 
-### Using FORALL for Bulk DML
+### 大量DMLのための FORALL の使用
 
 ```plpgsql
 DECLARE
@@ -399,34 +399,34 @@ END;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Keep transactions as short as possible.** Do all computation before the transaction, execute DML, commit immediately.
-- **Never wait for user input inside a transaction.** The user might walk away, leaving locks held.
-- **Always handle exceptions and call ROLLBACK.** An unhandled exception in application code that disconnects without rollback leaves the transaction open until the session is killed.
-- **Use `COMMIT WRITE BATCH NOWAIT` only for bulk loads** where you understand the durability trade-off.
-- **Prefer `FORALL` and bulk operations** over row-by-row DML to reduce commit frequency while keeping transactions short.
-- **Test with `SERIALIZABLE` isolation** if your application logic depends on consistent reads across multiple statements; do not assume `READ COMMITTED` provides snapshot consistency at the transaction level.
-- **Never use `PRAGMA AUTONOMOUS_TRANSACTION` to work around locking issues.** It creates invisible data dependencies that are hard to debug.
+- **トランザクションは可能な限り短く保つ。** すべての計算をトランザクション前に行い、DMLを実行し、直ちにコミットする。
+- **トランザクション内でユーザー入力を待たない。** ユーザーが席を外すと、ロックが保持されたままになってしまう。
+- **常に例外を処理し、ROLLBACK を呼び出す。** アプリケーション・コードでハンドルされない例外が発生し、ロールバックなしで切断されると、セッションが強制終了されるまでトランザクションがオープンのまま残る。
+- **`COMMIT WRITE BATCH NOWAIT` は大量ロードにのみ使用する**（永続性とのトレードオフを理解した上で行う）。
+- **`FORALL` やバルク操作を優先する。** 行単位のDMLよりもコミット頻度を下げつつ、トランザクションを短く保つことができる。
+- **`SERIALIZABLE` 分離レベルでのテスト。** アプリケーションのロジックが複数の文にわたる一貫した読取りに依存している場合に行う。`READ COMMITTED` がトランザクション・レベルでスナップショットの一貫性を提供すると仮定してはならない。
+- **ロック問題を回避するために `PRAGMA AUTONOMOUS_TRANSACTION` を使用しない。** デバッグが困難な目に見えないデータの依存関係を生み出してしまう。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-### Mistake 1: Swallowing Exceptions Without Rollback
+### 間違い 1: ロールバックなしで例外を握りつぶす
 
 ```plpgsql
--- WRONG: exception is caught but transaction is not rolled back
+-- 誤り: 例外はキャッチされているが、トランザクションがロールバックされていない
 BEGIN
     UPDATE accounts SET balance = balance - 500 WHERE id = 1;
     UPDATE accounts SET balance = balance + 500 WHERE id = 2;
 EXCEPTION
     WHEN OTHERS THEN
-        -- Silent swallow — first UPDATE may be committed elsewhere
+        -- 沈黙のうちに握りつぶされる — 最初の UPDATE がどこかでコミットされる可能性がある
         NULL;
 END;
 
--- RIGHT
+-- 正解
 BEGIN
     UPDATE accounts SET balance = balance - 500 WHERE id = 1;
     UPDATE accounts SET balance = balance + 500 WHERE id = 2;
@@ -434,46 +434,45 @@ BEGIN
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
-        RAISE;  -- re-raise so the caller knows
+        RAISE;  -- 呼び出し元が把握できるように再スローする
 END;
 ```
 
-### Mistake 2: DDL in the Middle of a Transaction
+### 間違い 2: トランザクションの途中で DDL を実行する
 
-In Oracle, any DDL statement (`CREATE`, `ALTER`, `DROP`, `TRUNCATE`) issues an implicit COMMIT before and after it executes. This silently commits any pending DML.
+Oracleでは、あらゆるDDL文（`CREATE`, `ALTER`, `DROP`, `TRUNCATE`）の実行前後に暗黙的な COMMIT が発行される。これにより、保留中のDMLが意図せずコミットされてしまう。
 
 ```sql
 INSERT INTO temp_data VALUES (1, 'test');  -- DML
-CREATE INDEX idx_temp ON temp_data(id);    -- IMPLICIT COMMIT before this!
-ROLLBACK;  -- too late; the INSERT was already committed
+CREATE INDEX idx_temp ON temp_data(id);    -- この直前に暗黙の COMMIT が発生！
+ROLLBACK;  -- 遅すぎる。INSERT は既にコミットされている
 ```
 
-### Mistake 3: Relying on Autocommit in JDBC
+### 間違い 3: JDBC のオートコミットをそのままにする
 
-JDBC connections have `autoCommit=true` by default. Every single statement is immediately committed. This is almost never what you want for OLTP.
+JDBC接続のデフォルトは `autoCommit=true` である。すべての文が直ちにコミットされる。これは OLTP においてほとんどの場合、望ましい動作ではない。
 
 ```java
-// Disable autocommit immediately after obtaining connection
+// 接続取得後、直ちにオートコミットを無効にする
 connection.setAutoCommit(false);
-// ... perform DML ...
-connection.commit();  // or connection.rollback() in catch block
+// ... DMLを実行 ...
+connection.commit();  // または catch ブロックで connection.rollback()
 ```
 
-### Mistake 4: Misunderstanding Statement-Level vs. Transaction-Level Rollback
+### 間違い 4: 文レベルとトランザクション・レベルのロールバックの混同
 
-When a DML statement fails with an exception, only that statement is rolled back. The transaction remains open. If you catch the exception and do nothing, the prior statements in the transaction are still uncommitted and their locks are still held.
+DML文が例外で失敗した場合、その文だけがロールバックされる。トランザクションはオープンのままである。例外をキャッチして何もしなければ、トランザクション内の以前の文はコミットされず、ロックも保持されたままになる。
 
 ---
 
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Database 19c Concepts (CNCPT) — Transactions](https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/)
-- [Oracle Database 19c Application Developer's Guide (ADFNS)](https://docs.oracle.com/en/database/oracle/oracle-database/19/adfns/)
-- [Oracle Database 19c PL/SQL Language Reference — Transaction Processing](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/)
+- [Oracle Database 19c 概念 (CNCPT) — トランザクション](https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/)
+- [Oracle Database 19c アプリケーション・開発者ガイド (ADFNS)](https://docs.oracle.com/en/database/oracle/oracle-database/19/adfns/)
+- [Oracle Database 19c PL/SQL言語リファレンス — トランザクション処理](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/)

@@ -1,26 +1,26 @@
-# SQLcl MCP Server
+# SQLcl MCP サーバー
 
-## Overview
+## 概要
 
-The SQLcl MCP Server is a built-in capability of Oracle SQLcl (**25.2 or later**) that exposes Oracle Database functionality to AI assistants via the **Model Context Protocol (MCP)**. SQLcl acts as the MCP server — it holds the database connection and handles authentication, while AI clients (Claude Desktop, Claude Code, VS Code with Cline, etc.) drive the interaction through well-defined MCP tool calls.
+SQLcl MCP サーバーは、Oracle Database の機能を **Model Context Protocol (MCP)** 経由で AI アシスタントに公開する、Oracle SQLcl（**25.2 以降**）の組み込み機能です。SQLcl が MCP サーバーとして動作し、データベース接続を保持して認証を処理する一方で、AI クライアント（Claude Desktop、Claude Code、VS Code Cline など）は定義済みの MCP ツール呼び出しを通じてインタラクションを駆動します。
 
-Communication uses **`stdio` only**. The AI client spawns SQLcl as a child process and communicates via stdin/stdout. There is no HTTP, SSE, or network port.
+通信には **`stdio` のみ** を使用します。AI クライアントは SQLcl を子プロセスとして起動し、stdin/stdout 経由で通信します。HTTP、SSE、またはネットワーク・ポートは使用されません。
 
 ---
 
-## Prerequisites
+## 前提条件
 
-- **SQLcl 25.2 or later** (MCP was not present in 24.3 or earlier)
-- **JRE 17 or 21**
+- **SQLcl 25.2 以降**（MCP は 24.3 以前には存在しませんでした）
+- **JRE 17 または 21**
 
-Verify your version:
+バージョンの確認：
 
 ```shell
 sql -V
-# SQLcl: Release 25.2.0 Production or newer required
+# SQLcl: Release 25.2.0 Production 以降が必要
 ```
 
-Upgrade on macOS:
+macOS でのアップグレード：
 
 ```shell
 brew upgrade sqlcl
@@ -28,11 +28,11 @@ brew upgrade sqlcl
 
 ---
 
-## Step 1: Save Your Database Connection
+## ステップ 1：データベース接続の保存
 
-The MCP server does **not** accept credentials on the command line. You must pre-save connections using SQLcl's connection store before starting the MCP server.
+MCP サーバーはコマンドラインでの資格情報の入力を受け付けません。MCP サーバーを起動する前に、SQLcl の接続ストアを使用して接続を事前に保存しておく必要があります。
 
-Connect and save with the `-save` and `-savepwd` flags:
+`-save` および `-savepwd` フラグを使用して接続し、保存します。
 
 ```shell
 sql /nolog
@@ -42,12 +42,12 @@ sql /nolog
 conn -save my_connection -savepwd username/password@//hostname:1521/service_name
 ```
 
-- `-save <name>` — saves the connection under a name
-- `-savepwd` — stores the password securely in `~/.dbtools`
+- `-save <名前>` — 接続に名前を付けて保存します。
+- `-savepwd` — パスワードを `~/.dbtools` に安全に保存します。
 
-The password **must** be saved with `-savepwd` for the MCP server to be able to use it. After saving, the AI client will reference this named connection via the `connect` MCP tool.
+MCP サーバーがパスワードを使用できるようにするには、必ず `-savepwd` を指定してパスワードを保存する **必要があります**。保存完了後、AI クライアントは `connect` MCP ツールを介してこの名前付き接続を参照します。
 
-For TNS-based connections, set `TNS_ADMIN` so SQLcl can find `tnsnames.ora`:
+TNS ベースの接続の場合は、SQLcl が `tnsnames.ora` を見つけられるように `TNS_ADMIN` を設定してください。
 
 ```shell
 sql /nolog
@@ -59,17 +59,17 @@ conn -save my_tns_connection -savepwd username/password@tns_alias
 
 ---
 
-## Step 2: Start the MCP Server
+## ステップ 2：MCP サーバーの起動
 
-Start SQLcl with the `-mcp` flag:
+`-mcp` フラグを指定して SQLcl を起動します。
 
 ```shell
 sql -mcp
 ```
 
-SQLcl starts in MCP server mode, listening on stdin/stdout. The default restrict level when using `-mcp` is **4** (most restrictive — see Restrict Levels below).
+SQLcl は MCP サーバー・モードで起動し、stdin/stdout で待機します。`-mcp` 使用時のデフォルトの制限レベル（restrict level）は **4** です（最も厳しい制限。後述の制限レベルのセクションを参照）。
 
-You will see a startup confirmation:
+起動確認メッセージが表示されます：
 
 ```
 ---------- MCP SERVER STARTUP ----------
@@ -78,7 +78,7 @@ Press Ctrl+C to stop the server
 ----------------------------------------
 ```
 
-To use a different restrict level:
+異なる制限レベルを使用する場合：
 
 ```shell
 sql -R 1 -mcp
@@ -86,11 +86,11 @@ sql -R 1 -mcp
 
 ---
 
-## Step 3: Configure Your AI Client
+## ステップ 3：AI クライアントの構成
 
 ### Claude Desktop
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+`~/Library/Application Support/Claude/claude_desktop_config.json`（macOS）または `%APPDATA%\Claude\claude_desktop_config.json`（Windows）を編集します：
 
 ```json
 {
@@ -103,7 +103,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 }
 ```
 
-For TNS connections, pass `TNS_ADMIN` so the spawned process can find `tnsnames.ora` (MCP client processes do not inherit shell environment variables):
+TNS 接続の場合は、起動されたプロセスが `tnsnames.ora` を見つけられるように `TNS_ADMIN` を渡します（MCP クライアント・プロセスはシェルの環境変数を継承しないため）：
 
 ```json
 {
@@ -119,23 +119,23 @@ For TNS connections, pass `TNS_ADMIN` so the spawned process can find `tnsnames.
 }
 ```
 
-Use the absolute path to `sql` — find it with:
+`sql` への絶対パスを使用してください。以下のコマンドで確認できます：
 
 ```shell
 which sql
 ```
 
-Restart Claude Desktop after editing the config.
+設定を編集した後、Claude Desktop を再起動します。
 
 ### Claude Code
 
-Add the server using the `claude mcp add` command:
+`claude mcp add` コマンドを使用してサーバーを追加します：
 
 ```shell
 claude mcp add sqlcl /path/to/sql -- -mcp
 ```
 
-Or manually create/edit `.mcp.json` in your project directory:
+または、プロジェクト・ディレクトリ内の `.mcp.json` を手動で作成/編集します：
 
 ```json
 {
@@ -148,15 +148,15 @@ Or manually create/edit `.mcp.json` in your project directory:
 }
 ```
 
-Verify the server is registered:
+サーバーが登録されていることを確認します：
 
 ```shell
 claude mcp list
 ```
 
-### VS Code with Cline
+### VS Code Cline
 
-Edit `cline_mcp_settings.json`:
+`cline_mcp_settings.json` を編集します：
 
 ```json
 {
@@ -172,41 +172,41 @@ Edit `cline_mcp_settings.json`:
 
 ---
 
-## MCP Tools
+## MCP ツール
 
-Five tools are exposed by the SQLcl MCP server. Oracle adds new tools in each SQLcl release.
+SQLcl MCP サーバーからは 5 つのツールが公開されています。Oracle は SQLcl のリリースごとに新しいツールを追加しています。
 
-| Tool | Description |
+| ツール名 | 説明 |
 |------|-------------|
-| `list-connections` | Discovers and lists all saved Oracle Database connections in `~/.dbtools` |
-| `connect` | Establishes a connection to one of the saved named connections |
-| `disconnect` | Terminates the current active Oracle Database connection |
-| `run-sql` | Executes standard SQL queries and PL/SQL code blocks against the connected database |
-| `run-sqlcl` | Executes SQLcl-specific commands and extensions |
+| `list-connections` | `~/.dbtools` に保存されているすべての Oracle Database 接続を検出し、リスト表示します。 |
+| `connect` | 保存されている名前付き接続のいずれかに対して接続を確立します。 |
+| `disconnect` | 現在アクティブな Oracle Database 接続を終了します。 |
+| `run-sql` | 接続されているデータベースに対して、標準的な SQL クエリおよび PL/SQL コード・ブロックを実行します。 |
+| `run-sqlcl` | SQLcl 固有のコマンドや拡張機能を実行します。 |
 
-The AI client will first call `list-connections` to discover available connections, then `connect` to establish a session, then `run-sql` or `run-sqlcl` to interact with the database.
+AI クライアントは、まず `list-connections` を呼び出して利用可能な接続を検出し、次に `connect` でセッションを確立し、最後に `run-sql` または `run-sqlcl` を呼び出してデータベースとやり取りします。
 
 ---
 
-## Restrict Levels
+## 制限レベル (Restrict Levels)
 
-The `-R` flag controls which SQLcl commands are available to the MCP server. When `-mcp` is used, the default is **level 4** (most restrictive).
+`-R` フラグは、MCP サーバーで利用可能な SQLcl コマンドを制御します。`-mcp` が使用される場合、デフォルトは **レベル 4**（最も制限が厳しい）です。
 
-| Level | What is blocked |
+| レベル | ブロックされるもの |
 |-------|----------------|
-| `0` | Nothing — all commands allowed |
-| `1` | Host/OS commands (`host`, `!`, `$`, `edit`) |
-| `2` | Level 1 + file-saving commands (`save`, `spool`, `store`) |
-| `3` | Level 2 + script execution (`@`, `@@`, `get`, `start`) |
-| `4` | Level 3 + 100+ additional commands — **default for `-mcp`** |
+| `0` | なし — すべてのコマンドが許可されます。 |
+| `1` | ホスト/OS コマンド（`host`, `!`, `$`, `edit`） |
+| `2` | レベル 1 + ファイル保存コマンド（`save`, `spool`, `store`） |
+| `3` | レベル 2 + スクリプト実行（`@`, `@@`, `get`, `start`） |
+| `4` | レベル 3 + 100 以上の追加コマンド — **`-mcp` のデフォルト** |
 
-Example — allow slightly more than the default:
+例 — デフォルトよりも少し緩和する場合：
 
 ```shell
 sql -R 3 -mcp
 ```
 
-Example config with restrict level:
+制限レベルを指定した構成例：
 
 ```json
 {
@@ -221,102 +221,102 @@ Example config with restrict level:
 
 ---
 
-## Monitoring
+## モニタリング
 
-### Activity Log Table
+### アクティビティ・ログ構成表
 
-SQLcl automatically creates a `DBTOOLS$MCP_LOG` table in the connected schema to record all MCP activity:
+SQLcl は、接続先のスキーマに `DBTOOLS$MCP_LOG` 表を自動的に作成し、すべての MCP アクティビティを記録します。
 
 ```sql
 SELECT id, mcp_client, model, end_point_type, end_point_name, log_message
 FROM DBTOOLS$MCP_LOG;
 ```
 
-This provides a full audit trail of AI-driven SQL execution, including which AI client and model made each call.
+これにより、各呼び出しを行った AI クライアントやモデルの情報を含め、AI主導の SQL 実行に関する完全な監査証跡が提供されます。
 
-### V$SESSION Integration
+### V$SESSION との統合
 
-SQLcl populates Oracle session metadata for MCP connections:
+SQLcl は MCP 接続のために Oracle セッション・メタデータを設定します：
 
-- `V$SESSION.MODULE` — set to the MCP client name (e.g., `Claude Desktop`)
-- `V$SESSION.ACTION` — set to the LLM model name
+- `V$SESSION.MODULE` — MCP クライアント名に設定されます（例：`Claude Desktop`）
+- `V$SESSION.ACTION` — LLM モデル名に設定されます。
 
-This allows DBAs to identify and monitor AI-driven sessions in real time.
+これにより、DBA は AI 主導のセッションをリアルタイムで特定および監視できます。
 
-### Query Tagging
+### クエリ・タギング
 
-All SQL generated and executed by an LLM through the MCP server is automatically tagged with a comment:
+MCP サーバーを介して LLM によって生成および実行されるすべての SQL には、自動的に以下のコメントがタグ付けされます：
 
 ```sql
 /* LLM in use is [model-name] */ SELECT ...
 ```
 
-This makes AI-generated SQL identifiable in AWR, ASH, and `V$SQL`.
+これにより、AWR、ASH、および `V$SQL` において、AI 生成の SQL を識別できるようになります。
 
 ---
 
-## Security Considerations
+## セキュリティに関する考慮事項
 
-### Use a Least-Privilege Database User
+### 最小権限のデータベース・ユーザーの使用
 
-Save a dedicated, restricted database user for MCP connections rather than using your DBA account:
+DBA アカウントを使用するのではなく、MCP 接続用に制限された専用のデータベース・ユーザーを保存して使用してください：
 
 ```sql
 CREATE USER mcp_reader IDENTIFIED BY "StrongPassword123!";
 GRANT CREATE SESSION TO mcp_reader;
 GRANT SELECT ON oe.orders TO mcp_reader;
 GRANT SELECT ON oe.customers TO mcp_reader;
--- Grant SELECT ANY DICTIONARY for schema introspection:
+-- スキーマのイントロスペクション（構造把握）のために SELECT ANY DICTIONARY を付与：
 GRANT SELECT ANY DICTIONARY TO mcp_reader;
 ```
 
-Save this connection before starting the MCP server:
+MCP サーバーを起動する前に、この接続を保存します：
 
 ```sql
 conn -save mcp_readonly -savepwd mcp_reader/StrongPassword123!@//host:1521/svc
 ```
 
-### What the AI Can and Cannot Do
+### AI ができること、できないこと
 
-The AI operates entirely within the permissions of the database user it connects as. Restrict levels further limit SQLcl commands available within the session.
+AI は、接続したデータベース・ユーザーの権限の範囲内でのみ動作します。制限レベルの設定によって、セッション内で利用可能な SQLcl コマンドがさらに制限されます。
 
-**Cannot do regardless of DB permissions:**
-- Access the OS filesystem (blocked by default restrict level)
-- Open network connections
-- Escalate database privileges
+**DB 権限に関わらずできないこと：**
+- OS ファイルシステムへのアクセス（デフォルトの制限レベルでブロックされます）
+- ネットワーク接続のオープン
+- データベース権限の昇格
 
-### TNS_ADMIN Is the Only Supported Environment Variable
+### TNS_ADMIN は唯一サポートされている環境変数です
 
-The only environment variable documented for the SQLcl MCP server is `TNS_ADMIN`. Do not attempt to pass passwords via environment variables — there is no supported mechanism for this. All credentials must be pre-saved using `conn -save -savepwd`.
+SQLcl MCP サーバー向けにドキュメント化されている唯一の環境変数は `TNS_ADMIN` です。環境変数を介してパスワードを渡そうとしないでください。そのためのサポートされているメカニズムはありません。すべての資格情報は `conn -save -savepwd` を使用して事前に保存しておく必要があります。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Fix |
+| 間違い | 回避策 |
 |---------|-----|
-| Using SQLcl 24.3 or earlier | Upgrade to 25.2+; MCP was not available in earlier versions |
-| Passing credentials on the `sql -mcp` command line | Pre-save connections with `conn -save -savepwd` instead |
-| Using a relative path to `sql` in the MCP config | Use the absolute path (`which sql`) — AI clients do not inherit your shell PATH |
-| Forgetting `TNS_ADMIN` in the config `env` block for TNS connections | MCP client processes don't inherit shell env vars; set `TNS_ADMIN` explicitly in the config |
-| Saving a connection without `-savepwd` | The MCP server cannot connect without a saved password; always include `-savepwd` |
-| Expecting HTTP/SSE transport | SQLcl MCP is stdio only — no network port is involved |
+| SQLcl 24.3 以前を使用している | 25.2 以降にアップグレードしてください。以前のバージョンでは MCP は利用できません。 |
+| `sql -mcp` コマンドラインで資格情報を渡そうとしている | 代わりに `conn -save -savepwd` で接続を事前に保存してください。 |
+| MCP 構成で `sql` への相対パスを使用している | 絶対パス（`which sql`）を使用してください。AI クライアントはシェルの PATH を継承しません。 |
+| TNS 接続の構成で `env` ブロックに `TNS_ADMIN` を含め忘れている | MCP クライアント・プロセスはシェルの環境変数を継承しません。構成内で `TNS_ADMIN` を明示的に設定してください。 |
+| `-savepwd` なしで接続を保存している | MCP サーバーは保存済みのパスワードなしでは接続できません。必ず `-savepwd` を含めてください。 |
+| HTTP/SSE トランスポートを期待している | SQLcl MCP は stdio のみであり、ネットワーク・ポートは関与しません。 |
 
 ---
 
-## Related Skills
+## 関連スキル
 
-- `sqlcl-basics.md` — SQLcl installation, connection methods, and core commands
-- `sqlcl-cicd.md` — Using SQLcl non-interactively in pipelines
-- `security/privilege-management.md` — Oracle user creation and least-privilege setup
-- `monitoring/top-sql-queries.md` — Identifying AI-generated SQL via V$SQL tagging
+- `sqlcl-basics.md` — SQLcl のインストール、接続方法、およびコア・コマンド
+- `sqlcl-cicd.md` — パイプライン内で非対話的に SQLcl を使用する方法
+- `security/privilege-management.md` — Oracle ユーザーの作成と最小権限の設定
+- `monitoring/top-sql-queries.md` — V$SQL タギングを介した AI 生成 SQL の特定
 
 ---
 
-## Sources
+## 参考資料
 
-- [Oracle SQLcl 25.2 User's Guide](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/oracle-sqlcl-users-guide.pdf)
-- [SQLcl Release Notes 25.2 — MCP Server introduced](https://www.oracle.com/tools/sqlcl/sqlcl-relnotes-25.2.html)
-- [Starting and Leaving SQLcl — startup flags including -mcp](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/startup-sqlcl-settings.html)
+- [Oracle SQLcl 25.2 ユーザーズ・ガイド](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/oracle-sqlcl-users-guide.pdf)
+- [SQLcl リリース・ノート 25.2 — MCP サーバーの導入](https://www.oracle.com/tools/sqlcl/sqlcl-relnotes-25.2.html)
+- [SQLcl の開始と終了 — -mcp を含む起動フラグ](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/startup-sqlcl-settings.html)
 
-> ⚠️ Unverified: The official MCP documentation page for SQLcl 25.2 was not reachable at time of verification. The critical facts in this file (5 tools, stdio transport, `-mcp` flag, version 25.2+, `DBTOOLS$MCP_LOG` log table, `TNS_ADMIN` only env var, `conn -save -savepwd`) should be confirmed against the live Oracle SQLcl docs before use in production.
+> ⚠️ 未検証：検証時点では、SQLcl 25.2 の公式 MCP ドキュメント・ページにアクセスできませんでした。このファイル内の重要な事実（5 つのツール、stdio トランスポート、`-mcp` フラグ、バージョン 25.2 以降、`DBTOOLS$MCP_LOG` ログ表、`TNS_ADMIN` 以外の環境変数は不可、`conn -save -savepwd`）は、本番環境で使用する前に最新の Oracle SQLcl ドキュメントで確認する必要があります。

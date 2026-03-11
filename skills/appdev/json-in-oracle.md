@@ -1,19 +1,19 @@
-# JSON in Oracle Database
+# Oracle DatabaseにおけるJSON
 
-## Overview
+## 概要
 
-Oracle has evolved from treating JSON as a string stored in VARCHAR2 or CLOB columns (12c) to providing a dedicated native JSON data type with deep query integration, indexing, and schema enforcement (21c+). In Oracle 23c, JSON Relational Duality Views represent a paradigm shift — allowing the same data to be accessed and modified as both JSON documents and relational rows simultaneously.
+OracleにおけるJSONの扱いは、VARCHAR2やCLOB列に文字列として格納する方式（12c）から、深いクエリの統合、索引付け、およびスキーマの適用が可能な専用のネイティブJSONデータ型（21c以降）へと進化してきた。Oracle 23cにおける「JSON関係ディアルティ・ビュー（JSON Relational Duality Views）」は、パラダイムシフトを意味しており、同じデータをJSONドキュメントとしてもリレーショナルな行としても同時にアクセス・変更することを可能にする。
 
-This guide covers the full spectrum: storage options, the complete SQL/JSON function set, indexing strategies, and the modern JSON Duality View architecture.
+本ガイドでは、ストレージ・オプション、SQL/JSON関数の全セット、索引戦略、および最新のJSONディアルティ・ビューのアーキテクチャまで、包括的に解説する。
 
 ---
 
-## JSON Storage Options
+## JSONのストレージ・オプション
 
-### Pre-21c: VARCHAR2 / CLOB with IS JSON Constraint
+### 21cより前: IS JSON制約を伴う VARCHAR2 / CLOB
 
 ```sql
--- VARCHAR2 for small JSON documents (≤32767 bytes)
+-- 小規模なJSONドキュメント用の VARCHAR2 (≤32767バイト)
 CREATE TABLE product_catalog (
     product_id   NUMBER PRIMARY KEY,
     product_name VARCHAR2(200) NOT NULL,
@@ -21,32 +21,32 @@ CREATE TABLE product_catalog (
         CONSTRAINT chk_attributes_json CHECK (attributes IS JSON)
 );
 
--- CLOB for large documents
+-- 大規模ドキュメント用の CLOB
 CREATE TABLE event_log (
     event_id     NUMBER PRIMARY KEY,
     event_data   CLOB
         CONSTRAINT chk_event_json CHECK (event_data IS JSON)
 );
 
--- LAX vs STRICT JSON validation
--- LAX (default): allows duplicate keys, trailing commas, unquoted keys
--- STRICT: enforces strict JSON syntax
+-- LAX vs STRICT によるJSON検証
+-- LAX (デフォルト): 重複キー、末尾のカンマ、引用符なしのキーを許可
+-- STRICT: 厳密なJSON構文を強制
 CREATE TABLE strict_json_table (
     id   NUMBER PRIMARY KEY,
     data CLOB CONSTRAINT chk_strict CHECK (data IS JSON STRICT)
 );
 ```
 
-### 21c+: Native JSON Data Type
+### 21c以降: ネイティブJSONデータ型
 
-The native `JSON` type stores JSON in a compact binary OSON (Oracle Serialized Object Notation) format. Benefits over CLOB/VARCHAR2:
-- No need to parse JSON on every access
-- Smaller storage footprint
-- Faster query execution
-- Automatic structural validation
+ネイティブの `JSON` 型は、JSONをコンパクトなバイナリ形式である OSON (Oracle Serialized Object Notation) で格納する。CLOB/VARCHAR2と比較した利点は以下の通り：
+- アクセスごとのJSONパースが不要
+- ストレージ・サイズが小さい
+- クエリ実行が高速
+- 自動的な構造検証
 
 ```sql
--- Native JSON type (21c+)
+-- ネイティブJSON型 (21c以降)
 CREATE TABLE orders (
     order_id     NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     customer_id  NUMBER NOT NULL,
@@ -54,7 +54,7 @@ CREATE TABLE orders (
     created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
 );
 
--- Insert JSON document
+-- JSONドキュメントの挿入
 INSERT INTO orders (customer_id, order_data)
 VALUES (42, JSON('{"status": "pending",
                    "items": [
@@ -63,64 +63,64 @@ VALUES (42, JSON('{"status": "pending",
                    ],
                    "shipping": {"method": "express", "address": "123 Main St"}}'));
 
--- Or insert as a string — Oracle parses and stores as binary JSON
+-- 文字列として挿入することも可能。OracleはパースしてバイナリJSONとして格納する
 INSERT INTO orders (customer_id, order_data)
 VALUES (43, '{"status": "shipped", "items": [{"sku": "WGT-002", "qty": 3, "price": 19.99}]}');
 ```
 
 ---
 
-## Dot Notation Access (Simplified SQL/JSON)
+## ドット表記法 (簡易SQL/JSON)
 
-Oracle's dot notation provides a concise, readable way to navigate JSON paths. It works on both VARCHAR2/CLOB columns (with IS JSON constraint) and native JSON columns.
+Oracleのドット表記法は、JSONパスをシンプルかつ読みやすくナビゲートする方法を提供する。これは IS JSON制約を持つ VARCHAR2/CLOB 列およびネイティブJSON列の両方で動作する。
 
 ```sql
--- Simple dot notation
+-- シンプルなドット表記
 SELECT o.order_data.status,
        o.order_data.shipping.method,
        o.order_data.shipping.address
 FROM   orders o
 WHERE  o.order_data.status = 'pending';
 
--- Array element access (zero-based index)
+-- 配列要素へのアクセス (0開始のインデックス)
 SELECT o.order_data.items[0].sku    AS first_item_sku,
        o.order_data.items[0].price  AS first_item_price
 FROM   orders o;
 
--- Dot notation returns VARCHAR2 by default; use type suffix for numbers
+-- ドット表記はデフォルトで VARCHAR2 を返す。数値が必要な場合はサフィックスを使用
 SELECT o.order_data.items[0].price.numberOnly() AS price_number
 FROM   orders o;
 ```
 
 ---
 
-## JSON_VALUE: Extract Scalar Values
+## JSON_VALUE: スカラー値の抽出
 
-`JSON_VALUE` extracts a single scalar value from a JSON document. It returns `NULL` by default if the path does not exist or if the value is not scalar.
+`JSON_VALUE` は、JSONドキュメントから単一のスカラー値を抽出する。パスが存在しない場合や値がスカラーでない場合、デフォルトで `NULL` を返す。
 
 ```sql
--- Basic JSON_VALUE
+-- 基本的な JSON_VALUE
 SELECT JSON_VALUE(order_data, '$.status')             AS status,
        JSON_VALUE(order_data, '$.shipping.method')    AS ship_method,
        JSON_VALUE(order_data, '$.items[0].sku')       AS first_sku
 FROM   orders;
 
--- With RETURNING clause for type conversion
+-- RETURNING 句による型変換
 SELECT JSON_VALUE(order_data, '$.items[0].price' RETURNING NUMBER(10,2)) AS price,
        JSON_VALUE(order_data, '$.created_ts'     RETURNING TIMESTAMP)    AS ts
 FROM   orders;
 
--- Error handling clauses
+-- エラー処理句
 SELECT JSON_VALUE(order_data, '$.missing_field'
-           DEFAULT 'N/A' ON EMPTY      -- when path not found
-           NULL ON ERROR)              -- on malformed JSON or wrong type
+           DEFAULT 'N/A' ON EMPTY      -- パスが見つからない場合
+           NULL ON ERROR)              -- JSONの形式不正や型の不一致の場合
 AS   safe_value
 FROM orders;
 
--- NULL ON EMPTY | ERROR ON EMPTY | DEFAULT value ON EMPTY
--- NULL ON ERROR | ERROR ON ERROR | DEFAULT value ON ERROR
+-- NULL ON EMPTY | ERROR ON EMPTY | DEFAULT 値 ON EMPTY
+-- NULL ON ERROR | ERROR ON ERROR | DEFAULT 値 ON ERROR
 
--- In WHERE clause
+-- WHERE 句での使用
 SELECT order_id, customer_id
 FROM   orders
 WHERE  JSON_VALUE(order_data, '$.status') = 'pending'
@@ -129,63 +129,63 @@ WHERE  JSON_VALUE(order_data, '$.status') = 'pending'
 
 ---
 
-## JSON_QUERY: Extract JSON Fragments
+## JSON_QUERY: JSONフラグメントの抽出
 
-`JSON_QUERY` returns a JSON object or array (not a scalar). Use it when the target value is itself a JSON structure.
+`JSON_QUERY` は、JSONオブジェクトまたは配列を返す（スカラー値ではない）。ターゲットの値自体がJSON構造である場合に使用する。
 
 ```sql
--- Extract the entire shipping object
+-- shipping オブジェクト全体を抽出
 SELECT JSON_QUERY(order_data, '$.shipping')       AS shipping_json,
        JSON_QUERY(order_data, '$.items')          AS items_array,
        JSON_QUERY(order_data, '$.items[0]')       AS first_item
 FROM   orders;
 
--- WITH WRAPPER: wrap result in array brackets
--- Needed when path returns multiple items
+-- WITH WRAPPER: 結果を配列のブラケット [] で囲む
+-- パスが複数のアイテムを返す場合に必要
 SELECT JSON_QUERY(order_data, '$.items[*].sku' WITH ARRAY WRAPPER) AS all_skus
 FROM   orders;
 
--- WITH CONDITIONAL WRAPPER: wrap only if result is not already an array
+-- WITH CONDITIONAL WRAPPER: 結果が既に配列でない場合のみ囲む
 SELECT JSON_QUERY(order_data, '$.shipping' WITH CONDITIONAL WRAPPER) AS shipping
 FROM   orders;
 
--- Pretty printing
+-- 整形表示 (Pretty printing)
 SELECT JSON_QUERY(order_data, '$' RETURNING VARCHAR2(4000) PRETTY) AS pretty_json
 FROM   orders WHERE order_id = 1;
 ```
 
 ---
 
-## JSON_EXISTS: Test Path Existence
+## JSON_EXISTS: パスの存在確認
 
-`JSON_EXISTS` returns TRUE/FALSE (used in WHERE clauses) to test whether a path exists or matches a condition.
+`JSON_EXISTS` は、パスが存在するか、または条件に一致するかをテストし、TRUE/FALSE を返す（WHERE句で使用される）。
 
 ```sql
--- Test for path existence
+-- パスの存在を確認
 SELECT order_id FROM orders
 WHERE  JSON_EXISTS(order_data, '$.shipping.tracking_number');
 
--- Test with filter condition (JSON_EXISTS predicate)
+-- フィルタ条件を伴うテスト (JSON_EXISTS 述語)
 SELECT order_id FROM orders
 WHERE  JSON_EXISTS(order_data, '$.items[*]?(@.price > 100)');
 
--- Multiple conditions
+-- 複数条件
 SELECT order_id FROM orders
 WHERE  JSON_EXISTS(order_data, '$.items[*]?(@.sku == "WGT-001" && @.qty >= 2)');
 
--- Check for null values
+-- null値の確認
 SELECT order_id FROM orders
 WHERE  JSON_EXISTS(order_data, '$.status?(@ != null)');
 ```
 
 ---
 
-## JSON_TABLE: Shred JSON into Relational Rows
+## JSON_TABLE: JSONをリレーショナルな行に変換 (シュレッド)
 
-`JSON_TABLE` is the most powerful JSON function — it converts a JSON document (or array) into a virtual relational table that can be joined, filtered, and aggregated.
+`JSON_TABLE` は最も強力なJSON関数であり、JSONドキュメント（または配列）を仮想的なリレーショナル表に変換し、結合、フィルタリング、集計を可能にする。
 
 ```sql
--- Expand order items into individual rows
+-- 注文アイテムを個別の行に展開
 SELECT o.order_id, o.customer_id, jt.sku, jt.qty, jt.price,
        jt.qty * jt.price AS line_total
 FROM   orders o,
@@ -197,7 +197,7 @@ FROM   orders o,
            )
        ) jt;
 
--- Nested JSON_TABLE for hierarchical data
+-- 階層データのためのネストされた JSON_TABLE
 SELECT o.order_id, jt.method, jt.street, jt.city
 FROM   orders o,
        JSON_TABLE(o.order_data, '$'
@@ -211,18 +211,18 @@ FROM   orders o,
            )
        ) jt;
 
--- JSON_TABLE with error handling
+-- エラー処理を伴う JSON_TABLE
 SELECT customer_id, jt.item_sku, jt.item_price
 FROM   orders,
        JSON_TABLE(order_data, '$.items[*]'
-           ERROR ON ERROR  -- raise error on malformed JSON
+           ERROR ON ERROR  -- JSONの形式不正でエラーを発生させる
            COLUMNS (
                item_sku    VARCHAR2(20)   PATH '$.sku'   NULL ON ERROR,
                item_price  NUMBER(10,2)   PATH '$.price' DEFAULT 0 ON ERROR
            )
        ) jt;
 
--- Aggregate over shredded items
+-- 展開されたアイテムの集計
 SELECT o.order_id,
        COUNT(jt.sku)       AS item_count,
        SUM(jt.qty * jt.price) AS order_total
@@ -239,16 +239,16 @@ GROUP  BY o.order_id;
 
 ---
 
-## JSON Modification Functions
+## JSONの変更関数
 
 ```sql
--- JSON_MERGEPATCH: merge/update a JSON document (RFC 7396)
+-- JSON_MERGEPATCH: JSONドキュメントのパラレルなマージ/更新 (RFC 7396)
 UPDATE orders
 SET    order_data = JSON_MERGEPATCH(order_data,
            '{"status": "shipped", "shipped_at": "2025-01-15T10:30:00Z"}')
 WHERE  order_id = 1;
 
--- JSON_TRANSFORM (21c+): more powerful surgical updates
+-- JSON_TRANSFORM (21c以降): より強力で局所的な更新
 UPDATE orders
 SET    order_data = JSON_TRANSFORM(order_data,
            SET    '$.status'      = 'delivered',
@@ -257,7 +257,7 @@ SET    order_data = JSON_TRANSFORM(order_data,
        )
 WHERE  order_id = 1;
 
--- Remove a key
+-- キーの削除
 UPDATE orders
 SET    order_data = JSON_TRANSFORM(order_data,
            REMOVE '$.temp_processing_notes')
@@ -266,66 +266,66 @@ WHERE  order_id = 1;
 
 ---
 
-## JSON Indexes
+## JSONの索引
 
-Proper indexing of JSON data is critical for performance. Oracle provides several options.
+JSONデータの適切な索引付けはパフォーマンスにおいて不可欠である。Oracleはいくつかのオプションを提供している。
 
-### Functional Index on JSON_VALUE
+### JSON_VALUE に対するファンクション索引
 
 ```sql
--- Index on a specific JSON scalar path (most selective, most efficient)
+-- 特定のJSONスカラーパスに対する索引 (最も選択的で効率的)
 CREATE INDEX idx_order_status
     ON orders (JSON_VALUE(order_data, '$.status' RETURNING VARCHAR2(20)));
 
 CREATE INDEX idx_order_ship_method
     ON orders (JSON_VALUE(order_data, '$.shipping.method' RETURNING VARCHAR2(20)));
 
--- These indexes are used automatically by the optimizer
+-- これらの索引はオプティマイザによって自動的に使用される
 SELECT order_id FROM orders
 WHERE  JSON_VALUE(order_data, '$.status' RETURNING VARCHAR2(20)) = 'pending';
--- Or with dot notation
+-- またはドット表記を使用した場合
 SELECT order_id FROM orders WHERE order_data.status = 'pending';
 ```
 
-### JSON Search Index (Oracle Text Full-Text)
+### JSON検索索引 (Oracle Text 全文検索)
 
-For flexible, multi-path searching across the entire JSON document:
+JSONドキュメント全体に対する柔軟なマルチパス検索用：
 
 ```sql
--- Creates a full-text index over all JSON content
+-- 全JSONコンテンツに対する全文検索索引を作成
 CREATE SEARCH INDEX idx_order_json_search ON orders (order_data)
     FOR JSON;
 
--- Use with JSON_EXISTS
+-- JSON_EXISTS と組み合わせて使用
 SELECT order_id FROM orders
 WHERE  JSON_EXISTS(order_data, '$.items[*]?(@.sku == "WGT-001")');
 
--- Synchronize the search index (if not SYNC ON COMMIT)
+-- 検索索引の同期 (SYNC ON COMMIT でない場合)
 EXEC CTX_DDL.SYNC_INDEX('idx_order_json_search');
 ```
 
-### Composite JSON + Relational Index
+### JSON + リレーショナル のコンポジット索引
 
 ```sql
--- Compound index for common query pattern
+-- 一般的なクエリパターンのための複合索引
 CREATE INDEX idx_cust_status ON orders (
     customer_id,
     JSON_VALUE(order_data, '$.status' RETURNING VARCHAR2(20))
 );
 
--- Covers: WHERE customer_id = ? AND order_data.status = ?
+-- WHERE customer_id = ? AND order_data.status = ? をカバー
 ```
 
 ---
 
-## JSON Duality Views (23c)
+## JSON関係ディアルティ・ビュー (23c)
 
-JSON Relational Duality Views are one of Oracle 23c's flagship features. They expose relational table data as JSON documents that can be fully queried and modified through either a JSON or SQL interface. This eliminates the impedance mismatch between application objects and database rows.
+JSON関係ディアルティ・ビュー（JSON Relational Duality Views）は、Oracle 23cの主要機能の1つである。リレーショナル表のデータをJSONドキュメントとして公開し、JSONまたはSQLインターフェースのいずれからでも完全に照会・変更できるようにする。これにより、アプリケーション・オブジェクトとデータベースの行の間のインピーダンス・ミスマッチが解消される。
 
-### Creating a Duality View
+### ディアルティ・ビューの作成
 
 ```sql
--- Underlying relational tables
+-- 基底のリレーショナル表
 CREATE TABLE customers_23 (
     customer_id  NUMBER PRIMARY KEY,
     name         VARCHAR2(100),
@@ -347,7 +347,7 @@ CREATE TABLE order_items_23 (
     unit_price  NUMBER(10,2)
 );
 
--- JSON Duality View: one JSON document per customer with nested orders
+-- JSONディアルティ・ビュー: 顧客ごとに1つのJSONドキュメント（ネストされた注文を含む）
 CREATE OR REPLACE JSON RELATIONAL DUALITY VIEW customer_orders_dv AS
     SELECT JSON {
         'customerId'  : c.customer_id,
@@ -374,10 +374,10 @@ CREATE OR REPLACE JSON RELATIONAL DUALITY VIEW customer_orders_dv AS
     }
     FROM customers_23 c WITH (INSERT UPDATE DELETE);
 
--- Query the duality view as JSON
+-- ディアルティ・ビューを JSON として照会
 SELECT * FROM customer_orders_dv WHERE json_value(data, '$.customerId') = 42;
 
--- Insert through the duality view (automatically inserts into all tables)
+-- ディアルティ・ビューを介した挿入 (全テーブルへ自動的に挿入)
 INSERT INTO customer_orders_dv VALUES (
     '{"customerId": 100,
       "name": "Acme Corp",
@@ -387,113 +387,112 @@ INSERT INTO customer_orders_dv VALUES (
          "items": [{"sku": "WGT-001", "quantity": 2, "unitPrice": 299.99}]}
       ]}'
 );
--- This inserts into customers_23, orders_23, AND order_items_23 atomically
+-- これにより customers_23, orders_23, および order_items_23 へ原子的に挿入される
 ```
 
 ---
 
-## Storing vs. Querying JSON: Design Considerations
+## JSONの格納 vs. 照会: 設計上の考慮事項
 
-### When to Store JSON
+### JSONとして格納すべき場合
 
-- **Variable structure**: attributes differ per product category, event type, or customer segment
-- **Schemaless extension**: allow adding fields without schema migrations
-- **Document-oriented data**: configuration objects, API payloads, serialized objects
-- **Nested/array data**: line items, tags, audit trails with natural JSON structure
+- **可変構造**: 属性が製品カテゴリ、イベント、または顧客セグメントごとに異なる
+- **スキーマレスな拡張**: スキーマ移行なしでフィールドを追加可能にしたい
+- **ドキュメント指向データ**: 設定オブジェクト、APIペイロード、シリアライズされたオブジェクト
+- **ネスト/配列データ**: 自然なJSON構造を持つ明細項目、タグ、監査証跡
 
-### When to Normalize Instead
+### 代わりに正規化すべき場合
 
-- **Frequently queried scalar fields**: if you always query `$.status`, store it as a column
-- **Referential integrity needed**: foreign keys require relational columns
-- **Aggregation and reporting**: GROUP BY, SUM, AVG on relational columns is faster and clearer
-- **Index selectivity**: B-tree indexes on `NUMBER` columns vastly outperform JSON path indexes
+- **頻繁に照会されるスカラーフィールド**: 常に `$.status` で検索する場合、それは列として格納すべき
+- **参照整合性が必要な場合**: 外部キーにはリレーショナルな列が必要
+- **集計とレポート**: リレーショナル列に対する GROUP BY, SUM, AVG の方が高速かつ明確
+- **索引の選択性**: `NUMBER` 列に対するBツリー索引は、JSONパス索引よりも圧倒的に優れている
 
-### Hybrid Approach (Most Common)
+### ハイブリッド・アプローチ (最も一般的)
 
 ```sql
--- Store frequently-queried fields as relational columns
--- Store variable/extensible attributes as JSON
+-- 頻繁に照会されるフィールドはリレーショナル列として格納
+-- 可変/拡張的な属性は JSON として格納
 CREATE TABLE products (
     product_id    NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     sku           VARCHAR2(50)  NOT NULL UNIQUE,
     product_name  VARCHAR2(200) NOT NULL,
-    category_id   NUMBER        NOT NULL,  -- relational FK
-    price         NUMBER(10,2)  NOT NULL,  -- indexed, aggregated
-    status        VARCHAR2(20)  DEFAULT 'ACTIVE',  -- frequently filtered
-    attributes    JSON,          -- variable: color, size, material, etc.
+    category_id   NUMBER        NOT NULL,  -- リレーショナルな外部キー
+    price         NUMBER(10,2)  NOT NULL,  -- 索引、集計対象
+    status        VARCHAR2(20)  DEFAULT 'ACTIVE',  -- 頻繁なフィルタ対象
+    attributes    JSON,          -- 可変項目: 色、サイズ、素材など
     created_at    TIMESTAMP DEFAULT SYSTIMESTAMP
 );
 
--- Relational indexes on hot columns
+-- 頻繁に使用される列に対するリレーショナル索引
 CREATE INDEX idx_products_category ON products(category_id, status, price);
 
--- Functional index on common JSON attribute
+-- 一般的なJSON属性に対するファンクション索引
 CREATE INDEX idx_products_color
     ON products (JSON_VALUE(attributes, '$.color' RETURNING VARCHAR2(50)));
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Use native JSON type (21c+)** for new schemas. The binary OSON format is significantly faster than CLOB-based storage.
-- **Add IS JSON constraints** on VARCHAR2/CLOB columns in pre-21c databases to validate at insert time.
-- **Create functional indexes on frequently-queried JSON paths** rather than full-text search indexes for single-path queries.
-- **Use JSON_TABLE in FROM clause** rather than JSON_VALUE in SELECT for array expansion — it's set-based and optimizable.
-- **Store scalar values that appear in WHERE clauses as relational columns** with standard indexes. JSON path queries, even with indexes, cannot match the efficiency of a B-tree on a typed column.
-- **Use JSON_MERGEPATCH for document updates** rather than fetching, parsing, modifying, and re-inserting in application code.
-- **Enable `VALIDATE` on JSON Duality Views** to enforce schemas on the JSON side.
+- **新しいスキーマにはネイティブの JSON 型 (21c以降) を使用する。** バイナリの OSON 形式は、CLOB ベースのストレージよりも大幅に高速である。
+- **21cより前のデータベースでは、VARCHAR2/CLOB 列に IS JSON 制約を追加**し、挿入時に検証を行う。
+- **頻繁に照会されるJSONパスには、全文検索索引ではなくファンクション索引を作成する。** 単一パスのクエリにはこちらの方が効率的である。
+- **配列の展開には SELECT 句の JSON_VALUE ではなく FROM 句の JSON_TABLE を使用する。** セットベースでありオプティマイザとの相性が良い。
+- **WHERE 句に出現するスカラー値は、リレーショナル列として格納**し、標準的な索引を付ける。JSONパス・クエリは、たとえ索引があっても、型指定された列に対するBツリーの効率には及ばない。
+- **ドキュメントの更新には JSON_MERGEPATCH を使用する。** アプリケーション側で取得・パース・変更・再挿入する手間を省くことができる。
+- **JSON側でスキーマを強制するために、JSONディアルティ・ビューで `VALIDATE` を有効にする。**
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-### Mistake 1: Using VARCHAR2 for Large JSON
+### 間違い 1: 大きな JSON に VARCHAR2 を使用する
 
-VARCHAR2 is limited to 32,767 bytes in PL/SQL and 4,000 bytes in SQL (unless `MAX_STRING_SIZE=EXTENDED`). Use CLOB or native JSON for documents that could exceed this.
+VARCHAR2 は PL/SQL で 32,767 バイト、SQL で 4,000 バイト（`MAX_STRING_SIZE=EXTENDED` でない場合）に制限されている。これを超える可能性があるドキュメントには、CLOB またはネイティブ JSON を使用すること。
 
-### Mistake 2: No Index on Queried JSON Paths
+### 間違い 2: 照会される JSON パスに索引がない
 
 ```sql
--- This is a full table scan on every row's JSON
+-- これは全行のJSONに対するフル・テーブル・スキャンになる
 SELECT * FROM orders WHERE JSON_VALUE(order_data, '$.status') = 'pending';
 
--- Fix: add a functional index
+-- 修正案: ファンクション索引を追加
 CREATE INDEX idx_order_status ON orders(JSON_VALUE(order_data, '$.status' RETURNING VARCHAR2(20)));
 ```
 
-### Mistake 3: Parsing JSON in Application Code When SQL/JSON Functions Suffice
+### 間違い 3: SQL/JSON 関数で済む場合にアプリケーション・コードで JSON をパースする
 
-Do not fetch the entire JSON document to application code, parse it, extract one field, and return. Use `JSON_VALUE` in the SQL query.
+JSONドキュメント全体をアプリケーションに取得してパースし、1つのフィールドを取り出して戻すようなことはしない。SQLクエリ内で `JSON_VALUE` を使用すること。
 
-### Mistake 4: Using JSON_QUERY When JSON_VALUE Is Appropriate
+### 間違い 4: JSON_VALUE が適切な場面で JSON_QUERY を使用する
 
-`JSON_QUERY` returns a JSON string, even for scalars. For scalar extraction, always use `JSON_VALUE` to get a typed Oracle value.
+`JSON_QUERY` はスカラー値に対しても JSON 文字列を返す。スカラー値の抽出には、常に `JSON_VALUE` を使用して、型指定された Oracle の値を取得すること。
 
-### Mistake 5: Forgetting Type Conversions in JSON_VALUE
+### 間違い 5: JSON_VALUE における型変換の失念
 
-`JSON_VALUE` returns VARCHAR2 by default. Without `RETURNING NUMBER`, numeric comparisons and arithmetic will be wrong or throw implicit conversion errors.
+`JSON_VALUE` はデフォルトで VARCHAR2 を返す。`RETURNING NUMBER` がないと、数値の比較や算術演算が誤った結果になったり、暗黙的な型変換エラーが発生したりする。
 
 ```sql
--- WRONG: comparing string to number
-WHERE JSON_VALUE(order_data, '$.total') > 100  -- string comparison!
+-- 誤り: 文字列と数値の比較
+WHERE JSON_VALUE(order_data, '$.total') > 100  -- 文字列比較になる！
 
--- RIGHT
+-- 正解
 WHERE JSON_VALUE(order_data, '$.total' RETURNING NUMBER) > 100
 ```
 
 ---
 
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Database 19c JSON Developer's Guide (ADJSN)](https://docs.oracle.com/en/database/oracle/oracle-database/19/adjsn/)
-- [Oracle Database 19c SQL Language Reference — JSON Functions](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/)
-- [Oracle Database 21c — JSON Data Type](https://docs.oracle.com/en/database/oracle/oracle-database/21/adjsn/)
-- [Oracle Database 23c — JSON Relational Duality Views](https://docs.oracle.com/en/database/oracle/oracle-database/23/jsnvu/)
+- [Oracle Database 19c JSON開発者ガイド (ADJSN)](https://docs.oracle.com/en/database/oracle/oracle-database/19/adjsn/)
+- [Oracle Database 19c SQL言語リファレンス — JSON関数](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/)
+- [Oracle Database 21c — JSONデータ型](https://docs.oracle.com/en/database/oracle/oracle-database/21/adjsn/)
+- [Oracle Database 23c — JSON関係ディアルティ・ビュー](https://docs.oracle.com/en/database/oracle/oracle-database/23/jsnvu/)

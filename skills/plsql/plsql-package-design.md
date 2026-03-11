@@ -1,33 +1,33 @@
-# PL/SQL Package Design
+# PL/SQLパッケージ設計
 
-## Overview
+## 概要
 
-Packages are the fundamental unit of modular programming in PL/SQL. They group related procedures, functions, types, variables, and constants into a single named object. Well-designed packages improve maintainability, performance (compiled once, loaded once per session), and enable information hiding through public/private API separation.
+パッケージは、PL/SQLにおけるモジュール化プログラミングの基本単位です。関連するプロシージャ、ファンクション、型、変数、定数を1つの名前付きオブジェクトにまとめます。適切に設計されたパッケージは、メンテナンス性、パフォーマンス（一度コンパイルされ、セッションごとに一度ロードされる）を向上させ、パブリック/プライベートAPIの分離による情報の隠蔽を可能にします。
 
 ---
 
-## Package Architecture Principles
+## パッケージ・アーキテクチャの原則
 
-A package has two parts:
+パッケージは2つの部分で構成されます。
 
-- **Package Specification (Spec)**: The public interface — what callers can see and use.
-- **Package Body**: The implementation — private members and the code behind the spec.
+- **パッケージ仕様部 (Spec)**: パブリック・インターフェース。呼び出し側から参照および使用できるもの。
+- **パッケージ本体 (Body)**: 実装。プライベート・メンバーと、仕様部の裏側にあるコード。
 
-The spec is compiled independently. When only the body changes, dependent objects remain valid, reducing recompilation cascades.
+仕様部は独立してコンパイルされます。本体のみが変更された場合、依存するオブジェクトは有効なままとなり、再コンパイルの連鎖を減らすことができます。
 
 ```sql
--- Specification: public API
+-- パッケージ仕様部: パブリックAPI
 CREATE OR REPLACE PACKAGE order_mgmt_pkg AS
 
-  -- Public type
+  -- パブリックな型
   TYPE t_order_status IS TABLE OF VARCHAR2(30) INDEX BY PLS_INTEGER;
 
-  -- Public constants
+  -- パブリックな定数
   c_status_pending   CONSTANT VARCHAR2(10) := 'PENDING';
   c_status_shipped   CONSTANT VARCHAR2(10) := 'SHIPPED';
   c_status_cancelled CONSTANT VARCHAR2(10) := 'CANCELLED';
 
-  -- Public procedures/functions
+  -- パブリックなプロシージャ/ファンクション
   PROCEDURE create_order(
     p_customer_id IN  orders.customer_id%TYPE,
     p_order_id    OUT orders.order_id%TYPE
@@ -45,13 +45,13 @@ CREATE OR REPLACE PACKAGE order_mgmt_pkg AS
 END order_mgmt_pkg;
 /
 
--- Body: implementation + private members
+-- パッケージ本体: 実装 + プライベート・メンバー
 CREATE OR REPLACE PACKAGE BODY order_mgmt_pkg AS
 
-  -- Private constant (not visible to callers)
+  -- プライベートな定数 (呼び出し側からは見えない)
   c_max_retries CONSTANT PLS_INTEGER := 3;
 
-  -- Private procedure (not in spec)
+  -- プライベートなプロシージャ (仕様部には記述しない)
   PROCEDURE log_order_event(
     p_order_id IN orders.order_id%TYPE,
     p_event    IN VARCHAR2
@@ -63,7 +63,7 @@ CREATE OR REPLACE PACKAGE BODY order_mgmt_pkg AS
     COMMIT;
   END log_order_event;
 
-  -- Public procedure implementation
+  -- パブリックなプロシージャの実装
   PROCEDURE create_order(
     p_customer_id IN  orders.customer_id%TYPE,
     p_order_id    OUT orders.order_id%TYPE
@@ -116,46 +116,46 @@ END order_mgmt_pkg;
 
 ---
 
-## Spec vs Body Separation Strategy
+## 仕様部と本体の分離戦略
 
-| What belongs in SPEC | What belongs in BODY |
+| 仕様部 (SPEC) に配置するもの | 本体 (BODY) に配置するもの |
 |---|---|
-| Types used by callers | Private types |
-| Public procedure/function signatures | All procedure/function bodies |
-| Public constants | Private constants |
-| Public variables (avoid if possible) | Private variables |
-| Exceptions callers must catch | Private exceptions |
-| Cursor declarations callers iterate | All cursor implementations |
+| 呼び出し側が使用する型 | プライベートな型 |
+| パブリックなプロシージャ/ファンクションの定義 | すべてのプロシージャ/ファンクションの本体 |
+| パブリックな定数 | プライベートな定数 |
+| パブリックな変数 (可能な限り避ける) | プライベートな変数 |
+| 呼び出し側がキャッチすべき例外 | プライベートな例外 |
+| 呼び出し側が反復処理するカーソルの宣言 | すべてのカーソルの実装 |
 
-**Rule of thumb**: If a caller does not need to reference it, keep it in the body. Minimizing the spec reduces coupling and recompilation.
+**経験則**: 呼び出し側が参照する必要がないものは、本体に記述します。仕様部を最小限に抑えることで、依存関係を減らし、再コンパイルの頻度を下げることができます。
 
 ---
 
-## Designing Public vs Private APIs
+## パブリックAPIとプライベートAPIの設計
 
-### Public API Design Principles
+### パブリックAPIの設計原則
 
-1. **Stable signatures**: Changing a spec parameter breaks all dependents. Use default values to add parameters without breaking existing calls.
-2. **Meaningful names**: `process_order` is better than `do_stuff`.
-3. **Single responsibility**: Each procedure does one thing.
-4. **Return values vs OUT parameters**: Functions returning a single value are more composable. Use procedures with OUT parameters for multiple outputs or DML operations.
+1. **安定したシグネチャ**: 仕様部のパラメータを変更すると、すべての依存オブジェクトが破損します。既存の呼び出しを壊さずにパラメータを追加するには、デフォルト値を使用します。
+2. **意味のある名前**: `do_stuff` よりも `process_order` の方が適切です。
+3. **単一責任**: 各プロシージャは1つのことだけを行います。
+4. **戻り値 vs OUTパラメータ**: 単一の値を返すファンクションの方が組み合わせが容易です。複数の出力やDML操作を行う場合は、OUTパラメータを持つプロシージャを使用します。
 
 ```sql
--- Good: default parameter allows adding optional behavior
+-- 良い例: デフォルト値により、既存のコードを壊さずに追加機能を提供可能
 PROCEDURE process_payment(
   p_order_id      IN orders.order_id%TYPE,
   p_amount        IN NUMBER,
-  p_currency      IN VARCHAR2 DEFAULT 'USD',  -- added later, no breaking change
-  p_send_receipt  IN BOOLEAN  DEFAULT TRUE    -- added later, no breaking change
+  p_currency      IN VARCHAR2 DEFAULT 'USD',  -- 後から追加、既存呼び出しに影響なし
+  p_send_receipt  IN BOOLEAN  DEFAULT TRUE    -- 後から追加、既存呼び出しに影響なし
 );
 ```
 
-### Private Implementation Helpers
+### プライベート実装ヘルパー
 
-Keep implementation details private. Only promote to spec when another package genuinely needs it.
+実装の詳細はプライベートに保ちます。他のパッケージが本当に必要とする場合にのみ、仕様部に昇格させます。
 
 ```sql
--- Private helper: validation logic callers never call directly
+-- プライベート・ヘルパー: 呼び出し側が直接呼び出すことのないバリデーション・ロジック
 PROCEDURE validate_order_amount(
   p_amount   IN NUMBER,
   p_currency IN VARCHAR2
@@ -172,9 +172,9 @@ END validate_order_amount;
 
 ---
 
-## Package Initialization Blocks
+## パッケージ初期化ブロック
 
-A package body may have an optional initialization block that runs exactly once per session — the first time the package is referenced.
+パッケージ本体には、セッションごとに一度だけ、そのパッケージが最初に参照されたときに実行される初期化ブロック（オプション）を持たせることができます。
 
 ```sql
 CREATE OR REPLACE PACKAGE BODY config_pkg AS
@@ -182,9 +182,9 @@ CREATE OR REPLACE PACKAGE BODY config_pkg AS
   g_env_name     VARCHAR2(50);
   g_debug_enabled BOOLEAN;
 
-  -- Initialization block: runs once per session on first package reference
+  -- 初期化ブロック: パッケージへの初回参照時にセッションごとに一度実行
   BEGIN
-    -- Load configuration from a settings table
+    -- 設定テーブルから設定をロード
     BEGIN
       SELECT setting_value
       INTO   g_env_name
@@ -200,21 +200,21 @@ CREATE OR REPLACE PACKAGE BODY config_pkg AS
 /
 ```
 
-### Package State Pitfalls with Connection Pooling
+### 接続プール使用時のパッケージ状態の落とし穴
 
-**This is a critical production concern.** Package-level variables (global state) are session-scoped. With connection pooling (JDBC, OCI, DRCP), a session may be reused across different logical users or requests. Package state from a previous user's request may persist.
+**これは本番環境における重要な懸念事項です。** パッケージ・レベルの変数（グローバル状態）はセッション・スコープです。接続プール（JDBC、OCI、DRCPなど）を使用する場合、セッションは異なる論理的なユーザーやリクエスト間で再利用される可能性があります。前のユーザーのリクエストによるパッケージ状態が残ってしまう場合があります。
 
 ```sql
--- DANGEROUS: package variable holds user-specific state
+-- 危険: パッケージ変数がユーザー固有の状態を保持している
 CREATE OR REPLACE PACKAGE session_context_pkg AS
-  g_current_user_id NUMBER;  -- This persists across pool reuse!
+  g_current_user_id NUMBER;  -- プールの再利用を跨いで永続する！
   PROCEDURE set_user(p_user_id IN NUMBER);
   FUNCTION  get_user RETURN NUMBER;
 END session_context_pkg;
 /
 
--- SAFE ALTERNATIVE: use application context (SYS_CONTEXT)
--- Set at login via a logon trigger or app initialization call
+-- 安全な代替案: アプリケーション・コンテキスト (SYS_CONTEXT) を使用する
+-- ログオン・トリガーやアプリケーション初期化コールで設定
 BEGIN
   DBMS_SESSION.SET_CONTEXT(
     namespace => 'APP_CTX',
@@ -223,15 +223,16 @@ BEGIN
   );
 END;
 
--- Read anywhere, session-specific, not affected by pooling misconceptions
+-- どこからでも読み取れ、セッション固有であり、プールの再利用の影響を受けない
 SELECT SYS_CONTEXT('APP_CTX', 'USER_ID') FROM DUAL;
 ```
 
-### Safe Use of Package State
+### パッケージ状態の安全な使用法
 
-Package state is appropriate for:
-- **Read-only configuration** loaded once from tables (environment flags, lookup maps)
-- **Session-scoped caches** where staleness is acceptable and the session represents one user
+パッケージ状態は以下のような場合に適しています。
+
+- 表から一度だけロードされる**読み取り専用の設定**（環境フラグ、検索マップなど）
+- 鮮度が許容され、セッションが1人のユーザーを表す場合の**セッション・スコープのキャッシュ**
 
 ```sql
 CREATE OR REPLACE PACKAGE BODY lookup_cache_pkg AS
@@ -265,15 +266,15 @@ END lookup_cache_pkg;
 
 ---
 
-## Cohesion and Coupling
+## 凝集度と結合度
 
-- **High cohesion**: Group procedures that operate on the same data or serve the same feature domain. `customer_pkg` handles customer operations, not order operations.
-- **Low coupling**: Packages should not circularly depend on each other. If `pkg_a` calls `pkg_b` and vice versa, extract shared logic into a third package.
+- **高い凝集度**: 同じデータを操作する、または同じ機能ドメインに属するプロシージャをグループ化します。`customer_pkg` は顧客操作を処理し、注文操作は処理しません。
+- **低い結合度**: パッケージ間で循環参照が発生しないようにします。`pkg_a` が `pkg_b` を呼び出し、その逆も発生する場合は、共通のロジックを第3のパッケージに抽出します。
 
-### Detecting Circular Dependencies
+### 循環依存の検出
 
 ```sql
--- Check for circular dependencies in USER_DEPENDENCIES
+-- USER_DEPENDENCIESを使用して循環依存を確認
 SELECT referenced_name, name
 FROM   user_dependencies
 WHERE  type = 'PACKAGE BODY'
@@ -283,21 +284,21 @@ ORDER BY referenced_name;
 
 ---
 
-## Forward Declarations
+## 前方宣言
 
-Within a package body, a procedure defined after another cannot be called by the earlier one without a forward declaration:
+パッケージ本体の中では、自身の後に定義されたプロシージャを呼び出すことはできません。呼び出すには前方宣言が必要です。
 
 ```sql
 CREATE OR REPLACE PACKAGE BODY mutual_pkg AS
 
-  -- Forward declaration allows process_a to call process_b
-  -- even though process_b is defined later
+  -- 前方宣言により、process_aからprocess_bを呼び出せるようにする
+  -- (process_bは後で定義されているため)
   PROCEDURE process_b(p_id IN NUMBER);
 
   PROCEDURE process_a(p_id IN NUMBER) IS
   BEGIN
     IF p_id > 0 THEN
-      process_b(p_id - 1);  -- valid because of forward declaration
+      process_b(p_id - 1);  -- 前方宣言があるため有効
     END IF;
   END process_a;
 
@@ -315,14 +316,14 @@ END mutual_pkg;
 
 ---
 
-## Overloading
+## オーバーロード
 
-The same procedure/function name can appear multiple times in a spec with different parameter signatures. Oracle resolves the call at compile time.
+同じプロシージャ/ファンクション名を、異なるパラメータ・シグネチャで仕様部に複数記述できます。Oracleはコンパイル時に呼び出しを解決します。
 
 ```sql
 CREATE OR REPLACE PACKAGE format_pkg AS
 
-  -- Overloaded: same name, different parameter types
+  -- オーバーロード: 名前は同じだがパラメータ・タイプが異なる
   FUNCTION format_date(p_date IN DATE)      RETURN VARCHAR2;
   FUNCTION format_date(p_date IN TIMESTAMP) RETURN VARCHAR2;
   FUNCTION format_date(p_date IN DATE, p_fmt IN VARCHAR2) RETURN VARCHAR2;
@@ -351,59 +352,59 @@ END format_pkg;
 /
 ```
 
-**Overloading restrictions**: Cannot overload based solely on return type. Cannot overload when the only difference is IN vs OUT mode. Cannot overload when parameter types differ only in PLS_INTEGER vs NUMBER (subtypes of the same family).
+**オーバーロードの制限**: 戻り値の型のみに基づくオーバーロードはできません。INモードかOUTモードかだけの違いによるオーバーロードもできません。パラメータ・タイプが PLS_INTEGER と NUMBER のように同じファミリーのサブタイプであるだけの違いも不可です。
 
 ---
 
-## Package Size Guidelines
+## パッケージ・サイズのガイドライン
 
-Large packages are harder to maintain and cause longer compilation times. Consider splitting by:
+巨大なパッケージはメンテナンスが難しく、コンパイル時間も長くなります。以下の基準で分割を検討してください。
 
-| Signal | Action |
+| 兆候 | アクション |
 |---|---|
-| Body exceeds ~1000-1500 lines | Split into sub-packages by feature area |
-| Spec has 30+ public members | Review if all are truly public |
-| Package mixes multiple domains | Split by domain (customer vs order vs payment) |
-| Initialization block hits tables from many schemas | Extract to a dedicated config package |
+| 本体が約1000〜1500行を超える | 機能領域ごとにサブパッケージに分割する |
+| 仕様部に30以上のパブリック・メンバーがある | すべてが本当にパブリックであるべきか見直す |
+| 複数のドメインが混在している | ドメインごとに分割する (顧客 vs 注文 vs 支払い) |
+| 初期化ブロックが多くのスキーマの表にアクセスしている | 専用の設定パッケージに抽出する |
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- Always create the spec first, then the body. This allows dependent objects to compile against the spec before the body exists.
-- Use `NOCOPY` for large IN OUT collection parameters (see performance guide).
-- Never put DML in a package initialization block — it runs implicitly and can cause unexpected commits or locks.
-- Prefix package-level (global) variables with `g_` to distinguish from local variables.
-- Anchor variable declarations to column types using `%TYPE` to survive schema changes.
-- Document the spec with comments; it serves as the API documentation.
+- 常に仕様部を先に作成し、その後に本体を作成します。これにより、本体が存在する前に、依存オブジェクトが仕様部に対してコンパイルできるようになります。
+- 大規模な IN OUT コレクション・パラメータには `NOCOPY` を使用します（パフォーマンス・ガイドを参照）。
+- パッケージ初期化ブロックにDMLを記述しないでください。暗黙的に実行され、予期しないコミットやロックの原因となる可能性があります。
+- パッケージ・レベル（グローバル）の変数には `g_` プレフィックスを付け、ローカル変数と区別します。
+- スキーマ変更に対応できるよう、変数の宣言は `%TYPE` を使用して列の型に固定します。
+- APIドキュメントとしての役割を果たすよう、仕様部にコメントを記述します。
 
 ---
 
-## Common Mistakes and Anti-Patterns
+## よくある間違いとアンチパターン
 
-| Anti-Pattern | Problem | Fix |
+| アンチパターン | 問題点 | 解決策 |
 |---|---|---|
-| Public package variables | Callers depend on internal state directly; hard to change | Use getter/setter functions |
-| Storing user identity in package globals with connection pooling | State leaks across requests | Use application context (`DBMS_SESSION.SET_CONTEXT`) |
-| Circular package dependencies | Cannot compile; maintenance nightmare | Extract shared types/utilities into a separate base package |
-| One giant "utils" package | Zero cohesion; everything depends on it | Break into domain-specific packages |
-| Business logic in initialization blocks | Runs silently on first reference; hard to debug | Use explicit initialization procedures |
-| Recompiling spec for body-only changes | Invalidates all dependent objects | Change body only when logic changes; change spec only when API changes |
+| パブリックなパッケージ変数 | 呼び出し側が内部状態に直接依存し、変更が困難になる | ゲッター/セッター・ファンクションを使用する |
+| 接続プール使用時にユーザー識別情報をパッケージ・グローバルに保存する | リクエスト間で状態がリークする | アプリケーション・コンテキスト (`DBMS_SESSION.SET_CONTEXT`) を使用する |
+| パッケージ間の循環依存 | コンパイル不可。メンテナンスの悪夢 | 共通の型/ユーティリティを別のベース・パッケージに抽出する |
+| 1つの巨大な "utils" パッケージ | 凝集度がゼロになり、あらゆるものがそれに依存する | ドメインごとのパッケージに分割する |
+| 初期化ブロックにビジネス・ロジックを記述する | 初回参照時に黙って実行されるため、デバッグが困難 | 明示的な初期化プロシージャを使用する |
+| 本体のみの変更時に仕様部も再コンパイルする | すべての依存オブジェクトが無効化される | ロジック変更時は本体のみ、API変更時のみ仕様部を変更する |
 
 ---
 
-## Oracle Version Notes (19c vs 26ai)
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- ハイブリッドな環境では、19c と 26ai の両方で構文とパッケージの動作をテストすること。デフォルトや非推奨がリリース・アップデートによって異なる場合があるため。
 
-- **Oracle 12c+**: Invisible columns in tables do not affect `%ROWTYPE` in packages compiled before the column was added — recompile is needed.
-- **Oracle 18c+**: Private procedures in the package spec (using `ACCESSIBLE BY` introduced in 12.2) allow fine-grained access control between packages.
-- **Oracle 12.2+**: `ACCESSIBLE BY` clause allows restricting which units can call a package.
+- **Oracle 12c以降**: 表の不可視列（Invisible columns）は、その列が追加される前にコンパイルされたパッケージの `%ROWTYPE` には影響しません。再コンパイルが必要です。
+- **Oracle 18c以降**: パッケージ仕様部内のプライベートなプロシージャ（12.2で導入された `ACCESSIBLE BY` を使用）により、パッケージ間のきめ細かなアクセス制御が可能。
+- **Oracle 12.2以降**: `ACCESSIBLE BY` 句により、パッケージを呼び出せるユニットを制限可能。
 
 ```sql
--- 12.2+: Restrict access to this package to only order_mgmt_pkg
+-- 12.2以降: このパッケージへのアクセスを order_mgmt_pkg のみに制限する
 CREATE OR REPLACE PACKAGE order_internals_pkg
   ACCESSIBLE BY (PACKAGE order_mgmt_pkg)
 AS
@@ -414,8 +415,8 @@ END order_internals_pkg;
 
 ---
 
-## Sources
+## ソース
 
-- [Oracle Database PL/SQL Language Reference 19c — Packages](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/plsql-packages.html) — package structure, spec vs body, overloading, forward declarations, initialization
-- [Oracle Database PL/SQL Language Reference 19c — ACCESSIBLE BY Clause](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/ACCESSIBLE-BY-clause.html) — 12.2+ access control
-- [DBMS_SESSION (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_SESSION.html) — SET_CONTEXT for application context
+- [Oracle Database PL/SQL Language Reference 19c — Packages](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/plsql-packages.html) — パッケージ構造、仕様部 vs 本体、オーバーロード、前方宣言、初期化
+- [Oracle Database PL/SQL Language Reference 19c — ACCESSIBLE BY Clause](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/ACCESSIBLE-BY-clause.html) — 12.2以降のアクセス制御
+- [DBMS_SESSION (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_SESSION.html) — SET_CONTEXT によるアプリケーション・コンテキスト

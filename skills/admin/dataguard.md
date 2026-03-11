@@ -1,68 +1,68 @@
 # Oracle Data Guard
 
-## Overview
+## 概要
 
-Oracle Data Guard is Oracle's high-availability, disaster recovery, and data protection solution. It maintains one or more synchronized copies of a production database (the **primary**) called **standby databases**. If the primary database becomes unavailable, a standby can be activated to take over, minimizing downtime and data loss.
+Oracle Data Guardは、Oracleの高可用性、災害復旧、およびデータ保護ソリューションである。本番データベース（**プライマリ**）の同期されたコピーを1つ以上、**スタンバイ・データベース**として維持する。プライマリ・データベースが使用不能になった場合、スタンバイをアクティブにして引き継がせることで、ダウンタイムとデータ損失を最小限に抑えることができる。
 
-Data Guard is licensed with Oracle Database Enterprise Edition. It is Oracle's recommended disaster recovery solution for mission-critical databases and is a core component of Maximum Availability Architecture (MAA).
+Data GuardはOracle Database Enterprise Editionでライセンス供与される。ミッション・クリティカルなデータベースのためのOracle推奨の災害復旧ソリューションであり、Maximum Availability Architecture (MAA)のコア・コンポーネントである。
 
 ---
 
-## Physical vs Logical Standby
+## フィジカル・スタンバイ vs ロジカル・スタンバイ
 
-### Physical Standby
+### フィジカル・スタンバイ
 
-A physical standby is a block-for-block identical copy of the primary database. Redo data generated on the primary is shipped to the standby and applied using **Media Recovery** (Redo Apply). The standby is always in a state of recovery.
+フィジカル・スタンバイは、プライマリ・データベースのブロック単位で同一のコピーである。プライマリで生成されたredoデータはスタンバイに転送され、**メディア・リカバリ** (Redo Apply)を使用して適用される。スタンバイは常にリカバリ状態にある。
 
-**Characteristics:**
-- Byte-for-byte identical to primary at the block level
-- Uses Redo Apply (MRP — Managed Recovery Process)
-- Can be opened read-only while applying redo (Active Data Guard — requires separate license)
-- Supports all data types and object types without restriction
-- Fastest to configure and easiest to maintain
-- Used for most DR and HA deployments
+**特徴:**
+- ブロック・レベルでプライマリとバイト単位で同一
+- Redo Apply (MRP — Managed Recovery Process)を使用
+- redoを適用しながら、読取り専用でオープンできる（Active Data Guard — 別途ライセンスが必要）
+- すべてのデータ型およびオブジェクト型を制限なくサポート
+- 構成が最も速く、保守が容易
+- ほとんどの災害復旧（DR）および高可用性（HA）の展開に使用される
 
-**When to use:** DR/HA for any workload, read offload with Active Data Guard, rolling upgrades.
+**使用場面:** あらゆるワークロードのDR/HA、Active Data Guardによる読取りオフロード、ローリング・アップグレード。
 
-### Logical Standby
+### ロジカル・スタンバイ
 
-A logical standby receives redo from the primary, mines it into SQL statements, and applies those statements using **SQL Apply** (LogMiner-based). The standby database is open read-write and can have additional objects not on the primary.
+ロジカル・スタンバイは、プライマリからredoを受信し、それをSQL文に変換（解析）して、**SQL Apply** (LogMinerベース)を使用してそれらの文を適用する。スタンバイ・データベースは読取り/書込みの両方でオープンされ、プライマリには存在しない追加のオブジェクトを持つことができる。
 
-**Characteristics:**
-- Open for read-write during apply
-- Additional reporting tables, indexes, or schemas can exist on the standby
-- Does not support all data types (e.g., BFILE, NCLOB on some versions have restrictions)
-- More complex to manage; SQL Apply can lag behind Redo Apply under heavy load
-- Supports transformations of data during apply
+**特徴:**
+- 適用中に読取り/書込みの両方でオープン
+- スタンバイ上にレポート用の追加テーブル、索引、またはスキーマを存在させることができる
+- すべてのデータ型をサポートしているわけではない（例：一部のバージョンではBFILE、NCLOBに制限がある）
+- 管理がより複雑である。高負荷下ではSQL ApplyがRedo Applyに遅れる可能性がある
+- 適用中のデータの変換をサポート
 
-**When to use:** Reporting databases needing read-write access, custom schema modifications on standby, selective replication.
+**使用場面:** 読取り/書込みアクセスが必要なレポート用データベース、スタンバイ上のカスタム・スキーマ変更、選択的レプリケーション。
 
-### Snapshot Standby
+### スナップショット・スタンバイ
 
-A snapshot standby is a physical standby that has been temporarily converted to a read-write state for testing. Redo from the primary continues to be received but not applied. When converted back, the divergent changes are discarded and recovery resumes.
+スナップショット・スタンバイは、テストのために一時的に読取り/書込み状態に変換されたフィジカル・スタンバイである。プライマリからのredoは引き続き受信されるが、適用はされない。フィジカル・スタンバイに戻すと、乖離した変更は破棄され、リカバリが再開される。
 
 ```sql
--- Convert physical standby to snapshot standby (via DGMGRL)
+-- フィジカル・スタンバイをスナップショット・スタンバイに変換 (DGMGRL経由)
 DGMGRL> CONVERT DATABASE standby_db TO SNAPSHOT STANDBY;
 
--- Convert back to physical standby
+-- フィジカル・スタンバイに戻す
 DGMGRL> CONVERT DATABASE standby_db TO PHYSICAL STANDBY;
 ```
 
 ---
 
-## Redo Transport and Apply
+## Redo転送と適用
 
-### Redo Transport
+### Redo転送
 
-The primary database ships redo log data to standby destinations. Transport can be synchronous or asynchronous.
+プライマリ・データベースは、redoログ・データをスタンバイ先に転送する。転送は同期または非同期で行うことができる。
 
-**SYNC (synchronous):** Primary waits for acknowledgment from standby before committing. Zero data loss, but adds latency to commits.
+**SYNC（同期）:** プライマリは、コミットする前にスタンバイからの確認を待つ。データ損失はゼロだが、コミットに遅延が発生する。
 
-**ASYNC (asynchronous):** Primary commits without waiting for standby acknowledgment. Better performance, but potential for data loss equal to the transport lag.
+**ASYNC（非同期）:** プライマリは、スタンバイの確認を待たずにコミットする。パフォーマンスは向上するが、転送ラグに相当するデータ損失の可能性がある。
 
 ```sql
--- Configure redo transport on primary (example LOG_ARCHIVE_DEST_2)
+-- プライマリでのredo転送の構成 (例: LOG_ARCHIVE_DEST_2)
 ALTER SYSTEM SET LOG_ARCHIVE_DEST_2 =
   'SERVICE=standby_tns ASYNC NOAFFIRM
    DB_UNIQUE_NAME=standby_db
@@ -73,55 +73,55 @@ ALTER SYSTEM SET LOG_ARCHIVE_DEST_2 =
 ALTER SYSTEM SET LOG_ARCHIVE_DEST_STATE_2 = ENABLE SCOPE=BOTH;
 ```
 
-### Redo Apply (Physical Standby)
+### Redo Apply (フィジカル・スタンバイ)
 
-The Managed Recovery Process (MRP) applies archived redo logs or redo from the standby redo logs (real-time apply).
+Managed Recovery Process (MRP)は、アーカイブされたredoログまたはスタンバイredoログからのredoを適用する（リアルタイム適用）。
 
 ```sql
--- Start managed recovery (on physical standby)
+-- 管理リカバリの開始 (フィジカル・スタンバイ側)
 ALTER DATABASE RECOVER MANAGED STANDBY DATABASE DISCONNECT FROM SESSION;
 
--- Start real-time apply (applies redo as it arrives, before archiving)
+-- リアルタイム適用の開始 (アーカイブされる前に、到着したredoを適用)
 ALTER DATABASE RECOVER MANAGED STANDBY DATABASE
   USING CURRENT LOGFILE DISCONNECT FROM SESSION;
 
--- Stop managed recovery
+-- 管理リカバリの停止
 ALTER DATABASE RECOVER MANAGED STANDBY DATABASE CANCEL;
 
--- Check apply status
+-- 適用ステータスの確認
 SELECT process, status, sequence#, thread#
 FROM v$managed_standby
 ORDER BY process;
 ```
 
-### SQL Apply (Logical Standby)
+### SQL Apply (ロジカル・スタンバイ)
 
 ```sql
--- Start SQL Apply on logical standby
+-- ロジカル・スタンバイでSQL Applyを開始
 ALTER DATABASE START LOGICAL STANDBY APPLY IMMEDIATE;
 
--- Stop SQL Apply
+-- SQL Applyを停止
 ALTER DATABASE STOP LOGICAL STANDBY APPLY;
 
--- Check SQL Apply status
+-- SQL Applyステータスの確認
 SELECT status, applied_scn, latest_scn
 FROM dba_logstdby_progress;
 ```
 
-### Standby Redo Logs
+### スタンバイRedoログ
 
-Standby Redo Logs (SRLs) are required for real-time apply and for synchronous redo transport. They receive redo from the primary's current online redo logs (in addition to archived logs).
+スタンバイRedoログ (SRL)は、リアルタイム適用および同期redo転送に必要である。プライマリの現在のオンラインredoログから（アーカイブ・ログに加えて）redoを受信する。
 
 ```sql
--- Add standby redo log groups (on standby; should have primary group count + 1)
--- Each group should be same size as primary online redo logs
+-- スタンバイRedoログ・グループの追加 (スタンバイ側。プライマリのグループ数 + 1を推奨)
+-- 各グループはプライマリのオンラインredoログと同じサイズにする必要がある
 ALTER DATABASE ADD STANDBY LOGFILE GROUP 4
   ('/oradata/standby/stdby_redo04.log') SIZE 500M;
 
 ALTER DATABASE ADD STANDBY LOGFILE GROUP 5
   ('/oradata/standby/stdby_redo05.log') SIZE 500M;
 
--- View standby redo logs
+-- スタンバイRedoログの表示
 SELECT group#, members, bytes/1048576 size_mb, status
 FROM v$standby_log;
 ```
@@ -130,19 +130,19 @@ FROM v$standby_log;
 
 ## Data Guard Broker (DGMGRL)
 
-Data Guard Broker is the management framework for Data Guard configurations. It automates and centralizes configuration, monitoring, and role transitions. Using Broker is strongly recommended over manual Data Guard management.
+Data Guard Brokerは、Data Guard構成を管理するためのフレームワークである。構成、監視、およびロール遷移を自動化し、一元化する。手動でのData Guard管理よりも、Brokerの使用が強く推奨される。
 
-### Enabling the Broker
+### Brokerの有効化
 
 ```sql
--- Enable on both primary and standby
+-- プライマリとスタンバイの両方で有効化
 ALTER SYSTEM SET dg_broker_start = TRUE SCOPE=BOTH;
 ```
 
-### Creating a Broker Configuration
+### Broker構成の作成
 
 ```bash
-# Connect to DGMGRL (from primary or any host with network access)
+# DGMGRLに接続 (プライマリまたはネットワーク・アクセスのあるホストから)
 dgmgrl sys/<password>@primary_db
 
 DGMGRL> CREATE CONFIGURATION 'my_dg_config'
@@ -156,122 +156,122 @@ DGMGRL> ADD DATABASE standby_db
 DGMGRL> ENABLE CONFIGURATION;
 ```
 
-### Common DGMGRL Commands
+### 一般的なDGMGRLコマンド
 
 ```bash
-# Show full configuration and health
+# 構成と健全性の全体を表示
 DGMGRL> SHOW CONFIGURATION;
 
-# Show details for a specific database
+# 特定のデータベースの詳細を表示
 DGMGRL> SHOW DATABASE VERBOSE standby_db;
 
-# Show current lag
+# 現在のラグを表示
 DGMGRL> SHOW DATABASE standby_db 'ApplyLag';
 DGMGRL> SHOW DATABASE standby_db 'TransportLag';
 
-# Edit a property
+# プロパティの編集
 DGMGRL> EDIT DATABASE standby_db SET PROPERTY LogXptMode='ASYNC';
 DGMGRL> EDIT DATABASE primary_db SET PROPERTY RedoRoutes='(LOCAL : standby_db ASYNC)';
 
-# Validate the configuration
+# 構成の検証
 DGMGRL> VALIDATE DATABASE standby_db;
 DGMGRL> VALIDATE DATABASE VERBOSE standby_db;
 ```
 
 ---
 
-## Switchover vs Failover
+## スイッチオーバー vs フェイルオーバー
 
-### Switchover
+### スイッチオーバー
 
-A **switchover** is a planned, graceful role reversal. Both databases remain intact and no data is lost. Used for planned maintenance, patching, or testing.
+**スイッチオーバー**は、計画的な正常なロール交代である。両方のデータベースが維持され、データは失われない。計画的なメンテナンス、パッチ適用、またはテストに使用される。
 
-**Sequence of events:**
-1. Primary transitions to standby role (flushes redo, prevents new connections)
-2. Standby transitions to primary role
-3. Both databases are operational in their new roles
+**イベントの流れ:**
+1. プライマリがスタンバイ・ロールに移行する（redoをフラッシュし、新しい接続を防止する）
+2. スタンバイがプライマリ・ロールに移行する
+3. 両方のデータベースが新しいロールで稼働する
 
 ```bash
-# Verify readiness before switchover
+# スイッチオーバー前に準備状況を検証
 DGMGRL> VALIDATE DATABASE standby_db;
 
-# Perform switchover (Broker handles both sides automatically)
+# スイッチオーバーの実行 (Brokerが両側の処理を自動的に行う)
 DGMGRL> SWITCHOVER TO standby_db;
 
-# Verify new configuration
+# 新しい構成を確認
 DGMGRL> SHOW CONFIGURATION;
 ```
 
-**Manual switchover (without Broker):**
+**手動スイッチオーバー (Brokerなし):**
 ```sql
--- On PRIMARY: initiate switchover
+-- プライマリ側: スイッチオーバーの開始
 ALTER DATABASE COMMIT TO SWITCHOVER TO PHYSICAL STANDBY WITH SESSION SHUTDOWN;
 
--- On STANDBY: complete the switchover to become primary
+-- スタンバイ側: スイッチオーバーを完了してプライマリになる
 ALTER DATABASE COMMIT TO SWITCHOVER TO PRIMARY WITH SESSION SHUTDOWN;
 ALTER DATABASE OPEN;
 ```
 
-### Failover
+### フェイルオーバー
 
-A **failover** is an emergency operation when the primary database is unavailable or has failed and cannot be recovered quickly. Data loss is possible unless using Maximum Protection or Maximum Availability mode with synchronous redo transport and all redo is received.
+**フェイルオーバー**は、プライマリ・データベースが使用不能になった場合、または故障してすぐに復旧できない場合の緊急操作である。Maximum ProtectionまたはMaximum Availabilityモードで同期redo転送を使用し、すべてのredoを受信していない限り、データ損失の可能性がある。
 
-**Failover permanently activates the standby as the new primary.** The old primary cannot be used without reinstating it as a standby.
+**フェイルオーバーは、スタンバイを新しいプライマリとして永久にアクティブにする。** 旧プライマリは、スタンバイとして再有効化（リーンステート）しない限り使用できない。
 
 ```bash
-# Failover using Broker (recommended)
+# Brokerを使用したフェイルオーバー (推奨)
 DGMGRL> FAILOVER TO standby_db;
 
-# With data loss prevention attempt (waits for all redo)
+# データ損失防止を試みる場合 (すべてのredoを待機)
 DGMGRL> FAILOVER TO standby_db IMMEDIATE;
 ```
 
-**Manual failover (without Broker):**
+**手動フェイルオーバー (Brokerなし):**
 ```sql
--- On STANDBY: recover any remaining archived logs, then activate
+-- スタンバイ側: 残りのアーカイブ・ログをリカバリしてアクティブ化
 RECOVER MANAGED STANDBY DATABASE CANCEL;
 ALTER DATABASE RECOVER MANAGED STANDBY DATABASE FINISH;
 ALTER DATABASE ACTIVATE PHYSICAL STANDBY DATABASE;
 ALTER DATABASE OPEN;
 ```
 
-### Reinstating the Old Primary
+### 旧プライマリの再有効化 (Reinstate)
 
-After a failover, the old primary can be reinstated as a standby:
+フェイルオーバー後、旧プライマリをスタンバイとして再有効化できる：
 
 ```bash
 DGMGRL> REINSTATE DATABASE old_primary_db;
 ```
 
-This uses Flashback Database on the old primary to roll it back to before the failover point, then re-synchronizes it with the new primary.
+これは、旧プライマリでFlashback Databaseを使用してフェイルオーバー・ポイントまでロールバックし、新しいプライマリと再同期することで行われる。
 
 ---
 
-## Lag Monitoring
+## ラグの監視
 
-### Transport Lag and Apply Lag
+### 転送ラグと適用ラグ
 
-- **Transport Lag:** How far behind the standby is in receiving redo from the primary
-- **Apply Lag:** How far behind the standby is in applying received redo
+- **転送ラグ (Transport Lag):** スタンバイがプライマリからredoを受信するのにどれだけ遅れているか
+- **適用ラグ (Apply Lag):** スタンバイが受信したredoを適用するのにどれだけ遅れているか
 
 ```sql
--- View lag from the standby database
+-- スタンバイ・データベースからラグを表示
 SELECT name, value, time_computed, datum_time
 FROM v$dataguard_stats
 WHERE name IN ('transport lag', 'apply lag', 'apply finish time');
 
--- View from primary (requires DBA_LOGSTDBY_LOG or V$ARCHIVE_DEST_STATUS)
+-- プライマリから表示 (DBA_LOGSTDBY_LOG または V$ARCHIVE_DEST_STATUS が必要)
 SELECT dest_id, dest_name, status, archived_seq#, applied_seq#,
        gap_status
 FROM v$archive_dest_status
 WHERE target = 'STANDBY';
 
--- Check for archive gap
+-- アーカイブ・ギャップの確認
 SELECT thread#, low_sequence#, high_sequence#
 FROM v$archive_gap;
 ```
 
-### Monitoring via DGMGRL
+### DGMGRL経由の監視
 
 ```bash
 DGMGRL> SHOW DATABASE standby_db 'ApplyLag';
@@ -280,40 +280,40 @@ DGMGRL> SHOW DATABASE standby_db 'RecvQEntries';
 DGMGRL> SHOW DATABASE standby_db 'SendQEntries';
 ```
 
-### Monitoring via Enterprise Manager
+### Enterprise Manager経由の監視
 
-Enterprise Manager Data Guard management page shows lag graphs, configuration topology, and alert thresholds. For automated alerting, configure EM metric thresholds on `ApplyLag` and `TransportLag`.
+Enterprise ManagerのData Guard管理ページには、ラグのグラフ、構成トポロジー、およびアラートしきい値が表示される。自動通知の場合は、`ApplyLag`および`TransportLag`にEMメトリックのしきい値を構成する。
 
 ---
 
-## Active Data Guard (Read Offload)
+## Active Data Guard (読取りオフロード)
 
-Active Data Guard (ADG) allows a physical standby database to be open **read-only** while simultaneously applying redo from the primary. This requires an additional Active Data Guard license.
+Active Data Guard (ADG)を使用すると、プライマリからのredoを適用しながら、フィジカル・スタンバイ・データベースを**読取り専用**でオープンでき、さらにActive Data Guardライセンスが必要である。
 
-**Use cases:**
-- Offload reporting queries from the primary
-- Offload backups (back up from the standby, not the primary)
-- Distribute read workloads globally using far sync instances
+**ユースケース:**
+- プライマリからレポート・クエリをオフロードする
+- バックアップをオフロードする（本番ではなく、スタンバイからバックアップを取得する）
+- Far Syncインスタンスを使用して、読取りワークロードをグローバルに分散する
 
-### Opening a Physical Standby Read-Only with ADG
+### ADGを使用したフィジカル・スタンバイの読取り専用オープン
 
 ```sql
--- On standby: open read-only while continuing to apply redo
+-- スタンバイ側: redoを適用し続けながら読取り専用でオープン
 ALTER DATABASE OPEN READ ONLY;
 ALTER DATABASE RECOVER MANAGED STANDBY DATABASE
   USING CURRENT LOGFILE DISCONNECT FROM SESSION;
 
--- Confirm it is applying while open
+-- オープン中に適用されていることを確認
 SELECT open_mode, db_unique_name FROM v$database;
--- open_mode should be: READ ONLY WITH APPLY
+-- open_mode が次であること: READ ONLY WITH APPLY
 ```
 
-### Far Sync Instance
+### Far Syncインスタンス
 
-A Far Sync instance is a lightweight Oracle instance (no datafiles) placed geographically close to the standby to receive synchronous redo from the primary and forward it asynchronously to the remote standby. This achieves synchronous transport over a short distance (low latency) while still protecting a geographically distant standby.
+Far Syncインスタンスは、プライマリから同期的にredoを受信し、それをリモート制御スタンバイに非同期に転送するために、地理的にスタンバイの近くに配置される軽量なOracleインスタンス（データファイルなし）である。これにより、短距離（低遅延）での同期転送を実現しながらも、地理的に離れたスタンバイを保護することができる。
 
 ```bash
-# Add a far sync instance to broker configuration
+# Broker構成にfar syncインスタンスを追加
 DGMGRL> ADD FAR_SYNC farsync_inst AS CONNECT IDENTIFIER IS farsync_tns;
 DGMGRL> EDIT DATABASE primary_db SET PROPERTY RedoRoutes =
           '(LOCAL : farsync_inst SYNC)(farsync_inst : standby_db ASYNC)';
@@ -322,37 +322,37 @@ DGMGRL> ENABLE FAR_SYNC farsync_inst;
 
 ---
 
-## Protection Modes
+## 保護モード
 
-Data Guard protection modes define the trade-off between data protection (zero data loss) and primary database performance/availability.
+Data Guardの保護モードは、データ保護（データ損失ゼロ）とプライマリ・データベースのパフォーマンス/可用性のトレードオフを定義する。
 
-### Maximum Protection
+### 最高保護 (Maximum Protection)
 
-- Requires synchronous redo transport (SYNC AFFIRM) to at least one standby
-- Primary shuts down if no synchronized standby is available
-- Guarantees zero data loss
-- Adds commit latency equal to the round-trip to the standby
+- 少なくとも1つのスタンバイへの同期redo転送 (SYNC AFFIRM)が必要
+- 同期されたスタンバイが使用できない場合、プライマリがシャットダウンする
+- データ損失ゼロを保証
+- スタンバイへの往復時間（RTT）に相当するコミット遅延が発生する
 
 ```sql
 ALTER DATABASE SET STANDBY DATABASE TO MAXIMIZE PROTECTION;
 ```
 
-### Maximum Availability
+### 最高可用性 (Maximum Availability)
 
-- Requires SYNC transport; if standby is unavailable, automatically degrades to asynchronous (no primary shutdown)
-- Zero data loss when standby is reachable
-- Best balance of protection and availability — recommended for most production deployments
+- SYNC転送が必要。スタンバイが使用不可の場合、自動的に非同期に格下げされる（プライマリは停止しない）
+- スタンバイに到達可能な場合はデータ損失ゼロ
+- 保護と可用性の最良のバランスであり、ほとんどの本番環境で推奨される
 
 ```sql
 ALTER DATABASE SET STANDBY DATABASE TO MAXIMIZE AVAILABILITY;
 ```
 
-### Maximum Performance (Default)
+### 最高パフォーマンス (Maximum Performance — デフォルト)
 
-- Uses asynchronous transport (ASYNC)
-- Primary never waits for standby acknowledgment
-- Best performance; potential data loss equal to the transport lag
-- Default mode; suitable when some data loss is acceptable
+- 非同期転送 (ASYNC)を使用
+- プライマリはスタンバイの確認を待機しない
+- 最高のパフォーマンス。転送ラグに相当するデータ損失の可能性がある
+- デフォルト・モードであり、ある程度のデータ損失が許容される場合に適している
 
 ```sql
 ALTER DATABASE SET STANDBY DATABASE TO MAXIMIZE PERFORMANCE;
@@ -360,77 +360,76 @@ ALTER DATABASE SET STANDBY DATABASE TO MAXIMIZE PERFORMANCE;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Use Data Guard Broker (DGMGRL)** for all configuration management. Manual log_archive_dest parameter management is error-prone and difficult to maintain.
+- **Data Guard Broker (DGMGRL)を使用する。** 手動のlog_archive_destパラメータ管理は間違いやすく、保守も困難である。
 
-- **Configure Standby Redo Logs** on both primary and standby. They are required for real-time apply and synchronous transport.
+- **プライマリとスタンバイの両方でスタンバイRedoログを構成する。** リアルタイム適用と同期転送には必須である。
 
-- **Use Maximum Availability** mode with SYNC transport for critical OLTP workloads where the network latency to the standby is acceptable (typically under 5ms RTT).
+- **最高可用性モードを使用する。** スタンバイへのネットワーク遅延が許容可能（通常はRTT 5ms未満）なクリティカルなOLTPワークロードにSYNC転送で適用する。
 
-- **Monitor lag actively.** A standby with 4 hours of apply lag provides 4 hours of recovery time, not instant failover.
+- **ラグをアクティブに監視する。** 4時間の適用ラグがあるスタンバイは、即時のフェイルオーバーではなく、4時間の復旧時間（RTO）を意味する。
 
-- **Test switchovers regularly** (quarterly at minimum). A failover procedure that has never been executed is a high-risk assumption.
+- **スイッチオーバーを定期的にテストする**（最低でも四半期ごと）。一度も実行されたことのないフェイルオーバー・手順は、高リスクな仮定に過ぎない。
 
-- **Back up from the standby** to offload backup I/O from the primary. RMAN can back up from a physical standby.
+- **スタンバイからバックアップを取得する。** プライマリからのバックアップI/Oをオフロードできる。RMANはフィジカル・スタンバイからバックアップを実行可能である。
 
-- **Enable Flashback Database** on the primary to enable reinstatement after failover.
+- **プライマリでFlashback Databaseを有効にする。** フェイルオーバー後の再有効化が可能になる。
   ```sql
   ALTER DATABASE FLASHBACK ON;
   ```
 
-- **Size the Standby Redo Logs correctly.** Each group should be the same size as the primary online redo logs, and there should be (number of primary groups + 1) standby redo log groups per thread.
+- **スタンバイRedoログを正しくサイズ設定する。** 各グループはプライマリのオンラインredoログと同じサイズにし、スレッドごとに（プライマリ・グループ数 + 1）個のスタンバイredoログ・グループを確保する。
 
 ---
 
-## Common Mistakes and How to Avoid Them
+## よくある間違いと回避策
 
-**Not configuring Standby Redo Logs**
-Without SRLs, real-time apply is not possible. Redo is only applied after archiving, increasing apply lag unnecessarily.
+**スタンバイRedoログの未構成**
+SRLがないと、リアルタイム適用ができなくなる。redoはアーカイブ後にのみ適用されるため、適用ラグが不必要に増加する。
 
-**Incorrect LOG_ARCHIVE_DEST parameter syntax**
-The `VALID_FOR` attribute must match the database role and log type. Misconfiguration causes redo transport to silently stop.
+**LOG_ARCHIVE_DESTパラメータの構文の誤り**
+`VALID_FOR`属性はデータベースの役割とログ・タイプに一致している必要がある。構成が間違っていると、redo転送が警告なしに停止する。
 
 ```sql
--- Correct: ship online logs when acting as primary
+-- 正解: プライマリとして動作しているときにオンライン・ログを転送する
 ALTER SYSTEM SET LOG_ARCHIVE_DEST_2 =
   'SERVICE=standby ASYNC NOAFFIRM
    DB_UNIQUE_NAME=standby
    VALID_FOR=(ONLINE_LOGFILES,PRIMARY_ROLE)';
 ```
 
-**Forgetting to set DB_UNIQUE_NAME**
-All databases in a Data Guard configuration must have unique `DB_UNIQUE_NAME` values. They can share the same `DB_NAME`.
+**DB_UNIQUE_NAMEの設定忘れ**
+Data Guard構成内のすべてのデータベースは、一意の`DB_UNIQUE_NAME`を持つ必要がある。これらは同じ`DB_NAME`を共有できる。
 
 ```sql
--- Check
+-- 確認
 SELECT db_unique_name, db_name FROM v$database;
 ```
 
-**Failover without checking for gaps**
-Before failing over manually, always check for archive gaps:
+**ギャップを確認せずにフェイルオーバーする**
+手動でフェイルオーバーする前に、必ずアーカイブ・ギャップを確認すること：
 ```sql
 SELECT * FROM v$archive_gap;
 ```
 
-**Not enabling Flashback on the primary**
-Without Flashback, reinstating the old primary after failover requires a full rebuild from backup. Always enable Flashback on the primary before any failover.
+**プライマリでのFlashbackの未有効化**
+Flashbackなしの場合、フェイルオーバー後の旧プライマリの再有効化にはバックアップからの完全な再構築が必要になる。フェイルオーバー前に必ずプライマリでFlashbackを有効にしておくこと。
 
-**Treating the standby as a permanent reporting database without ADG license**
-Opening a standby read-only and suspending apply is not Active Data Guard. You need the ADG license to keep apply running while the database is open.
+**ADGライセンスなしでスタンバイを恒久的なレポート・データベースとして扱う**
+スタンバイを読取り専用でオープンし、適用を一時停止することはActive Data Guardではない。データベースをオープンしたまま適用を継続するには、ADGライセンスが必要である。
 
 ---
 
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Data Guard Concepts and Administration 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/sbydb/)
-- [Oracle Database 19c SQL Language Reference — ALTER DATABASE (Data Guard clauses)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/ALTER-DATABASE.html)
+- [Oracle Data Guard 概念および管理 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/sbydb/)
+- [Oracle Database 19c SQL言語リファレンス — ALTER DATABASE (Data Guard句)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/ALTER-DATABASE.html)
 - [Oracle Data Guard Broker 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/dgbkr/)
-- [Oracle Database 19c Reference — V$DATAGUARD_STATS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-DATAGUARD_STATS.html)
+- [Oracle Database 19c リファレンス — V$DATAGUARD_STATS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-DATAGUARD_STATS.html)

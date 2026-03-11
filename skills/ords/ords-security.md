@@ -1,34 +1,34 @@
-# ORDS Security: Hardening, CORS, Rate Limiting, and Defense-in-Depth
+# ORDS セキュリティ: 強固な保護、CORS、レート制限、および多層防御
 
-## Overview
+## 概要
 
-Securing ORDS involves multiple layers: enforcing HTTPS transport, configuring CORS policies for browser clients, protecting endpoints with OAuth2 privileges, preventing SQL injection through correct bind variable usage, managing database credentials securely, and monitoring for suspicious activity. ORDS exposes Oracle Database functionality over HTTP, making it a critical security boundary — a misconfiguration can expose sensitive data or allow unauthorized data modification.
+ORDS のセキュリティ保護には、HTTPS 通信の強制、ブラウザ・クライアント向けの CORS ポリシーの構成、OAuth2 権限によるエンドポイントの保護、バインド変数の正しい使用による SQL インジェクションの防止、データベース資格証明の安全な管理、および不審なアクティビティの監視など、複数のレイヤーが含まれる。ORDS は Oracle Database の機能を HTTP 経由で公開するため、重要なセキュリティ境界となる。誤った構成は機密データの漏洩や不正なデータ変更を招く可能性がある。
 
-This guide covers ORDS-specific security controls, complementing Oracle Database security features (VPD, Vault, Audit).
+このガイドでは、Oracle Database のセキュリティ機能（VPD、Vault、監査）を補完する、ORDS 固有のセキュリティ制御について説明する。
 
 ---
 
-## Enforcing HTTPS
+## HTTPS の強制
 
-Never expose ORDS over plain HTTP in any non-development environment. Configure ORDS to refuse or redirect HTTP requests.
+開発環境以外では、決して ORDS を平文の HTTP で公開してはならない。HTTP リクエストを拒否またはリダイレクトするように ORDS を構成する。
 
-### Force HTTPS in ORDS Configuration
+### ORDS 構成での HTTPS 強制
 
 ```shell
-# Require HTTPS for all requests
+# すべてのリクエストに HTTPS を要求
 ords --config /opt/oracle/ords/config config set security.forceHTTPS true
 ```
 
-When `security.forceHTTPS = true`, ORDS:
-- Redirects HTTP requests to HTTPS (301)
-- Adds `Strict-Transport-Security` header to responses
+`security.forceHTTPS = true` の場合、ORDS は以下を行う。
+- HTTP リクエストを HTTPS にリダイレクトする (301)
+- レスポンスに `Strict-Transport-Security` ヘッダーを追加する
 
-### HTTPS with ORDS Standalone (Production Certificate)
+### ORDS スタンドアロンでの HTTPS (本番用証明書)
 
-Using a certificate from Let's Encrypt or a commercial CA:
+Let's Encrypt や商用 CA の証明書を使用する場合:
 
 ```shell
-# Convert PEM certificate to PKCS12 for Java keystore
+# PEM 証明書を Java キーストア用の PKCS12 に変換
 openssl pkcs12 -export \
   -in /etc/ssl/certs/api.example.com.crt \
   -inkey /etc/ssl/private/api.example.com.key \
@@ -37,7 +37,7 @@ openssl pkcs12 -export \
   -name ords-ssl \
   -passout pass:changeit
 
-# Configure ORDS to use it
+# ORDS での使用構成
 ords --config /opt/oracle/ords/config config set standalone.https.port 443
 ords --config /opt/oracle/ords/config config set standalone.https.cert \
   /opt/oracle/ords/config/ords/standalone/api.p12
@@ -45,9 +45,9 @@ ords --config /opt/oracle/ords/config config set \
   standalone.https.cert.secret changeit
 ```
 
-### TLS Minimum Version and Cipher Suites
+### TLS 最小バージョンと暗号スイート
 
-Disable obsolete TLS versions by setting JVM options:
+JVM オプションを設定して、廃止された TLS バージョンを無効化する。
 
 ```shell
 # /etc/systemd/system/ords.service
@@ -55,7 +55,7 @@ Disable obsolete TLS versions by setting JVM options:
 Environment="JAVA_OPTS=-Djdk.tls.disabledAlgorithms=SSLv3,TLSv1,TLSv1.1,RC4,DES,MD5withRSA,DH keySize<2048"
 ```
 
-Or in Nginx (recommended reverse proxy approach):
+または Nginx (推奨されるリバース・プロキシ手法) で設定する。
 
 ```nginx
 ssl_protocols TLSv1.2 TLSv1.3;
@@ -66,24 +66,24 @@ add_header Strict-Transport-Security "max-age=63072000" always;
 
 ---
 
-## CORS Configuration
+## CORS 構成
 
-CORS (Cross-Origin Resource Sharing) controls which browser origins are allowed to call your ORDS endpoints. Misconfigured CORS (e.g., wildcard `*` on authenticated endpoints) is a common vulnerability.
+CORS (Cross-Origin Resource Sharing) は、どのブラウザ・オリジンが ORDS エンドポイントを呼び出すことを許可するかを制御する。CORS の誤設定（認証済みエンドポイントでのワイルドカード `*` など）は、一般的な脆弱性である。
 
-### Configure CORS in ORDS
+### ORDS での CORS 構成
 
-CORS settings are configured via the ORDS CLI:
+CORS 設定は ORDS CLI を介して行う。
 
 ```shell
-# Allow specific origins
+# 特定のオリジンを許可
 ords --config /opt/oracle/ords/config config set security.requestValidationFunction ords_util.authorize_plsql_gateway
 
-# Set allowed origins (comma-separated, no wildcards for authenticated endpoints)
+# 許可されたオリジンの設定 (カンマ区切り。認証済みエンドポイントにはワイルドカードを使用しないこと)
 ords --config /opt/oracle/ords/config config set security.allowedCORSOrigins \
   "https://app.example.com,https://admin.example.com"
 ```
 
-Set all CORS parameters via the ORDS CLI:
+ORDS CLI ですべての CORS パラメータを設定する。
 
 ```shell
 ords --config /opt/oracle/ords/config config set \
@@ -95,32 +95,32 @@ ords --config /opt/oracle/ords/config config set \
 ords --config /opt/oracle/ords/config config set security.maxAge 3600
 ```
 
-### CORS Best Practices
+### CORS のベスト・プラクティス
 
 ```shell
-# WRONG: Wildcard on an authenticated API — allows any origin to send credentials
+# 間違い: 認証済み API でのワイルドカード — あらゆるオリジンが資格証明を送信することを許可してしまう
 ords config set security.allowedCORSOrigins "*"
 
-# CORRECT: Explicit trusted origins only
+# 正解: 明示的に信頼されたオリジンのみを指定
 ords config set security.allowedCORSOrigins "https://myapp.example.com"
 
-# For truly public read-only APIs, wildcard is acceptable
-# but protect all write operations with OAuth2 regardless
+# 完全に公開された読み取り専用 API の場合はワイルドカードも許容されるが、
+# 書き込み操作はすべて OAuth2 で保護すること
 ords config set security.allowedCORSOrigins "*"
 ```
 
-When `security.forceHTTPS = true`, CORS allows HTTPS origins only. Mixed HTTP/HTTPS origins are rejected.
+`security.forceHTTPS = true` の場合、CORS は HTTPS オリジンのみを許可する。HTTP/HTTPS が混在するオリジンは拒否される。
 
 ---
 
-## Privilege-Protected vs Public Handlers
+## 権限保護されたハンドラー vs 公開ハンドラー
 
-Every ORDS REST handler is either public (no authentication required) or protected (Bearer token required).
+すべての ORDS REST ハンドラーは、公開（認証不要）または保護（Bearer トークンが必要）のいずれかである。
 
-### Public Handler (no privilege attached)
+### 公開ハンドラー (権限設定なし)
 
 ```sql
--- This endpoint is accessible without authentication
+-- このエンドポイントは認証なしでアクセス可能
 BEGIN
   ORDS.DEFINE_HANDLER(
     p_module_name => 'public.api',
@@ -134,18 +134,18 @@ END;
 /
 ```
 
-### Protected Handler (privilege required)
+### 保護されたハンドラー (権限が必要)
 
 ```sql
 BEGIN
-  -- Define the privilege
+  -- 権限の定義
   ORDS.DEFINE_PRIVILEGE(
     p_privilege_name => 'hr.employees.read',
     p_label          => 'Read HR Employee Data',
     p_description    => 'Required for accessing HR employee endpoints'
   );
 
-  -- Protect the module
+  -- モジュールの保護
   ORDS.PRIVILEGE_MAP_MODULE(
     p_privilege_name => 'hr.employees.read',
     p_module_name    => 'hr.employees'
@@ -155,7 +155,7 @@ END;
 /
 ```
 
-Any request to `hr.employees` module without a valid token returns:
+有効なトークンなしで `hr.employees` モジュールにアクセスすると、以下が返される。
 
 ```http
 HTTP/1.1 401 Unauthorized
@@ -167,49 +167,49 @@ WWW-Authenticate: Bearer realm="hr"
 }
 ```
 
-### Checking Current User in Handler
+### ハンドラー内での現在ユーザーの確認
 
 ```sql
--- :current_user contains the authenticated username (NULL if unauthenticated)
+-- :current_user には認証済みユーザー名が含まれる (未認証の場合は NULL)
 WHERE employee_id = :id
-AND   owner_username = :current_user  -- Row-level access control
+AND   owner_username = :current_user  -- 行レベルのアクセス制御
 ```
 
 ---
 
-## SQL Injection Prevention
+## SQL インジェクションの防止
 
-ORDS's primary defense against SQL injection is **bind parameters**. ORDS never concatenates user-supplied values into SQL strings — all request parameters are bound as variables.
+SQL インジェクションに対する ORDS の主要な防御策は **バインド・パラメータ** である。ORDS はユーザーから提供された値を SQL 文字列に結合することは決してなく、すべてのリクエスト・パラメータを変数としてバインドする。
 
-### Correct: Bind Parameters
+### 正解: バインド・パラメータ
 
 ```sql
--- SAFE: employee_id is a bind variable
+-- 安全: employee_id はバインド変数
 SELECT * FROM employees WHERE employee_id = :id
 
--- SAFE: VARCHAR2 bind variable
+-- 安全: VARCHAR2 バインド変数
 SELECT * FROM employees WHERE last_name = :last_name
 
--- SAFE: Used in PL/SQL
+-- 安全: PL/SQL での使用
 UPDATE employees SET salary = :salary WHERE employee_id = :id
 ```
 
-### Wrong: Dynamic SQL Concatenation
+### 間違い: 動的 SQL の文字列結合
 
-Never do this in ORDS handlers:
+ORDS ハンドラーで以下のようなことは決して行ってはならない。
 
 ```sql
--- DANGEROUS: :last_name injected into dynamic SQL
+-- 危険: :last_name が動的 SQL に注入される
 EXECUTE IMMEDIATE 'SELECT * FROM employees WHERE last_name = ''' || :last_name || '''';
 
--- DANGEROUS: Building WHERE clause dynamically without bind variables
+-- 危険: バインド変数を使わずに WHERE 句を動的に構築する
 l_sql := 'SELECT * FROM employees WHERE ' || :filter_column || ' = ' || :filter_value;
 EXECUTE IMMEDIATE l_sql;
 ```
 
-### Safe Dynamic SQL with DBMS_SQL
+### DBMS_SQL を使用した安全な動的 SQL
 
-If dynamic SQL is genuinely required:
+動的 SQL が真に必要な場合:
 
 ```sql
 DECLARE
@@ -218,15 +218,15 @@ DECLARE
   l_val      VARCHAR2(100);
   l_result   SYS_REFCURSOR;
 BEGIN
-  -- Validate column name against allowlist (critical!)
+  -- 許可リストに対するカラム名の検証 (重要!)
   IF :column_name NOT IN ('department_id', 'job_id', 'manager_id') THEN
     RAISE_APPLICATION_ERROR(-20001, 'Invalid filter column');
   END IF;
 
-  l_col_name := :column_name;  -- Safe after allowlist check
+  l_col_name := :column_name;  -- 許可リスト確認後は安全
   l_val      := :value;
 
-  -- Use bind variable in dynamic SQL
+  -- 動的 SQL 内でバインド変数を使用
   OPEN l_result FOR
     'SELECT * FROM employees WHERE ' || l_col_name || ' = :val'
     USING l_val;
@@ -235,51 +235,51 @@ BEGIN
 END;
 ```
 
-### Column/Table Name Allowlisting
+### カラム名/テーブル名の許可リスト化
 
-Column and table names cannot be parameterized as bind variables. Validate against a strict allowlist:
+カラム名やテーブル名はバインド変数としてパラメータ化できない。厳格な許可リストに対して検証すること。
 
 ```sql
 FUNCTION validate_column_name(p_col IN VARCHAR2) RETURN VARCHAR2 AS
   l_allowed DBMS_UTILITY.LNAME_ARRAY;
 BEGIN
-  -- Define allowed columns explicitly
+  -- 許可されたカラムを明示的に定義
   IF p_col NOT IN (
     'employee_id', 'department_id', 'job_id',
     'hire_date', 'salary', 'manager_id'
   ) THEN
     RAISE_APPLICATION_ERROR(-20001, 'Column not allowed for filtering: ' || p_col);
   END IF;
-  RETURN DBMS_ASSERT.SIMPLE_SQL_NAME(p_col);  -- Additional validation
+  RETURN DBMS_ASSERT.SIMPLE_SQL_NAME(p_col);  -- 追加の検証
 END;
 ```
 
 ---
 
-## Secrets Management for DB Credentials
+## データベース資格証明のシークレット管理
 
-### ORDS Wallet-Based Secret Storage (Default Mechanism)
+### ORDS ウォレットベースのシークレット・ストレージ (デフォルトの仕組み)
 
-All passwords in ORDS are stored in an **Oracle Wallet** (credential store) in the `credentials/` directory of the ORDS config. Passwords never appear in any configuration file. Use `ords config secret set` to set or rotate any credential:
+ORDS のすべてのパスワードは、ORDS 構成の `credentials/` ディレクトリにある **Oracle ウォレット**（資格証明ストア）に保存される。パスワードが構成ファイルに現れることはない。`ords config secret set` を使用して資格証明を設定またはローテーションする。
 
 ```shell
-# Set the DB password — stored in Oracle Wallet only
+# DB パスワードの設定 — Oracle ウォレットにのみ保存
 ords --config /opt/oracle/ords/config config secret set db.password \
   --password-stdin <<< "MySecurePassword123!"
 
-# Rotate a password — re-run with the new value
+# パスワードのローテーション — 新しい値で再実行
 ords --config /opt/oracle/ords/config config secret set db.password \
   --password-stdin <<< "NewSecurePassword456!"
 
-# Verify the wallet is present (passwords are not readable from config files)
+# ウォレットの存在確認 (パスワードは構成ファイルからは読み取れない)
 ls /opt/oracle/ords/config/credentials/
 ```
 
-Protect the `credentials/` directory with OS-level permissions (`chmod 700`) and include it in backup procedures alongside the rest of the config directory.
+`credentials/` ディレクトリは OS レベルの権限 (`chmod 700`) で保護し、構成ディレクトリの他の部分とともにバックアップ・手順に含めること。
 
-### OCI Vault Integration
+### OCI Vault との統合
 
-For cloud deployments, retrieve secrets from OCI Vault at startup and pipe directly into the wallet — no intermediate file needed:
+クラウド・デプロイメントでは、起動時に OCI Vault からシークレットを取得し、中間ファイルを経由せずに直接ウォレットにパイプする。
 
 ```shell
 OCI_SECRET=$(oci secrets secret-bundle get \
@@ -293,37 +293,37 @@ ords --config /opt/oracle/ords/config config secret set db.password \
 
 ---
 
-## IP Allowlisting
+## IP 許可リスト
 
-ORDS does not natively support IP allowlisting. Implement at the network layer:
+ORDS はネイティブでは IP 許可リストをサポートしていない。ネットワーク・レイヤーで実装する。
 
-### Using Linux `iptables`
+### Linux `iptables` の使用
 
 ```shell
-# Allow only specific IP ranges to reach ORDS port
+# 特定の IP 範囲のみ ORDS ポートへの到達を許可
 iptables -A INPUT -p tcp --dport 8443 -s 10.0.0.0/8 -j ACCEPT
 iptables -A INPUT -p tcp --dport 8443 -j DROP
 ```
 
-### Using Nginx as Reverse Proxy
+### Nginx をリバース・プロキシとして使用
 
 ```nginx
 location /ords/ {
-    # Allow corporate network
+    # 社内ネットワークの許可
     allow 10.0.0.0/8;
     allow 192.168.1.0/24;
-    # Allow specific partner IPs
+    # 特定のパートナー IP の許可
     allow 203.0.113.45;
-    # Deny everything else
+    # その他すべてを拒否
     deny all;
 
     proxy_pass http://localhost:8080/ords/;
 }
 ```
 
-### ORDS Request Validation Function
+### ORDS リクエスト検証関数
 
-ORDS supports a PL/SQL request validation function for custom access control logic including IP checking:
+ORDS は、IP チェックを含むカスタム・アクセス制御ロジックのための PL/SQL リクエスト検証関数をサポートしている。
 
 ```sql
 CREATE OR REPLACE FUNCTION hr.ords_request_validator(
@@ -336,14 +336,14 @@ CREATE OR REPLACE FUNCTION hr.ords_request_validator(
 ) RETURN BOOLEAN AS
   l_remote_addr VARCHAR2(50);
 BEGIN
-  -- Get client IP from OWA environment
+  -- OWA 環境からクライアント IP を取得
   FOR i IN 1..p_env.COUNT LOOP
     IF UPPER(p_env(i)) = 'REMOTE_ADDR' THEN
       l_remote_addr := p_val(i);
     END IF;
   END LOOP;
 
-  -- Block known bad IPs
+  -- 既知の不正 IP をブロック
   IF l_remote_addr IN (
     SELECT ip_address FROM security.blocked_ips WHERE active = 'Y'
   ) THEN
@@ -355,7 +355,7 @@ END;
 /
 ```
 
-Configure in ORDS:
+ORDS での構成:
 
 ```shell
 ords --config /opt/oracle/ords/config config set \
@@ -364,14 +364,14 @@ ords --config /opt/oracle/ords/config config set \
 
 ---
 
-## Rate Limiting
+## レート制限
 
-ORDS does not include built-in rate limiting. Implement at the reverse proxy or API gateway layer.
+ORDS にはレート制限機能が組み込まれていない。リバース・プロキシまたは API ゲートウェイ・レイヤーで実装する。
 
-### Nginx Rate Limiting
+### Nginx のレート制限
 
 ```nginx
-# Define rate limit zone: 100 requests/minute per IP
+# レート制限ゾーンの定義: IP あたり 毎分 100 リクエスト
 limit_req_zone $binary_remote_addr zone=ords_limit:10m rate=100r/m;
 
 server {
@@ -384,21 +384,21 @@ server {
 }
 ```
 
-### API Gateway Rate Limiting (OCI)
+### API ゲートウェイのレート制限 (OCI)
 
-For OCI deployments, use OCI API Gateway in front of ORDS:
-- Configure usage plans with request limits per client
-- Apply per-client rate limits based on API keys or OAuth tokens
-- Log and alert on throttled requests
+OCI デプロイメントでは、ORDS の前に OCI API Gateway を使用する。
+- クライアントごとのリクエスト制限を含む使用プランを構成する
+- API キーまたは OAuth トークンに基づいてクライアント別のレート制限を適用する
+- 制限されたリクエストについてログを記録しアラートを出す
 
 ---
 
-## Oracle Database Vault Integration
+## Oracle Database Vault との統合
 
-Oracle Database Vault (DBV) restricts access to sensitive schemas even from privileged accounts. Combined with ORDS, DBV prevents the ORDS connection account from accessing data it shouldn't, even if ORDS is compromised.
+Oracle Database Vault (DBV) は、特権アカウントからでも機密スキーマへのアクセスを制限する。ORDS と組み合わせることで、万が一 ORDS が侵害された場合でも、ORDS 接続アカウントが必要以上のデータにアクセスすることを防ぐ。
 
 ```sql
--- Example: Create a DBV realm for the HR schema
+-- 例: HR スキーマ用の DBV レルムを作成
 EXEC DVSYS.DBMS_MACADM.CREATE_REALM(
   realm_name   => 'HR Protected Realm',
   description  => 'Restricts access to HR sensitive tables',
@@ -406,33 +406,33 @@ EXEC DVSYS.DBMS_MACADM.CREATE_REALM(
   audit_options => DVSYS.DBMS_MACUTL.G_REALM_AUDIT_FAIL
 );
 
--- Add HR schema objects to realm
+-- HR スキーマ・オブジェクトをレルムに追加
 EXEC DVSYS.DBMS_MACADM.ADD_OBJECT_TO_REALM(
   realm_name   => 'HR Protected Realm',
   object_owner => 'HR',
-  object_name  => 'SALARY_DETAILS',  -- Sensitive table
+  object_name  => 'SALARY_DETAILS',  -- 機密テーブル
   object_type  => 'TABLE'
 );
 
--- Authorize only specific users
+-- 特定のユーザーのみを承認
 EXEC DVSYS.DBMS_MACADM.ADD_AUTH_TO_REALM(
   realm_name   => 'HR Protected Realm',
-  grantee      => 'HR_COMPENSATION_APP',  -- Application user, NOT ORDS_PUBLIC_USER
+  grantee      => 'HR_COMPENSATION_APP',  -- アプリケーション・ユーザー (ORDS_PUBLIC_USER ではない)
   rule_set_name => NULL,
   auth_options => DVSYS.DBMS_MACUTL.G_REALM_AUTH_OWNER
 );
 ```
 
-This ensures ORDS_PUBLIC_USER (and thus the general ORDS connection) cannot access `SALARY_DETAILS`, even if an attacker manipulates ORDS handler SQL.
+これにより、攻撃者が ORDS ハンドラーの SQL を操作したとしても、`ORDS_PUBLIC_USER`（および一般的な ORDS 接続）からは `SALARY_DETAILS` にアクセスできなくなる。
 
 ---
 
-## Security HTTP Headers
+## セキュリティ HTTP ヘッダー
 
-Configure ORDS to return security headers:
+セキュリティ・ヘッダーを返すように ORDS を構成する。
 
 ```shell
-# Via Nginx (recommended)
+# Nginx 経由 (推奨)
 add_header X-Content-Type-Options    "nosniff" always;
 add_header X-Frame-Options           "DENY" always;
 add_header X-XSS-Protection          "1; mode=block" always;
@@ -443,34 +443,33 @@ add_header Permissions-Policy        "geolocation=(), microphone=()" always;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Apply the principle of least privilege throughout**: ORDS_PUBLIC_USER needs only `CREATE SESSION`. REST-executing schemas need only the objects they use. No DBA accounts in any connection pool.
-- **Enable `p_auto_rest_auth => TRUE` on all AutoREST schemas**: Forces authentication on all AutoREST endpoints by default. Explicitly whitelist public objects rather than defaulting to public.
-- **Rotate credentials on schedule**: Client secrets, DB passwords, and SSL certificates should all have defined rotation schedules. Automate rotation using OCI Vault or HashiCorp Vault.
-- **Run ORDS behind a WAF (Web Application Firewall)**: OCI WAF or AWS WAF in front of ORDS adds protection against common web attacks (OWASP Top 10) that ORDS itself does not mitigate.
-- **Audit all ORDS requests**: Enable request logging and funnel logs to a SIEM. Alert on 401 spikes (credential stuffing), 500 spikes (exploitation attempts), and unusual payload sizes.
-- **Keep ORDS patched**: Oracle regularly releases ORDS security patches. Subscribe to Oracle Security Alerts and update promptly.
+- **最小権限の原則を徹底する**: `ORDS_PUBLIC_USER` に必要なのは `CREATE SESSION` のみである。REST を実行するスキーマには、使用するオブジェクトのみの権限を与える。接続プールに DBA アカウントを使用してはならない。
+- **すべての AutoREST スキーマで `p_auto_rest_auth => TRUE` を有効にする**: デフォルトですべての AutoREST エンドポイントに認証を強制する。デフォルトを公開にするのではなく、公開オブジェクトを明示的にホワイトリスト化する。
+- **資格証明を定期的にローテーションする**: クライアント・シークレット、DB パスワード、および SSL 証明書には、すべて定義されたローテーション・スケジュールを持たせる。OCI Vault や HashiCorp Vault を使用してローテーションを自動化する。
+- **WAF (Web Application Firewall) の背後で ORDS を実行する**: ORDS の前に OCI WAF や AWS WAF を配置することで、ORDS 自体では軽減できない一般的な Web 攻撃 (OWASP Top 10) に対する保護を追加する。
+- **すべての ORDS リクエストを監査する**: リクエスト・ロギングを有効にし、ログを SIEM に集約する。401 エラーの急増（資格証明の詰め込み攻撃）、500 エラーの急増（悪用試行）、異常なペイロード・サイズにアラートを出す。
+- **ORDS を最新の状態に保つ**: Oracle は定期的に ORDS のセキュリティ・パッチをリリースしている。Oracle Security Alerts を購読し、速やかに更新すること。
 
-## Common Mistakes
+## よくある間違い
 
-- **Wildcard CORS on authenticated endpoints**: `*` CORS policy with OAuth2 Bearer tokens negates the token security — any site can make cross-origin requests. Use explicit origin allowlists.
-- **Attempting to write passwords into config files**: ORDS stores all credentials in an Oracle Wallet (`credentials/` directory) — passwords never belong in any config file. Use `ords config secret set db.password` to set or rotate them. Attempting to embed a password directly in a config file will not work and may break ORDS startup.
-- **Not disabling Database Actions in production (if not needed)**: Database Actions (`feature.sdw=true`) provides a powerful SQL execution interface. Disable it on API-only ORDS instances: `feature.sdw=false`.
-- **Using the same OAuth client for all services**: If a shared client is compromised, all services lose access. Use one OAuth client per service/application.
-- **Not testing authentication on every endpoint after a schema change**: Adding a new module does not automatically protect it. Verify each new endpoint requires the expected authentication.
-- **Ignoring ORA-00942 and ORA-04043 errors in ORDS logs**: These indicate missing objects or privileges — potential indicators of misconfiguration or privilege escalation attempts.
+- **認証済みエンドポイントでのワイルドカード CORS**: OAuth2 Bearer トークンを使用している環境での `*` CORS ポリシーは、トークンのセキュリティを無効にする。あらゆるサイトがクロスオリジン・リクエストを行えるようになってしまうため、明示的なオリジン許可リストを使用すること。
+- **構成ファイルにパスワードを書き込もうとする**: ORDS はすべての資格証明を Oracle ウォレット (`credentials/` ディレクトリ) に保存する。構成ファイルにパスワードを記載すべきではない。設定やローテーションには `ords config secret set db.password` を使用すること。構成ファイルに直接パスワードを埋め込もうとしても機能せず、ORDS の起動を妨げる可能性がある。
+- **本番環境で不要な Database Actions を無効にしていない**: Database Actions (`feature.sdw=true`) は強力な SQL 実行インターフェースを提供する。API 専用の ORDS インスタンスでは無効にすること: `feature.sdw=false`。
+- **すべてのサービスで同じ OAuth クライアントを使用している**: 共有クライアントが侵害されると、すべてのサービスがアクセスを失う。サービス/アプリケーションごとに 1 つの OAuth クライアントを使用すること。
+- **スキーマ変更後にすべてのエンドポイントの認証をテストしていない**: 新しいモジュールを追加しても、自動的に保護されるわけではない。各新規エンドポイントが期待される認証を要求することを確認すること。
+- **ORDS ログの ORA-00942 や ORA-04043 エラーを無視している**: これらはオブジェクトや権限の欠落を示しており、構成ミスや権限昇格の試みの可能性を示唆している。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。混在環境では 19c 互換の代替手段を維持すること。
+- 19c と 26ai の両方をサポートする環境では、リリース・アップデートによってデフォルトや非推奨が異なる場合があるため、両方のバージョンで構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [ORDS Developer's Guide — Securing Oracle REST Data Services](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/about-oracle-rest-data-services.html)
 - [ORDS Configuration Settings Reference — Security Settings](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/ordig/configuration-settings.html)

@@ -1,62 +1,62 @@
-# Oracle Exadata Features: Smart Scan, HCC, and Storage Offload
+# Oracle Exadataの機能: スマート・スキャン、HCC、ストレージ・オフロード
 
-## Overview
+## 概要
 
-Oracle Exadata is an engineered system that co-locates Oracle Database servers with intelligent storage cells running Exadata Storage Server Software (CELLSRV). The fundamental design principle is to move SQL processing — filtering, joining, decompression — down to the storage layer, dramatically reducing the amount of data that must traverse the storage network to the database servers.
+Oracle Exadataは、Oracle Databaseサーバーと、Exadata Storage Server Software (CELLSRV) を実行するインテリジェントなストレージ・セルを組み合わせた垂直統合型システム（Engineered System）である。その根本的な設計原理は、SQL処理（フィルタリング、結合、解凍など）をストレージ・レイヤーに移動（オフロード）させることで、ストレージ・ネットワークを経由してデータベース・サーバーに転送されるデータ量を劇的に削減することにある。
 
-Exadata is available as a physical on-premises system (X9M, X10M), as Exadata Cloud Service (ExaCS) on OCI, and as Exadata Cloud at Customer (ExaDB-C@C). The Exadata-specific features described in this guide are available across all deployment models.
+Exadataは、物理的なオンプレミス・システム（X9M、X10M）、OCI上のExadata Cloud Service (ExaCS)、およびExadata Cloud at Customer (ExaDB-C@C) として利用可能である。このガイドで説明するExadata固有の機能は、すべてのデプロイメント・モデルで利用できる。
 
 ---
 
-## 1. Smart Scan (Cell Offload Processing)
+## 1. スマート・スキャン (セル・オフロード処理)
 
-Smart Scan is the core Exadata capability. When Oracle determines that a query can benefit from cell-side processing, it sends the predicate, projection, and optional join filter information to each storage cell. Each cell evaluates the data on its local disk and returns only the rows that satisfy the predicates. This is called **cell offload**.
+スマート・スキャン（Smart Scan）は、Exadataの基幹となる機能である。Oracleがクエリにおいてセル側での処理が有益であると判断すると、述語（WHERE句）、プロジェクション（選択列）、およびオプションの結合フィルタ情報を各ストレージ・セルに送信する。各セルはローカル・ディスク上のデータを評価し、述語を満たす行のみを返す。これを**セル・オフロード**と呼ぶ。
 
-### How Smart Scan Works
+### スマート・スキャンの仕組み
 
-Without Smart Scan:
-1. Storage cell reads all blocks from disk
-2. All blocks transfer across InfiniBand to DB server
-3. DB server evaluates WHERE clause and discards most rows
-4. DB server returns small result set to the session
+スマート・スキャンがない場合：
+1. ストレージ・セルがディスクからすべてのブロックを読み取る
+2. すべてのブロックがInfiniBand経由でDBサーバーに転送される
+3. DBサーバーがWHERE句を評価し、ほとんどの行を破棄する
+4. DBサーバーが少量の結果セットをセッションに返す
 
-With Smart Scan:
-1. Storage cell reads all blocks from disk
-2. Cell evaluates WHERE clause, projection, and bloom filter in CELLSRV process
-3. Only matching rows (or row pieces) transfer across InfiniBand
-4. DB server performs any remaining aggregation
+スマート・スキャンがある場合：
+1. ストレージ・セルがディスクからすべてのブロックを読み取る
+2. セルがCELLSRVプロセス内でWHERE句、プロジェクション、およびブルーム・フィルタを評価する
+3. 一致する行（または行の一部）のみがInfiniBand経由で転送される
+4. DBサーバーが必要に応じて残りの集計処理などを行う
 
-The data reduction ratio (bytes sent vs. bytes on disk) is called the **cell offload efficiency**. A 90% offload efficiency means 90% of the data never left the storage layer.
+データ削減率（送信バイト数 vs ディスク上のバイト数）は、**セル・オフロード効率**と呼ばれる。オフロード効率が90%であれば、データの90%はストレージ・レイヤーから出なかったことを意味する。
 
-### Prerequisites for Smart Scan
+### スマート・スキャンの前提条件
 
-Smart Scan activates only when all of the following conditions are met:
+スマート・スキャンは、以下の条件がすべて満たされた場合にのみ有効になる：
 
-1. **Full segment scan**: The operation is a full table scan or full index fast scan (not a lookup by rowid or index range scan on a selective range).
-2. **Direct-path read**: The operation bypasses the buffer cache and reads directly from storage. This occurs when the segment is large enough to trigger direct reads, or when the session uses `/*+ PARALLEL */` or `/*+ FULL */`.
-3. **Exadata storage**: The segment's datafiles reside on ASM disk groups backed by Exadata storage cells.
+1. **フル・セグメント・スキャン**: 操作が全表スキャン（Full Table Scan）または索引高速全スキャン（Index Fast Full Scan）であること（ROWIDによるルックアップや、選択的な範囲のスキャンではないこと）。
+2. **ダイレクト・パス・リード**: 操作がバッファ・キャッシュをバイパスし、ストレージから直接読み取ること。これは、セグメントがダイレクト・読み取りをトリガーするのに十分な大きさであるか、セッションで `/*+ PARALLEL */` または `/*+ FULL */` ヒントを使用している場合に発生する。
+3. **Exadataストレージ**: セグメントのデータファイルが、Exadataストレージ・セルによってバックアップされたASMディスク・グループ上に存在すること。
 
 ```sql
--- Verify Smart Scan eligibility for a table
+-- 表のスマート・スキャン適格性の確認
 SELECT table_name, blocks, num_rows,
        ROUND(blocks * 8192 / 1024 / 1024, 1) AS size_mb
 FROM   user_tables
 WHERE  table_name = 'SALES';
 
--- A table must be large enough to trigger direct-path reads
--- The threshold is roughly: segment_size > _small_table_threshold * db_block_size
+-- 表はダイレクト・パス・リードをトリガーするのに十分な大きさである必要がある
+-- 閾値はおおよそ: セグメントサイズ > _small_table_threshold * db_block_size
 SELECT name, value
 FROM   v$parameter
 WHERE  name = '_small_table_threshold';
 
--- Force Smart Scan for testing (do not use in production)
+-- テスト目的でスマート・スキャンを強制する（本番環境では使用しないこと）
 ALTER SESSION SET "_serial_direct_read" = always;
 ```
 
-### Monitoring Smart Scan Offload
+### スマート・スキャン・オフロードの監視
 
 ```sql
--- System-level Smart Scan statistics
+-- システム・レベルのスマート・スキャン統計
 SELECT name, value
 FROM   v$sysstat
 WHERE  name IN (
@@ -69,7 +69,7 @@ WHERE  name IN (
 )
 ORDER  BY name;
 
--- Calculate offload efficiency (percentage of bytes filtered out)
+-- オフロード効率（フィルタリングされたバイトの割合）の計算
 SELECT ROUND(
     (1 - (bytes_returned / NULLIF(bytes_read, 0))) * 100,
     2
@@ -87,13 +87,13 @@ FROM (
     )
 );
 
--- Session-level: how much was offloaded in the current session
+-- セッション・レベル: 現在のセッションでどれだけオフロードされたか
 SELECT name, value
 FROM   v$mystat m JOIN v$statname n ON m.statistic# = n.statistic#
 WHERE  n.name LIKE 'cell%'
 ORDER  BY value DESC;
 
--- SQL-level: check cell_offload_efficiency from AWR
+-- SQLレベル: AWR から cell_offload_efficiency を確認
 SELECT sql_id,
        ROUND(AVG(cell_offload_efficiency), 2) AS avg_offload_pct,
        SUM(executions) AS total_execs,
@@ -108,34 +108,34 @@ FETCH  FIRST 20 ROWS ONLY;
 
 ---
 
-## 2. Storage Indexes
+## 2. ストレージ索引
 
-Storage Indexes are a purely in-memory optimization maintained automatically by CELLSRV. For each 1 MB region of disk, the storage index tracks the minimum and maximum value for up to 8 columns. When a query has a WHERE clause predicate, the storage cell checks whether the predicate can possibly match any row in each 1 MB region. If not, the entire region is skipped without any disk I/O.
+ストレージ索引（Storage Index）は、完全なインメモリの最適化機能であり、CELLSRVによって自動的に維持される。ディスクの1MBのリージョンごとに、ストレージ索引は最大8つの列の最小値と最大値を追跡する。クエリにWHERE句の述語がある場合、ストレージ・セルは各1MBリージョンに一致する行が含まれる可能性があるかどうかを確認する。含まれない場合、そのリージョン全体のディスクI/Oはスキップされる。
 
-Storage Indexes are:
-- **Automatic**: no DDL or configuration required
-- **In-memory only**: stored in storage cell memory (DRAM), not on disk
-- **Lost on cell restart**: rebuilt over time as data is accessed
+ストレージ索引の特徴：
+- **自動**: DDLや設定は不要
+- **インメモリのみ**: ディスク上ではなく、ストレージ・セルのメモリー（DRAM）に格納される
+- **セル再起動で消失**: データがアクセスされるにつれて、時間の経過とともに再構築される
 
-### When Storage Indexes Are Most Effective
+### ストレージ索引が最も効果的な場合
 
-Storage Indexes are most effective when:
-- Data has **natural clustering** by the predicate column (e.g., `ORDER_DATE` in an orders table inserted in chronological order)
-- Queries filter on **high-cardinality range predicates** (`WHERE order_date BETWEEN ... AND ...`)
-- The table is **not randomly distributed** across the storage cells
+ストレージ索引は以下の場合に最も効果的である：
+- 述語となる列によってデータが**自然にクラスタリング**されている場合（例：時系列で挿入される注文表の `ORDER_DATE`）
+- クエリが**カーディナリティ（選択性）の高い範囲述語**（`WHERE order_date BETWEEN ... AND ...`）でフィルタリングする場合
+- 表がストレージ・セル間で**ランダムに分散されていない**場合
 
 ```sql
--- Storage Index statistics (per storage cell, from CellCLI or V$ views)
+-- ストレージ索引統計 (各ストレージ・セル、CellCLI または V$ ビューから取得)
 SELECT name, value
 FROM   v$sysstat
 WHERE  name IN (
-    'cell blocks helped by minmax predicate',   -- blocks eliminated by storage index
-    'cell blocks helped by bloom filter'        -- blocks eliminated by bloom filter join
+    'cell blocks helped by minmax predicate',   -- ストレージ索引によって削減されたブロック
+    'cell blocks helped by bloom filter'        -- ブルーム・フィルタ結合によって削減されたブロック
 )
 ORDER  BY name;
 
--- Identify queries that would benefit from storage index clustering
--- Look for full scans with selective date/numeric predicates
+-- ストレージ索引によるクラスタリングの恩恵を受けるクエリの特定
+-- 選択的な日付/数値述語を持つ全表スキャンを探す
 SELECT sql_id, sql_text, executions,
        rows_processed / NULLIF(executions, 0) AS avg_rows_per_exec,
        buffer_gets / NULLIF(executions, 0) AS avg_bufgets_per_exec
@@ -149,25 +149,25 @@ FETCH  FIRST 10 ROWS ONLY;
 
 ---
 
-## 3. Hybrid Columnar Compression (HCC)
+## 3. ハイブリッド列圧縮 (HCC)
 
-HCC is an Exadata-specific compression technology (also available on OCI Object Storage and ZFS Storage Appliance) that groups column values from multiple rows into **compression units** and compresses them together. Because column data tends to have low cardinality (many repeated values), HCC achieves compression ratios typically 10x–50x better than row-based compression.
+HCC（Hybrid Columnar Compression）は、Exadata固有の圧縮テクノロジーであり（OCI Object StorageやZFS Storage Applianceでも利用可能）、複数の行の列値を**圧縮ユニット**にグループ化し、まとめて圧縮する。列データはカーディナリティが低い（同じ値が繰り返される）傾向があるため、HCCは通常、行ベースの圧縮よりも10倍から50倍優れた圧縮率を実現する。
 
-### HCC Compression Levels
+### HCCの圧縮レベル
 
-| Compression Level | Target Use Case | Typical Ratio | Query Overhead |
+| 圧縮レベル | 対象ユースケース | 一般的な圧縮率 | クエリ・オーバーヘッド |
 |---|---|---|---|
-| `QUERY LOW` | Active query tables | 6x–10x | Low |
-| `QUERY HIGH` | Active query tables | 10x–15x | Low-Medium |
-| `ARCHIVE LOW` | Infrequently queried archives | 15x–25x | Medium |
-| `ARCHIVE HIGH` | Cold archives | 25x–50x | Higher |
+| `QUERY LOW` | アクティブに照会される表 | 6倍–10倍 | 低 |
+| `QUERY HIGH` | アクティブに照会される表 | 10倍–15倍 | 低～中 |
+| `ARCHIVE LOW` | 照会頻度の低いアーカイブ | 15倍–25倍 | 中 |
+| `ARCHIVE HIGH` | コールド・アーカイブ | 25倍–50倍 | 高 |
 
-`QUERY LOW` and `QUERY HIGH` are suitable for tables queried regularly. `ARCHIVE` levels are for data that is loaded once and rarely queried.
+`QUERY LOW` および `QUERY HIGH` は、定期的に照会される表に適している。`ARCHIVE` レベルは、一度ロードされたらめったに照会されないデータ用である。
 
-### Applying HCC
+### HCCの適用
 
 ```sql
--- Create a table with HCC compression
+-- HCC 圧縮を使用した表の作成
 CREATE TABLE sales_archive (
     sale_id       NUMBER        NOT NULL,
     sale_date     DATE          NOT NULL,
@@ -178,19 +178,19 @@ CREATE TABLE sales_archive (
 )
 COMPRESS FOR QUERY HIGH;
 
--- Alter an existing table to use HCC
--- Note: this only affects NEW data loaded after the ALTER
+-- 既存の表を変更して HCC を使用する
+-- 注意: これは ALTER 以降にロードされた新しいデータにのみ適用される
 ALTER TABLE sales_history COMPRESS FOR QUERY HIGH;
 
--- To recompress existing rows, move the table
+-- 既存の行を再圧縮するには、表を移動 (MOVE) する
 ALTER TABLE sales_history MOVE COMPRESS FOR QUERY HIGH ONLINE;
 
--- Or use CTAS (Create Table As Select) to recompress fully
+-- または CTAS (Create Table As Select) を使用して完全に再圧縮する
 CREATE TABLE sales_history_new
 COMPRESS FOR QUERY HIGH
 AS SELECT * FROM sales_history;
 
--- Check compression on individual table partitions
+-- 個々の表パーティションの圧縮設定の確認
 SELECT table_name, partition_name, compression, compress_for,
        blocks, num_rows
 FROM   user_tab_partitions
@@ -198,26 +198,26 @@ WHERE  table_name = 'SALES_HISTORY'
 ORDER  BY partition_position;
 ```
 
-### HCC and DML
+### HCC と DML
 
-HCC imposes important restrictions on DML operations:
+HCCは、DML操作に対して重要な制限がある：
 
-- **INSERT ... AS SELECT (direct path)**: Fully supported; creates HCC compression units
-- **INSERT (conventional)**: Rows are stored in a small row-format area (OLTP compression), not HCC
-- **UPDATE**: Updated rows are migrated out of the HCC compression unit into OLTP format (row migration)
-- **DELETE**: Deleted rows leave "holes" in compression units; does not cause migration but wastes space
+- **INSERT ... AS SELECT (ダイレクト・パス)**: 完全にサポートされる。HCC圧縮ユニットを作成する。
+- **INSERT (従来型)**: 行は「OLTP圧縮」形式の小さな領域に格納され、HCC形式にはならない。
+- **UPDATE**: 更新された行はHCC圧縮ユニットからOLTP形式に移行される（行移行）。
+- **DELETE**: 削除された行は圧縮ユニット内に「穴」を残す。行移行は発生しないが、領域が無駄になる。
 
-For this reason, HCC is appropriate for append-only or archive tables. Mixed read/write workloads should use Advanced Row Compression instead.
+このため、HCCはアペンド・オンリー（追記型）またはアーカイブ用途の表に適している。読み取り/書き込みが混在するワークロードには、HCCではなく「アドバンスト行圧縮（Advanced Row Compression）」を使用すべきである。
 
 ```sql
--- Verify HCC compression units for a table (requires SYSDBA or specific privileges)
+-- 表の HCC 圧縮ユニットの確認 (SYSDBA または特定の権限が必要)
 SELECT table_name, compression, compress_for,
        ROUND(blocks * 8192 / 1024 / 1024, 1) AS size_mb,
        num_rows
 FROM   dba_tables
 WHERE  table_name = 'SALES_ARCHIVE';
 
--- Check for row migration caused by updates in HCC tables
+-- HCC 表での更新によって発生した行移行の確認
 SELECT table_name, chain_cnt, num_rows,
        ROUND(chain_cnt / NULLIF(num_rows, 0) * 100, 2) AS migration_pct
 FROM   dba_tables
@@ -227,37 +227,37 @@ WHERE  compress_for IN ('QUERY LOW', 'QUERY HIGH', 'ARCHIVE LOW', 'ARCHIVE HIGH'
 
 ---
 
-## 4. I/O Resource Manager (IORM)
+## 4. I/Oリソース・マネージャ (IORM)
 
-IORM is a storage-cell-side resource manager that controls the I/O bandwidth allocation among databases, services, and consumer groups sharing the Exadata infrastructure. Unlike CPU-based DBRM (which runs on the DB server), IORM enforces I/O limits at the physical disk level inside CELLSRV.
+IORM（I/O Resource Manager）は、Exadataインフラを共有するデータベース、サービス、およびコンシューマ・グループ間のI/O帯域幅の割り当てを制御するストレージ・セル側のリソース・マネージャである。DBサーバーで動作するCPUベースのDBRM（Database Resource Manager）とは異なり、IORMはCELLSRV内部の物理ディスク・レベルでI/O制限を適用する。
 
-### IORM Plans
+### IORMプラン
 
-IORM plans are configured at three levels:
-1. **Inter-database plan**: Allocates I/O shares across different databases on the same Exadata
-2. **Intra-database plan**: Allocates I/O shares across consumer groups within a single database
-3. **Database plan with limits**: Caps the I/O bandwidth a specific database can consume
+IORMプランは、以下の3つのレベルで構成される：
+1. **データベース間プラン (Inter-database plan)**: 同じExadata上の異なるデータベース間でI/Oシェアを割り当てる。
+2. **データベース内プラン (Intra-database plan)**: 単一のデータベース内のコンシューマ・グループ間でI/Oシェアを割り当てる。
+3. **制限付きデータベース・プラン (Database plan with limits)**: 特定のデータベースが消費できるI/O帯域幅に上限を設ける。
 
 ```sql
--- Check current IORM settings (from CellCLI on storage cells)
+-- 現在の IORM 設定の確認 (ストレージ・セル上の CellCLI から)
 -- CellCLI> LIST IORMPLAN DETAIL
 
--- Configure IORM from SQL*Plus (requires SYSDBA, 12c+)
+-- SQL*Plus から IORM を構成する (SYSDBA 権限が必要、12c以降)
 BEGIN
     DBMS_RESOURCE_MANAGER.CREATE_PENDING_AREA();
 
-    -- Create an I/O plan for the database
+    -- データベースの I/O プランを作成
     DBMS_RESOURCE_MANAGER.CREATE_PLAN(
         plan    => 'EXADATA_IO_PLAN',
         comment => 'Exadata I/O resource plan'
     );
 
-    -- Assign I/O shares to consumer groups
+    -- コンシューマ・グループに I/O シェアを割り当てる
     DBMS_RESOURCE_MANAGER.CREATE_PLAN_DIRECTIVE(
         plan             => 'EXADATA_IO_PLAN',
         group_or_subplan => 'OLTP_GROUP',
         mgmt_p1          => 70,
-        limit_io_megabytes_per_second => 5000  -- MB/s cap
+        limit_io_megabytes_per_second => 5000  -- MB/s 上限
     );
 
     DBMS_RESOURCE_MANAGER.CREATE_PLAN_DIRECTIVE(
@@ -271,10 +271,10 @@ BEGIN
 END;
 /
 
--- Activate the plan
+-- プランを有効化
 ALTER SYSTEM SET RESOURCE_MANAGER_PLAN = 'EXADATA_IO_PLAN' SCOPE = BOTH;
 
--- Monitor I/O throughput per consumer group
+-- コンシューマ・グループごとの I/O スループットの監視
 SELECT consumer_group_name,
        io_requests,
        io_service_time,
@@ -285,26 +285,26 @@ ORDER  BY io_requests DESC;
 
 ---
 
-## 5. Exadata-Specific SQL Hints
+## 5. Exadata固有のSQLヒント
 
-Several SQL hints interact directly with Exadata offload capabilities.
+いくつかのSQLヒントは、Exadataのオフロード機能と直接相互作用する。
 
-### Key Hints
+### 主要なヒント
 
-| Hint | Effect |
+| ヒント | 効果 |
 |---|---|
-| `/*+ FULL(table) */` | Forces a full table scan, enabling Smart Scan |
-| `/*+ PARALLEL(table, degree) */` | Enables parallel query, which forces direct-path reads and Smart Scan |
-| `/*+ NO_PARALLEL(table) */` | Disables parallel query for the table |
-| `/*+ CELL_FLASH_CACHE(KEEP) */` | Pins the object in Exadata Smart Flash Cache |
-| `/*+ CELL_FLASH_CACHE(NONE) */` | Prevents the object from consuming Smart Flash Cache |
-| `/*+ RESULT_CACHE */` | Caches results in the SQL result cache (reduces repeated Smart Scan overhead) |
-| `/*+ CACHE(table) */` | Caches blocks in the database buffer cache (disables direct-path) |
-| `/*+ NO_CACHE(table) */` | Prevents buffer cache caching (maintains direct-path and Smart Scan) |
-| `/*+ VECTOR_TRANSFORM */` | Enables vector transformation for In-Memory aggregation (complements Smart Scan) |
+| `/*+ FULL(table) */` | 全表スキャンを強制し、スマート・スキャンを有効にする |
+| `/*+ PARALLEL(table, degree) */` | パラレル・クエリを有効にし、ダイレクト・パス・リードとスマート・スキャンを強制する |
+| `/*+ NO_PARALLEL(table) */` | 表のパラレル・クエリを無効にする |
+| `/*+ CELL_FLASH_CACHE(KEEP) */` | オブジェクトを Exadata スマート・フラッシュ・キャッシュにピン留めする |
+| `/*+ CELL_FLASH_CACHE(NONE) */` | オブジェクトがスマート・フラッシュ・キャッシュを消費しないようにする |
+| `/*+ RESULT_CACHE */` | 結果を SQL 結果キャッシュにキャッシュする (繰り返されるスマート・スキャンのオーバーヘッドを削減) |
+| `/*+ CACHE(table) */` | ブロックをデータベース・バッファ・キャッシュにキャッシュする (ダイレクト・パスを無効にする) |
+| `/*+ NO_CACHE(table) */` | バッファ・キャッシュへのキャッシュを防止する (ダイレクト・パスとスマート・スキャンを維持) |
+| `/*+ VECTOR_TRANSFORM */` | インメモリー集計用のベクトル型変換を有効にする (スマート・スキャンを補完) |
 
 ```sql
--- Force Smart Scan with a parallel hint
+-- パラレル・ヒントを使用してスマート・スキャンを強制する
 SELECT /*+ FULL(s) PARALLEL(s, 8) */
        region_id,
        COUNT(*),
@@ -314,14 +314,14 @@ WHERE  sale_date >= DATE '2025-01-01'
   AND  sale_date <  DATE '2026-01-01'
 GROUP  BY region_id;
 
--- Pin a hot lookup table in Smart Flash Cache to prevent it from
--- being evicted by large Smart Scan operations
+-- アクセス頻度の高いルックアップ表をスマート・フラッシュ・キャッシュにピン留めし、
+-- 大規模なスマート・スキャン操作によって追い出されないようにする
 ALTER TABLE country_codes STORAGE (CELL_FLASH_CACHE KEEP);
 
--- Prevent a very large cold table from polluting the Smart Flash Cache
+-- 非常に大きなコールド（アクセス頻度の低い）表がスマート・フラッシュ・キャッシュを占有しないようにする
 ALTER TABLE sales_archive_2010 STORAGE (CELL_FLASH_CACHE NONE);
 
--- Check Smart Flash Cache efficiency
+-- スマート・フラッシュ・キャッシュ効率の確認
 SELECT name, value
 FROM   v$sysstat
 WHERE  name IN (
@@ -333,19 +333,19 @@ ORDER  BY name;
 
 ---
 
-## 6. Monitoring Exadata Offload Efficiency
+## 6. Exadataオフロード効率の監視
 
-### Key V$ Views for Exadata Monitoring
+### Exadata監視用の主要なV$ビュー
 
 ```sql
--- Overall cell offload efficiency by SQL statement (current)
+-- SQL 文ごとの全体的なセル・オフロード効率 (現在)
 SELECT sql_id,
        child_number,
        io_cell_offload_eligible_bytes / 1024 / 1024 AS eligible_mb,
        io_cell_offload_returned_bytes  / 1024 / 1024 AS returned_mb,
        ROUND(
            (1 - io_cell_offload_returned_bytes /
-                NULLIF(io_cell_offload_eligible_bytes, 0)) * 100,
+                 NULLIF(io_cell_offload_eligible_bytes, 0)) * 100,
            2
        ) AS offload_efficiency_pct,
        io_cell_uncompressed_bytes / 1024 / 1024 AS uncompressed_mb
@@ -354,7 +354,7 @@ WHERE  io_cell_offload_eligible_bytes > 0
 ORDER  BY io_cell_offload_eligible_bytes DESC
 FETCH  FIRST 20 ROWS ONLY;
 
--- Historical offload efficiency from AWR
+-- AWR からの過去のオフロード効率
 SELECT snap_id,
        sql_id,
        ROUND(AVG(cell_offload_efficiency), 2) AS avg_offload_pct,
@@ -367,7 +367,7 @@ GROUP  BY snap_id, sql_id
 ORDER  BY eligible_gb DESC
 FETCH  FIRST 20 ROWS ONLY;
 
--- Cell metric statistics (Exadata storage cell performance)
+-- セル・メトリック統計 (Exadata ストレージ・セルのパフォーマンス)
 SELECT metric_name,
        AVG(average_value) AS avg_value,
        MAX(maximum_value) AS max_value,
@@ -377,7 +377,7 @@ JOIN   v$cell_metric      cm ON cmd.metric_id = cm.metric_id
 GROUP  BY metric_name
 ORDER  BY metric_name;
 
--- Check Smart Flash Cache hit rate
+-- スマート・フラッシュ・キャッシュ・ヒット率の確認
 SELECT name, value
 FROM   v$sysstat
 WHERE  name IN (
@@ -387,7 +387,7 @@ WHERE  name IN (
 )
 ORDER  BY name;
 
--- Compute Smart Flash Cache hit %
+-- スマート・フラッシュ・キャッシュ・ヒット率 (%) の計算
 SELECT ROUND(
     SUM(CASE WHEN name = 'cell flash cache read hits' THEN value END) /
     NULLIF(SUM(CASE WHEN name = 'physical read total IO requests' THEN value END), 0) * 100,
@@ -397,21 +397,21 @@ FROM   v$sysstat
 WHERE  name IN ('cell flash cache read hits', 'physical read total IO requests');
 ```
 
-### EXPLAIN PLAN and Exadata Offload Indication
+### 実行計画 (EXPLAIN PLAN) と Exadata オフロードの表示
 
 ```sql
--- Check whether the optimizer plans to use cell offload
+-- オプティマイザがセル・オフロードの使用を計画しているかどうかの確認
 EXPLAIN PLAN FOR
 SELECT region_id, COUNT(*), SUM(amount)
 FROM   sales
 WHERE  sale_date >= DATE '2025-01-01'
 GROUP  BY region_id;
 
--- Look for "TABLE ACCESS FULL" with "Batched Disk Reads" -- indicates direct path
--- The key phrase in the plan is "Batched Disk Reads" or "storage" predicate offload
+-- "TABLE ACCESS FULL" かつ "Batched Disk Reads" がある場合、ダイレクト・パスを意味する
+-- 実行計画内の重要なフレーズは "Batched Disk Reads" や "storage" 述語のオフロード表示である
 SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY(FORMAT => '+PREDICATE'));
 
--- Use cell_offload_plan_display to show offload predicates in execution plan
+-- 実行計画にオフロードされる述語を表示するようにセッションを設定
 ALTER SESSION SET "_cell_offload_plan_display" = ALWAYS;
 
 EXPLAIN PLAN FOR
@@ -422,93 +422,93 @@ WHERE  sale_date >= DATE '2025-01-01'
 GROUP  BY region_id;
 
 SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
--- Plan will show "Storage Filter" and "Storage Project" annotations
--- indicating which predicates and columns are offloaded to the cell
+-- 実行計画には、どの述語と列がセルにオフロードされているかを示す
+-- "Storage Filter" および "Storage Project" 注釈が表示される
 ```
 
 ---
 
-## 7. Cell Offload Metrics Reference
+## 7. セル・オフロード・メトリック・リファレンス
 
-| Statistic Name | Description |
+| 統計名 | 説明 |
 |---|---|
-| `cell physical IO interconnect bytes` | Total bytes sent from storage cells to DB servers |
-| `cell physical IO interconnect bytes returned by smart scan` | Bytes returned specifically by Smart Scan operations |
-| `cell scans` | Number of Smart Scan operations initiated |
-| `cell blocks processed by cache layer` | Blocks processed by the cell caching layer |
-| `cell blocks helped by minmax predicate` | Blocks eliminated by Storage Indexes |
-| `cell blocks helped by bloom filter` | Blocks eliminated by Bloom filter join offload |
-| `cell flash cache read hits` | Reads served from Smart Flash Cache without HDD access |
-| `physical read requests optimized` | Physical reads served by Smart Flash Cache |
-| `IO megabytes read total` | Total MB read from Exadata storage cells |
-| `IO megabytes written total` | Total MB written to Exadata storage cells |
+| `cell physical IO interconnect bytes` | ストレージ・セルから DB サーバーに送信された合計バイト数 |
+| `cell physical IO interconnect bytes returned by smart scan` | スマート・スキャン操作によって具体的に返されたバイト数 |
+| `cell scans` | 開始されたスマート・スキャン操作の数 |
+| `cell blocks processed by cache layer` | セルのキャッシュ・レイヤーによって処理されたブロック数 |
+| `cell blocks helped by minmax predicate` | ストレージ索引によって削減されたブロック数 |
+| `cell blocks helped by bloom filter` | ブルーム・フィルタ結合のオフロードによって削減されたブロック数 |
+| `cell flash cache read hits` | HDD アクセスなしでスマート・フラッシュ・キャッシュから提供された読み取り回数 |
+| `physical read requests optimized` | スマート・フラッシュ・キャッシュによって提供された物理読み取り要求 |
+| `IO megabytes read total` | Exadata ストレージ・セルから読み取られた合計 MB |
+| `IO megabytes written total` | Exadata ストレージ・セルに書き込まれた合計 MB |
 
 ---
 
-## 8. Best Practices
+## 8. ベスト・プラクティス
 
-- **Load data into HCC tables using direct-path INSERT.** Conventional insert defeats HCC by writing rows in row format. Always use `INSERT /*+ APPEND */` or `INSERT ... AS SELECT` for large loads.
-- **Size the private InfiniBand network appropriately.** The Exadata InfiniBand (or RoCE in X9M) network carries both Smart Scan results and Cache Fusion traffic (in RAC). Monitor for saturation with `V$CELL_METRIC`.
-- **Use IORM to protect OLTP latency from large analytics queries.** Without IORM, a parallel Smart Scan consuming all cell I/O bandwidth causes OLTP queries to queue behind it.
-- **Keep statistics current on Exadata.** The CBO must know that a full table scan is appropriate to generate a plan that triggers Smart Scan. Stale statistics can cause the optimizer to choose index lookups that bypass Smart Scan.
-- **Do not force index usage on large Exadata tables.** Index range scans use small I/Os and bypass Smart Scan. On Exadata, full scans with Smart Scan often outperform selective index scans for range predicates touching more than 5–10% of rows.
-- **Use `QUERY HIGH` for reporting tables loaded daily and `ARCHIVE HIGH` only for data that will never be updated.** Mixing ARCHIVE compression with UPDATE-heavy workflows causes severe row migration and performance degradation.
+- **ダイレクト・パス INSERT を使用して HCC 表にデータをロードする。** 従来型の INSERT は行形式で行を書き込むため、HCC が無効化される。大規模なロードには常に `INSERT /*+ APPEND */` または `INSERT ... AS SELECT` を使用すること。
+- **プライベート InfiniBand ネットワークのサイズを適切に設定する。** Exadata の InfiniBand（X9M では RoCE）ネットワークは、スマート・スキャンの結果と（RAC の）キャッシュ・フュージョンのトラフィックの両方を運ぶ。`V$CELL_METRIC` で飽和状態を監視すること。
+- **IORM を使用して、大規模な分析クエリから OLTP のレイテンシを保護する。** IORM がないと、すべてのセル I/O 帯域幅を消費するパラレル・スマート・スキャンが発生した場合、OLTP クエリがその背後で待機することになる。
+- **Exadata では統計を常に最新の状態に保つ。** CBO（コストベース・オプティマイザ）がスマート・スキャンをトリガーする実行計画を生成するには、全表スキャンが適切であることを認識していなければならない。古い統計により、スマート・スキャンをバイパスする索引ルックアップが選択される可能性がある。
+- **巨大な Exadata 表に対して索引の使用を強制しない。** 索引範囲スキャンは小さな I/O を使用し、スマート・スキャンをバイパスする。Exadata では、5%〜10% を超える行にアクセスする範囲述語の場合、スマート・スキャンを伴うフル・スキャンの方が選択的な索引スキャンよりも性能が良いことが多い。
+- **毎日ロードされるレポート用表には `QUERY HIGH` を使用し、決して更新されないデータにのみ `ARCHIVE HIGH` を使用する。** アーカイブ圧縮と更新の多いワークロードを混在させると、深刻な行移行とパフォーマンス低下が発生する。
 
 ---
 
-## 9. Common Mistakes and How to Avoid Them
+## 9. よくある間違いとその回避方法
 
-### Mistake 1: Expecting Smart Scan on Small Tables
+### 間違い 1: 小さな表でスマート・スキャンを期待する
 
-Smart Scan only activates for large segments using direct-path reads. If a table fits in the buffer cache, Oracle will use cached reads and Smart Scan will not activate. The threshold is governed by `_small_table_threshold`.
+スマート・スキャンは、ダイレクト・パス・リードを使用する大規模セグメントに対してのみ有効になる。表がバッファ・キャッシュに収まる場合、Oracle はキャッシュされた読み取りを使用し、スマート・スキャンは有効にならない。この閾値は `_small_table_threshold` によって制御される。
 
 ```sql
--- Check threshold (in database blocks)
+-- 閾値 (データベース・ブロック数) の確認
 SELECT name, value FROM v$parameter WHERE name = '_small_table_threshold';
--- Multiply by block_size to get byte threshold
--- Tables below this size will use buffer cache reads, not Smart Scan
+-- ブロックサイズを掛けてバイト単位の閾値を取得
+-- このサイズを下回る表はバッファ・キャッシュの読み取りを使用し、スマート・スキャンを使用しない
 ```
 
-### Mistake 2: Using HCC on OLTP Tables
+### 間違い 2: OLTP 表での HCC の使用
 
-HCC is fundamentally incompatible with frequent DML. Each UPDATE on an HCC row causes the row to migrate out of the compression unit into OLTP format. Over time, the table becomes a mixture of compressed and uncompressed rows, wasting space and slowing reads.
+HCC は頻繁な DML と根本的に互換性がない。HCC 行を UPDATE するたびに、その行は圧縮ユニットから OLTP 形式に移行される。時間が経つにつれて。表は圧縮された行と未圧縮の行が混在した状態になり、領域の浪費と読み取り速度の低下を招く。
 
-**Fix:** Use `COMPRESS FOR OLTP` (Advanced Row Compression) for OLTP tables. Reserve HCC for append-only or archive tables.
+**対策:** OLTP 表には `COMPRESS FOR OLTP` (アドバンスト行圧縮) を使用する。HCC はアペンド・オンリーまたはアーカイブ表に限定して使用すること。
 
-### Mistake 3: Disabling Cell Offload System-Wide
+### 間違い 3: システム全体でセル・オフロードを無効にする
 
-Setting `cell_offload_processing = FALSE` at the system level disables Smart Scan globally. This is sometimes done as a workaround for a specific query bug, but the parameter is then forgotten, leaving the Exadata running as a normal database server.
+システム・レベルで `cell_offload_processing = FALSE` を設定すると、グローバルにスマート・スキャンが無効になる。これは特定のクエリのバグ回避のために行われることがあるが、その後パラメータを戻し忘れると、Exadata が単なる通常のデータベース・サーバーとして動作することになってしまう。
 
 ```sql
--- Check if cell offload is enabled
+-- セル・オフロードが有効かどうかの確認
 SELECT name, value FROM v$parameter WHERE name = 'cell_offload_processing';
--- Value should be TRUE for Exadata
+-- Exadata では TRUE である必要がある
 
--- If set to FALSE for a session-level workaround, never persist it system-wide
--- ALTER SESSION SET cell_offload_processing = FALSE;  -- session only, acceptable
--- ALTER SYSTEM  SET cell_offload_processing = FALSE;  -- NEVER do this
+-- セッション・レベルでバグ回避のために設定したとしても、システム全体で永続化させてはいけない
+-- ALTER SESSION SET cell_offload_processing = FALSE;  -- セッションのみ、許容範囲
+-- ALTER SYSTEM  SET cell_offload_processing = FALSE;  -- 絶対にやってはいけない
 ```
 
-### Mistake 4: Ignoring Storage Index Invalidation After Bulk Loads
+### 間違い 4: 大量ロード後のストレージ索引の無効化を無視する
 
-Storage Indexes are rebuilt in memory as data is accessed. After a large bulk load or partition exchange, the Storage Index for the affected regions is cold. The first few executions of queries against newly loaded data will not benefit from Storage Index skipping. This is expected behavior, not a performance regression.
+ストレージ索引はデータがアクセスされる際にメモリー内に構築される。大規模な一括ロードやパーティション交換の直後は、影響を受けるリージョンのストレージ索引は「コールド」状態である。新しくロードされたデータに対する最初の数回のクエリ実行は、ストレージ索引によるスキップの恩恵を受けられない。これは期待される動作であり、パフォーマンスの低下ではない。
 
-### Mistake 5: Running Exadata Diagnostics Only at the Database Layer
+### 間違い 5: データベース・レイヤーのみで Exadata の診断を行う
 
-Exadata performance problems often originate in the storage cells (CELLSRV process, Flash Cache, disk I/O). Cell-level diagnostics require `CellCLI` access or Exadata Metrics available through OCI console. Always check cell-level metrics alongside `V$SYSSTAT` before concluding a performance issue is query-related.
+Exadata のパフォーマンス問題は、ストレージ・セル（CELLSRV プロセス、フラッシュ・キャッシュ、ディスク I/O）に起因することが多い。セル・レベルの診断には `CellCLI` へのアクセスか、OCI コンソール経由で利用可能な Exadata メトリックが必要である。パフォーマンスの問題がクエリに関連していると結論付ける前に、必ず `V$SYSSTAT` と並行してセル・レベルのメトリックを確認すること。
 
 ---
 
 
-## Oracle Version Notes (19c vs 26ai)
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-## Sources
+## ソース
 
-- [Oracle Exadata Database Machine System Overview](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) — Smart Scan, Storage Indexes, HCC, IORM
-- [Oracle Database SQL Language Reference 19c — COMPRESS clause](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-TABLE.html) — HCC compression levels
-- [DBMS_RESOURCE_MANAGER (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_RESOURCE_MANAGER.html) — IORM plan directives
-- [Oracle Exadata System Software User's Guide](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/sagug/) — CellCLI, IORM configuration
+- [Oracle Exadata Database Machine System Overview](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) — スマート・スキャン、ストレージ索引、HCC、IORM
+- [Oracle Database SQL Language Reference 19c — COMPRESS clause](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-TABLE.html) — HCC 圧縮レベル
+- [DBMS_RESOURCE_MANAGER (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_RESOURCE_MANAGER.html) — IORM プラン・ディレクティブ
+- [Oracle Exadata System Software User's Guide](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/sagug/) — CellCLI, IORM 構成

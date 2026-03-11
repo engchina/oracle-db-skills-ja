@@ -1,37 +1,37 @@
-# ORDS Authentication and Authorization
+# ORDS の認証と認可
 
-## Overview
+## 概要
 
-ORDS provides a complete OAuth2-based security model for protecting REST endpoints. Access control is defined through **privileges** (which endpoints are protected) and **OAuth2 clients** (which applications/users can access them). ORDS supports OAuth2 client credentials flow (machine-to-machine), authorization code flow (user-facing web applications), and implicit flow. Additionally, ORDS supports external identity providers via JWT profile configuration, enabling integration with Oracle Identity Cloud Service (IDCS), Azure AD, Okta, and other OIDC-compatible providers.
-
----
-
-## Core Security Concepts
-
-### Privileges
-
-A **privilege** is a named access control gate attached to one or more URL patterns (REST modules or specific templates). Any request to a protected URL must present a valid OAuth2 Bearer token with the required privilege scope.
-
-### Roles
-
-**Roles** are optional labels that can be assigned to privileges. A client or user must hold the required role to receive the privilege. Roles provide a second layer of authorization on top of the OAuth2 scope check.
-
-### OAuth Clients
-
-An **OAuth client** represents an application (or user account) that wants to call protected REST APIs. Clients are issued a client ID and client secret, which they exchange for access tokens at the token endpoint.
+ORDS は、REST エンドポイントを保護するための OAuth2 ベースの完全なセキュリティ・モデルを提供している。アクセス制御は、**権限 (Privileges)**（どのエンドポイントを保護するか）と **OAuth2 クライアント**（どのアプリケーション/ユーザーがアクセスできるか）を通じて定義される。ORDS は、OAuth2 クライアント資格証明フロー（マシン間）、認可コード・フロー（ユーザー向け Web アプリケーション）、およびインプリシット・フローをサポートしている。さらに、ORDS は JWT プロファイル構成を介して外部アイデンティティ・プロバイダーをサポートしており、Oracle Identity Cloud Service (IDCS)、Azure AD、Okta、およびその他の OIDC 互換プロバイダーとの統合が可能である。
 
 ---
 
-## Defining Privileges
+## 主要なセキュリティ概念
+
+### 権限 (Privileges)
+
+**権限**は、1 つ以上の URL パターン（REST モジュールまたは特定のテンプレート）に関連付けられた、名前付きのアクセス制御ゲートである。保護された URL へのリクエストには、必要な権限スコープを持つ有効な OAuth2 Bearer トークンを提示する必要がある。
+
+### ロール (Roles)
+
+**ロール**は、権限に割り当てることができるオプションのラベルである。クライアントまたはユーザーが権限を受け取るには、必要なロールを保持している必要がある。ロールは、OAuth2 スコープ・チェックに加えて、第 2 の認可レイヤーを提供する。
+
+### OAuth クライアント (OAuth Clients)
+
+**OAuth クライアント**は、保護された REST API を呼び出したいアプリケーション（またはユーザー・アカウント）を表す。クライアントにはクライアント ID とクライアント・シークレットが発行され、これらをトークン・エンドポイントでアクセス・トークンと交換する。
+
+---
+
+## 権限の定義
 
 ```sql
--- Define a privilege that protects employee data endpoints
+-- 従業員データ・エンドポイントを保護する権限を定義
 BEGIN
   ORDS.DEFINE_PRIVILEGE(
     p_privilege_name => 'hr.employees.read',
-    p_roles          => NULL,                  -- No role restriction (any authenticated client)
+    p_roles          => NULL,                  -- ロール制限なし（認証されたすべてのクライアント）
     p_label          => 'HR Employee Read',
-    p_description    => 'Read access to HR employee data',
+    p_description    => 'HR 従業員データへの読み取りアクセス',
     p_comments       => NULL
   );
   COMMIT;
@@ -39,18 +39,18 @@ END;
 /
 ```
 
-### Privilege with Required Roles
+### 必要なロールを伴う権限
 
 ```sql
 DECLARE
   l_roles owa.vc_arr;
 BEGIN
-  -- Define roles first
+  -- 最初にロールを作成
   ORDS.CREATE_ROLE(p_role_name => 'HR_MANAGER');
   ORDS.CREATE_ROLE(p_role_name => 'HR_ADMIN');
 
-  -- Define privilege requiring HR_MANAGER or HR_ADMIN role
-  -- p_roles is owa.vc_arr (not ORDS_TYPES.T_ORDS_STR_LIST)
+  -- HR_MANAGER または HR_ADMIN ロールを必要とする権限を定義
+  -- p_roles は owa.vc_arr 型（ORDS_TYPES.T_ORDS_STR_LIST ではない）
   l_roles(1) := 'HR_MANAGER';
   l_roles(2) := 'HR_ADMIN';
 
@@ -58,18 +58,18 @@ BEGIN
     p_privilege_name => 'hr.employees.write',
     p_roles          => l_roles,
     p_label          => 'HR Employee Write',
-    p_description    => 'Create, update, and delete HR employee records'
+    p_description    => 'HR 従業員レコードの作成、更新、削除'
   );
   COMMIT;
 END;
 /
 ```
 
-### Attaching a Privilege to Module Patterns
+### モジュール・パターンへの権限の適用
 
 ```sql
 BEGIN
-  -- Protect all endpoints in the hr.employees module
+  -- hr.employees モジュール内のすべてのエンドポイントを保護
   ORDS.PRIVILEGE_MAP_MODULE(
     p_privilege_name => 'hr.employees.read',
     p_module_name    => 'hr.employees'
@@ -79,20 +79,20 @@ END;
 /
 ```
 
-### Attaching a Privilege to a Specific URL Pattern
+### 特定の URL パターンへの権限の適用
 
 ```sql
 BEGIN
-  -- Protect only write operations on the employees resource
+  -- employees リソースへの書き込み操作のみを保護
   ORDS.CREATE_ROLE('hr.employees.write');
 
-  -- Associate privilege with a URL pattern
+  -- 権限を URL パターンに関連付け
   ORDS.DEFINE_PRIVILEGE(
     p_privilege_name  => 'hr.employees.write',
     p_roles           => ORDS_TYPES.T_ORDS_STR_LIST('HR_ADMIN'),
     p_label           => 'Employee Write',
-    p_description     => 'Modify employee records',
-    p_module_name     => 'hr.employees',   -- Scope to module
+    p_description     => '従業員レコードの修正',
+    p_module_name     => 'hr.employees',   -- モジュールにスコープ
     p_pattern         => 'employees/'
   );
   COMMIT;
@@ -102,11 +102,11 @@ END;
 
 ---
 
-## OAuth2 Client Credentials Flow (Machine-to-Machine)
+## OAuth2 クライアント資格証明フロー (マシン間)
 
-This flow is used for server-to-server API calls where there is no interactive user. A backend service uses its client ID and secret to obtain an access token.
+このフローは、対話型ユーザーが存在しないサーバー間の API 呼び出しに使用される。バックエンド・サービスは、独自のクライアント ID とシークレットを使用してアクセス・トークンを取得する。
 
-### Step 1: Create an OAuth Client
+### ステップ 1: OAuth クライアントの作成
 
 ```sql
 BEGIN
@@ -114,40 +114,40 @@ BEGIN
     p_name            => 'reporting-service',
     p_grant_type      => 'client_credentials',
     p_owner           => 'Data Platform Team',
-    p_description     => 'Automated reporting service for HR data',
+    p_description     => 'HR データ用自動レポート・サービス',
     p_support_email   => 'dataplatform@example.com',
-    p_privilege_names => 'hr.employees.read'   -- Comma-separated privilege names
+    p_privilege_names => 'hr.employees.read'   -- カンマ区切りの権限名
   );
   COMMIT;
 END;
 /
 ```
 
-### Step 2: Retrieve the Client ID and Secret
+### ステップ 2: クライアント ID とシークレットの取得
 
 ```sql
--- View the generated client_id and client_secret
+-- 生成された client_id と client_secret を確認
 SELECT client_id, client_secret
 FROM user_ords_clients
 WHERE name = 'reporting-service';
 ```
 
-Store the `client_secret` securely — it is only visible immediately after creation (or until next reset).
+`client_secret` は安全に保管すること。これは作成直後（またはリセットされるまで）のみ表示可能である。
 
-### Step 3: Grant Privileges to the Client
+### ステップ 3: クライアントへのロールの付与
 
 ```sql
 BEGIN
   OAUTH.GRANT_CLIENT_ROLE(
     p_client_name => 'reporting-service',
-    p_role_name   => 'HR_ADMIN'   -- if the privilege requires this role
+    p_role_name   => 'HR_ADMIN'   -- 権限がこのロールを必要とする場合
   );
   COMMIT;
 END;
 /
 ```
 
-### Step 4: Obtain an Access Token
+### ステップ 4: アクセス・トークンの取得
 
 ```http
 POST /ords/hr/oauth/token HTTP/1.1
@@ -158,7 +158,7 @@ Authorization: Basic <base64(client_id:client_secret)>
 grant_type=client_credentials
 ```
 
-Or equivalently with curl:
+または、curl を使用した場合:
 
 ```shell
 curl -s -X POST \
@@ -168,7 +168,7 @@ curl -s -X POST \
   -d "grant_type=client_credentials"
 ```
 
-Response:
+レスポンス:
 
 ```json
 {
@@ -178,7 +178,7 @@ Response:
 }
 ```
 
-### Step 5: Call the Protected Endpoint
+### ステップ 5: 保護されたエンドポイントの呼び出し
 
 ```http
 GET /ords/hr/v1/employees/ HTTP/1.1
@@ -188,11 +188,11 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ---
 
-## OAuth2 Authorization Code Flow (User-Facing Applications)
+## OAuth2 認可コード・フロー (ユーザー向けアプリケーション)
 
-Used when a human user must authenticate and explicitly authorize the application to access their data on their behalf.
+人間であるユーザーが認証を行い、アプリケーションが自分の代わりにデータにアクセスすることを明示的に許可する必要がある場合に使用される。
 
-### Step 1: Create an Authorization Code Client
+### ステップ 1: 認可コード・クライアントの作成
 
 ```sql
 BEGIN
@@ -203,16 +203,16 @@ BEGIN
     p_support_email     => 'portal-admin@example.com',
     p_privilege_names   => 'hr.employees.read,hr.employees.write',
     p_owner             => 'HR Portal Team',
-    p_description       => 'HR Self-Service Portal'
+    p_description       => 'HR セルフサービス・ポータル'
   );
   COMMIT;
 END;
 /
 ```
 
-### Step 2: Authorization Code Flow
+### ステップ 2: 認可コード・フローの実行
 
-**Step 2a: Redirect user to ORDS authorization endpoint**
+**ステップ 2a: ユーザーを ORDS 認可エンドポイントにリダイレクト**
 
 ```
 https://myserver.example.com/ords/hr/oauth/auth
@@ -223,15 +223,15 @@ https://myserver.example.com/ords/hr/oauth/auth
   &scope=hr.employees.read
 ```
 
-**Step 2b: User authenticates** (via ORDS First Party Authentication or an external IdP)
+**ステップ 2b: ユーザー認証**（ORDS ファースト・パーティ認証または外部 IdP 経由）
 
-**Step 2c: ORDS redirects to `redirect_uri` with authorization code**
+**ステップ 2c: ORDS が認可コードを伴って `redirect_uri` にリダイレクト**
 
 ```
 https://hrportal.example.com/callback?code=AUTH_CODE_HERE&state=random_csrf_state_value
 ```
 
-**Step 2d: Exchange authorization code for access token**
+**ステップ 2d: 認可コードをアクセス・トークンに交換**
 
 ```http
 POST /ords/hr/oauth/token HTTP/1.1
@@ -243,23 +243,23 @@ grant_type=authorization_code
 &redirect_uri=https://hrportal.example.com/callback
 ```
 
-Response includes `access_token` and `refresh_token`.
+レスポンスには `access_token` と `refresh_token` が含まれる。
 
 ---
 
-## Managing OAuth Clients and Tokens
+## OAuth クライアントとトークンの管理
 
 ```sql
--- List all OAuth clients
+-- すべての OAuth クライアントを一覧表示
 SELECT client_id, name, grant_type, redirect_uri, status
 FROM user_ords_clients;
 
--- List tokens issued (admin view)
+-- 発行済みトークンの表示 (管理者向けビュー)
 SELECT c.name, t.token_type, t.expires_in
 FROM user_ords_tokens t
 JOIN user_ords_clients c ON c.client_id = t.client_id;
 
--- Revoke a client (disable all its tokens)
+-- クライアントの無効化 (そのクライアントのすべてのトークンを無効化)
 BEGIN
   OAUTH.UPDATE_CLIENT(
     p_name   => 'reporting-service',
@@ -269,56 +269,56 @@ BEGIN
 END;
 /
 
--- Delete a client
+-- クライアントの削除
 BEGIN
   OAUTH.DELETE_CLIENT(p_name => 'reporting-service');
   COMMIT;
 END;
 /
 
--- Reset client secret
+-- クライアント・シークレットのリセット
 BEGIN
   OAUTH.RESET_CLIENT_SECRET(p_name => 'reporting-service');
   COMMIT;
 END;
 /
 
--- Get new secret after reset
+-- リセット後の新しいシークレットの取得
 SELECT client_secret FROM user_ords_clients WHERE name = 'reporting-service';
 ```
 
 ---
 
-## Token Endpoint and Discovery
+## トークン・エンドポイントとディスカバリ
 
-ORDS exposes standard OAuth2 endpoints per REST-enabled schema:
+ORDS は、REST 有効化されたスキーマごとに標準の OAuth2 エンドポイントを公開している。
 
-| Endpoint | URL |
+| エンドポイント | URL |
 |---|---|
-| Token endpoint | `/ords/{schema}/oauth/token` |
-| Authorization endpoint | `/ords/{schema}/oauth/auth` |
-| Discovery (OpenID Connect) | `/ords/{schema}/.well-known/openid-configuration` |
-| JWKS (public keys) | `/ords/{schema}/oauth/keys` |
+| トークン・エンドポイント | `/ords/{schema}/oauth/token` |
+| 認可エンドポイント | `/ords/{schema}/oauth/auth` |
+| ディスカバリ (OpenID Connect) | `/ords/{schema}/.well-known/openid-configuration` |
+| JWKS (公開鍵) | `/ords/{schema}/oauth/keys` |
 
 ```shell
-# Discover OAuth2 config
+# OAuth2 構成の検出
 curl https://myserver.example.com/ords/hr/.well-known/openid-configuration
 ```
 
 ---
 
-## JWT Profile Configuration for External Identity Providers
+## 外部アイデンティティ・プロバイダーのための JWT プロファイル構成
 
-ORDS can validate JWTs issued by external identity providers (Oracle IDCS, Azure AD, Okta, Keycloak, etc.) without requiring the token to be issued by ORDS itself.
+ORDS は、ORDS 自体が発行したものではない外部アイデンティティ・プロバイダー（Oracle IDCS、Azure AD、Okta、Keycloak など）によって発行された JWT を検証できる。
 
-### Configure JWT Verification in ORDS
+### ORDS での JWT 検証の構成
 
 ```shell
-# Set the trusted issuer and JWKS URI
+# 信頼された発行者と JWKS URI を設定
 ords --config /opt/oracle/ords/config config set \
   security.jwt.allowedAge 3600
 
-# Add a JWT profile
+# JWT プロファイルの追加
 ords --config /opt/oracle/ords/config config secret --global \
   jwt.verifier.1.issuer "https://login.microsoftonline.com/{tenant-id}/v2.0"
 
@@ -329,60 +329,60 @@ ords --config /opt/oracle/ords/config config secret --global \
   jwt.verifier.1.audience "api://my-ords-api"
 ```
 
-Once configured, clients send JWTs from Azure AD as Bearer tokens and ORDS validates them:
+構成後、クライアントは Azure AD からの JWT を Bearer トークンとして送信し、ORDS がそれを検証する。
 
 ```http
 GET /ords/hr/v1/employees/ HTTP/1.1
 Authorization: Bearer <Azure AD JWT>
 ```
 
-### Mapping JWT Claims to ORDS Roles
+### JWT クレームの ORDS ロールへのマッピング
 
-Configure ORDS to map JWT claims (e.g., `groups` or `roles` claims) to ORDS roles:
+JWT クレーム（`groups` や `roles` クレームなど）を ORDS ロールにマッピングするように ORDS を構成する。
 
 ```shell
 ords --config /opt/oracle/ords/config config set --global jwt.claimRole roles
 ```
 
-When ORDS sees a JWT with `"roles": ["HR_ADMIN"]`, it maps this to the `HR_ADMIN` ORDS role, granting access to privileges requiring that role.
+ORDS が `"roles": ["HR_ADMIN"]` を含む JWT を受け取ると、それを ORDS ロールの `HR_ADMIN` にマップし、そのロールを必要とする権限へのアクセスを許可する。
 
 ---
 
-## Role-Based Access Control Summary
+## ロールベースのアクセス制御 (RBAC) の概要
 
 ```
-JWT/Token ──► ORDS validates token ──► extracts roles/scopes
-                                            │
-                                   ┌────────▼────────┐
-                                   │   ORDS Roles     │
-                                   │  HR_MANAGER      │
-                                   │  HR_ADMIN        │
-                                   └────────┬─────────┘
-                                            │
-                              ┌─────────────▼──────────────┐
-                              │      ORDS Privileges        │
-                              │  hr.employees.read          │
-                              │  hr.employees.write         │
-                              └─────────────┬──────────────┘
-                                            │
-                              ┌─────────────▼──────────────┐
-                              │    Protected URL Patterns    │
-                              │  /v1/employees/             │
-                              │  /v1/employees/:id          │
-                              └─────────────────────────────┘
+JWT/トークン ──► ORDS がトークンを検証 ──► ロール/スコープを抽出
+                                             │
+                                    ┌────────▼────────┐
+                                    │   ORDS ロール    │
+                                    │  HR_MANAGER      │
+                                    │  HR_ADMIN        │
+                                    └────────┬─────────┘
+                                             │
+                               ┌─────────────▼──────────────┐
+                               │      ORDS 権限             │
+                               │  hr.employees.read          │
+                               │  hr.employees.write         │
+                               └─────────────┬──────────────┘
+                                             │
+                               ┌─────────────▼──────────────┐
+                               │   保護された URL パターン    │
+                               │  /v1/employees/             │
+                               │  /v1/employees/:id          │
+                               └─────────────────────────────┘
 ```
 
 ---
 
-## First-Party Authentication (ORDS Users)
+## ファースト・パーティ認証 (ORDS ユーザー)
 
-ORDS supports direct user authentication for Database Actions and similar tools. ORDS users map to database accounts.
+ORDS は、Database Actions や同様のツールのための直接的なユーザー認証をサポートしている。ORDS ユーザーはデータベース・アカウントにマップされる。
 
 ```sql
--- Create a REST-only ORDS user (Database Actions user)
--- Via Database Actions UI, or programmatically via the DB user itself:
+-- REST 専用の ORDS ユーザー（Database Actions ユーザー）を作成
+-- Database Actions UI を使用するか、プログラムで DB ユーザー自体を介して行う
 
--- Grant a DB user REST access (must be done by schema owner or DBA)
+-- DB ユーザーに REST アクセスを付与（スキーマ所有者または DBA が実行する必要がある）
 BEGIN
   ORDS.ENABLE_SCHEMA(
     p_enabled             => TRUE,
@@ -398,27 +398,27 @@ END;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Use client credentials for all service-to-service calls**: Never hardcode DB credentials in client applications. Use OAuth2 client credentials so you can revoke access without changing DB passwords.
-- **Set short token expiry for sensitive operations**: Default ORDS token expiry is 1 hour. For high-security contexts, configure shorter expiry and implement refresh token logic.
-- **Scope privileges narrowly**: Create separate privileges for read vs. write vs. admin operations. Clients receive only the minimum required privileges.
-- **Use external IdP for user-facing applications**: Rather than managing users in ORDS, integrate with your organization's identity provider via JWT profile. This enables SSO and centralizes user lifecycle management.
-- **Rotate client secrets regularly**: Treat client secrets like passwords. Rotate them on schedule and after any potential exposure. Use `OAUTH.RESET_CLIENT_SECRET`.
-- **Audit privilege assignments**: Periodically review `user_ords_clients` and `user_ords_client_roles` to ensure no stale or over-privileged clients exist.
+- **すべてのサービス間呼び出しにクライアント資格証明を使用する**: クライアント・アプリケーション内に DB の資格証明を直接記述してはならない。OAuth2 クライアント資格証明を使用することで、DB のパスワードを変更せずにアクセスを取り消すことができる。
+- **機密性の高い操作には短いトークン有効期限を設定する**: ORDS のデフォルトのトークン有効期限は 1 時間である。高いセキュリティが求められるコンテキストでは、より短い有効期限を構成し、リフレッシュ・トークンのロジックを実装すること。
+- **権限を細かく設定する**: 読み取り、書き込み、管理者操作などの権限を個別に作成する。クライアントには、必要最小限の権限のみを付与すること。
+- **ユーザー向けアプリケーションには外部 IdP を使用する**: ORDS 内でユーザーを管理するのではなく、JWT プロファイルを介して組織のアイデンティティ・プロバイダーと統合すること。これにより、SSO が可能になり、ユーザーのライフサイクル管理を一元化できる。
+- **クライアント・シークレットを定期的にローテーションする**: クライアント・シークレットはパスワードと同じように扱う。定期的なスケジュールに基づき、または漏洩の可能性がある場合にローテーションを行う。`OAUTH.RESET_CLIENT_SECRET` を使用すること。
+- **権限割り当てを監査する**: `user_ords_clients` および `user_ords_client_roles` を定期的に確認し、古くなったクライアントや過剰な権限を持つクライアントが存在しないか確認すること。
 
-## Common Mistakes
+## よくある間違い
 
-- **Calling the token endpoint for the wrong schema**: ORDS token endpoints are schema-scoped (`/ords/{schema}/oauth/token`). Using the wrong schema path returns 404.
-- **Forgetting to grant roles to clients**: Creating a client and granting a privilege is not enough if the privilege requires a specific role. Check `user_ords_client_roles`.
-- **Sending the client credentials in the request body instead of Authorization header**: The OAuth2 spec allows both, but ORDS requires `Authorization: Basic <base64>` for `client_credentials` grant. Body-based credentials fail with ORDS.
-- **Not URL-encoding the Authorization Code redirect URI**: The `redirect_uri` in the authorization code exchange must exactly match the registered URI, including trailing slashes and encoding.
-- **Exposing `client_secret` in client-side code**: For browser-based apps (SPAs), use PKCE (if ORDS supports it for your version) or a backend-for-frontend pattern. Never put client secrets in JavaScript.
-- **Assuming roles in JWT match ORDS privilege names**: JWT roles are mapped to ORDS roles, and ORDS roles are associated with ORDS privileges. They are distinct levels. Configure the mapping carefully.
+- **間違ったスキーマのトークン・エンドポイントを呼び出す**: ORDS のトークン・エンドポイントはスキーマごとにスコープされている (`/ords/{schema}/oauth/token`)。間違ったスキーマのパスを使用すると 404 エラーが返される。
+- **クライアントへのロールの付与を忘れる**: 権限が特定のロールを必要とする場合、クライアントを作成して権限を付与するだけでは不十分である。`user_ords_client_roles` を確認すること。
+- **Authorization ヘッダーではなくリクエスト・ボディでクライアント資格証明を送信する**: OAuth2 仕様では両方が許可されているが、ORDS の `client_credentials` グラントでは `Authorization: Basic <base64>` を必要とする。ボディベースの資格証明は ORDS では失敗する。
+- **認可コードのリダイレクト URI を URL エンコードしない**: 認可コードの交換における `redirect_uri` は、末尾のスラッシュやエンコードを含め、登録された URI と正確に一致している必要がある。
+- **クライアント側のコード内に `client_secret` を公開する**: ブラウザ・ベースのアプリ (SPA) では、PKCE を使用するか（使用しているバージョンで ORDS がサポートしている場合）、Backend-for-Frontend (BFF) パターンを使用すること。JavaScript 内にクライアント・シークレットを絶対に記述しないこと。
+- **JWT 内のロールが ORDS の権限名と一致していると思い込む**: JWT のロールは ORDS ロールにマップされ、ORDS ロールが ORDS 権限に関連付けられる。これらは異なるレイヤーである。マッピングを慎重に構成すること。
 
 ---
 
-## Sources
+## ソース
 
 - [ORDS Developer's Guide — Securing Oracle REST Data Services](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/about-oracle-rest-data-services.html)
 - [Oracle REST Data Services PL/SQL API Reference — OAUTH and ORDS Packages](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orrst/index.html)

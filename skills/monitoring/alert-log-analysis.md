@@ -1,62 +1,62 @@
-# Alert Log Analysis
+# アラート・ログの分析
 
-## Overview
+## 概要
 
-The Oracle alert log is the primary diagnostic record of a database instance. It captures startup and shutdown events, administrative operations, structural changes, and—critically—errors that occur during normal operation. Every Oracle DBA must be comfortable navigating, reading, and monitoring the alert log as a first step in any troubleshooting workflow.
+Oracle のアラート・ログは、データベース・インスタンスの主要な診断記録である。起動と停止のイベント、管理操作、構造的な変更、そして最も重要な点として、通常の運用中に発生したエラーを記録する。すべての Oracle DBA は、トラブルシューティング・ワークフローの最初のステップとして、アラート・ログのナビゲート、読み取り、および監視に習熟している必要がある。
 
-Understanding the alert log means understanding where it lives in the Automatic Diagnostic Repository (ADR), what the difference is between XML and text formats, how to interpret common ORA- errors, and how to automate monitoring so problems surface before users report them.
+アラート・ログを理解するということは、それが自動診断リポジトリ (ADR) のどこに存在するか、XML 形式とテキスト形式の違いは何か、一般的な ORA- エラーをどのように解釈するか、そしてユーザーが報告する前に問題を表面化させるために監視をどのように自動化するかを理解することを意味する。
 
 ---
 
-## ADR and Alert Log Location
+## ADR とアラート・ログの場所
 
-### The Automatic Diagnostic Repository (ADR)
+### 自動診断リポジトリ (ADR)
 
-Introduced in Oracle 11g, the **Automatic Diagnostic Repository (ADR)** is a unified file-based repository that stores diagnostic data for all Oracle products. Each database instance maintains its own ADR home under a root directory controlled by the `DIAGNOSTIC_DEST` initialization parameter.
+Oracle 11g で導入された**自動診断リポジトリ (ADR)** は、すべての Oracle 製品の診断データを格納する統一されたファイルベースのリポジトリである。各データベース・インスタンスは、`DIAGNOSTIC_DEST` 初期化パラメータによって制御されるルート・ディレクトリの下に、独自の ADR ホームを保持する。
 
 ```sql
--- Find your ADR base and home
+-- ADR ベースとホームを確認する
 SELECT name, value
 FROM   v$diag_info
 ORDER BY name;
 ```
 
-Key rows returned:
+返される主な行:
 
-| Name | Description |
+| 名前 | 説明 |
 |------|-------------|
-| `ADR Base` | Root of the ADR tree (usually `$ORACLE_BASE`) |
-| `ADR Home` | Full path to this instance's ADR home |
-| `Diag Alert` | Directory containing the XML alert log |
-| `Diag Trace` | Directory containing trace files and the text alert log |
+| `ADR Base` | ADR ツリーのルート (通常は `$ORACLE_BASE`) |
+| `ADR Home` | このインスタンスの ADR ホームへのフルパス |
+| `Diag Alert` | XML アラート・ログを含むディレクトリ |
+| `Diag Trace` | トレース・ファイルとテキスト形式アラート・ログを含むディレクトリ |
 
-### Alert Log File Formats
+### アラート・ログのファイル形式
 
-Oracle maintains the alert log in **two formats simultaneously**:
+Oracle はアラート・ログを **2 つの形式で同時に** 保持する。
 
-1. **XML format** — Located in `$ADR_HOME/alert/`. File is named `log.xml`. This is the authoritative format used by `adrci` and Enterprise Manager. It includes structured metadata, timestamps, and incident cross-references.
+1. **XML 形式** — `$ADR_HOME/alert/` に配置される。ファイル名は `log.xml` である。これは `adrci` や Enterprise Manager が使用する正式な形式である。構造化されたメタデータ、タイムスタンプ、およびインシデントの相互参照が含まれている。
 
-2. **Text format** — Located in `$ADR_HOME/trace/`. File is named `alert_<SID>.log`. This is the human-readable format most DBAs use directly. It is generated alongside the XML format and contains the same information in a simpler layout.
+2. **テキスト形式** — `$ADR_HOME/trace/` に配置される。ファイル名は `alert_<SID>.log` である。これは、ほとんどの DBA が直接使用する人間が読める形式である。XML 形式と並行して生成され、より単純なレイアウトで同じ情報が含まれている。
 
 ```sql
--- Find the exact path to the text alert log
+-- テキスト形式アラート・ログへの正確なパスを確認する
 SELECT value
 FROM   v$diag_info
 WHERE  name = 'Diag Trace';
--- Append /alert_<SID>.log to get the full file path
+-- フルパスを取得するには、末尾に /alert_<SID>.log を追加する
 ```
 
 ```sql
--- Find the exact path to the XML alert log
+-- XML 形式アラート・ログへの正確なパスを確認する
 SELECT value
 FROM   v$diag_info
 WHERE  name = 'Diag Alert';
--- The XML log is log.xml in this directory
+-- このディレクトリ内の log.xml が XML ログである
 ```
 
-### Legacy Location (Pre-11g)
+### レガシーな場所 (11g より前)
 
-Before ADR, the alert log was written to `$ORACLE_BASE/admin/<DB_NAME>/bdump/alert_<SID>.log` or the directory specified by `BACKGROUND_DUMP_DEST`. If you encounter older databases, check that parameter:
+ADR より前は、アラート・ログは `$ORACLE_BASE/admin/<DB_NAME>/bdump/alert_<SID>.log` または `BACKGROUND_DUMP_DEST` で指定されたディレクトリに書き込まれていた。古いデータベースを扱う場合は、そのパラメータを確認すること。
 
 ```sql
 SELECT name, value
@@ -66,11 +66,11 @@ WHERE  name = 'background_dump_dest';
 
 ---
 
-## XML vs. Text Format
+## XML 形式とテキスト形式の比較
 
-### Text Format
+### テキスト形式
 
-The text alert log is straightforward to read with any text editor or Unix command-line tools. Entries look like:
+テキスト形式のアラート・ログは、任意のテキスト・エディタや Unix コマンドライン・ツールで簡単に読み取ることができる。エントリは以下のようになる。
 
 ```
 Thu Mar 06 14:23:15 2026
@@ -78,12 +78,12 @@ ORA-01555 caused by SQL statement below (Query Duration=0 sec, SCN: 0x0003.abcd1
 SELECT * FROM sales WHERE sale_date > :1
 ```
 
-**Pros:** Human-readable, easy to grep, parseable with shell scripts.
-**Cons:** No structured metadata, harder to query programmatically, no direct cross-references to trace files.
+**長所:** 人間が読める、grep が容易、シェル・スクリプトで解析可能。
+**短所:** 構造化されたメタデータがない、プログラムによる照会が困難、トレース・ファイルへの直接的な相互参照がない。
 
-### XML Format
+### XML 形式
 
-The XML alert log wraps each entry in structured elements:
+XML 形式のアラート・ログは、各エントリを構造化された要素で囲む。
 
 ```xml
 <msg time='2026-03-06T14:23:15.123+00:00' org_id='oracle' comp_id='rdbms'
@@ -93,15 +93,15 @@ The XML alert log wraps each entry in structured elements:
 </msg>
 ```
 
-**Pros:** Queryable via `adrci`, supports filtering by time range and message type, cross-linked to incident IDs.
-**Cons:** Verbose, not practical to read directly.
+**長所:** `adrci` を介して照会可能、時間範囲やメッセージ・タイプによるフィルタリングをサポート、インシデント ID と相互リンクされている。
+**短所:** 冗長である、直接読むのには適さない。
 
-### Querying the XML Alert Log from SQL
+### SQL からの XML アラート・ログの照会
 
-Oracle exposes the XML alert log through an external table accessible via the `V$DIAG_ALERT_EXT` view:
+Oracle は、`V$DIAG_ALERT_EXT` ビューを介してアクセス可能な外部表を通じて、XML アラート・ログを公開している。
 
 ```sql
--- Last 50 alert log entries from SQL (no file access needed)
+-- SQL からアラート・ログの最新 50 件を取得（ファイル・アクセスは不要）
 SELECT originating_timestamp,
        message_text
 FROM   v$diag_alert_ext
@@ -110,7 +110,7 @@ FETCH FIRST 50 ROWS ONLY;
 ```
 
 ```sql
--- Find all ORA- errors in the last 24 hours
+-- 過去 24 時間に発生したすべての ORA- エラーを検索する
 SELECT originating_timestamp,
        message_text
 FROM   v$diag_alert_ext
@@ -121,33 +121,33 @@ ORDER BY originating_timestamp DESC;
 
 ---
 
-## Common ORA- Errors in the Alert Log
+## アラート・ログ内の一般的な ORA- エラー
 
-### Critical Errors (Require Immediate Action)
+### 重大なエラー (即時の対応が必要)
 
-**ORA-00600: internal error code**
-The most serious Oracle error. It indicates an internal inconsistency that Oracle detected. Always file a Support Request with the full arguments list and the associated trace file.
-- Arguments are in square brackets: `ORA-00600: [kcbz_check_objd_typ_3], [0], [1], ...`
-- Each argument combination maps to a specific bug or problem
-- Look for the trace file in `$ADR_HOME/trace/` with matching process ID and timestamp
+**ORA-00600: 内部エラー・コード**
+最も深刻な Oracle エラー。Oracle が検出した内部的な不整合を示す。常に、すべての引数リストと関連するトレース・ファイルを添えて、サポート・リクエストを提出すること。
+- 引数は角括弧内に示される: `ORA-00600: [kcbz_check_objd_typ_3], [0], [1], ...`
+- 各引数の組み合わせは、特定のバグや問題に対応している
+- プロセス ID とタイムスタンプが一致するトレース・ファイルを `$ADR_HOME/trace/` 内で探すこと
 
-**ORA-07445: exception encountered**
-Similar to ORA-00600 but triggered by an operating system exception (segfault, signal). Also requires a Support Request.
+**ORA-07445: 例外が発生しました**
+ORA-00600 と同様だが、オペレーティング・システムの例外 (セグメンテーション・フォールト、シグナル) によってトリガーされる。これもサポート・リクエストが必要である。
 
-**ORA-01578 / ORA-01110: data block corruption**
-Indicates a corrupt data block. Immediately check for hardware issues and run RMAN `VALIDATE DATABASE`.
+**ORA-01578 / ORA-01110: データ・ブロックの破損**
+データ・ブロックの破損を示す。直ちにハードウェアの問題を確認し、RMAN の `VALIDATE DATABASE` を実行すること。
 
 ```sql
--- Check for known corrupt blocks
+-- 既知の破損ブロックを確認する
 SELECT file#, block#, blocks, corruption_type
 FROM   v$database_block_corruption;
 ```
 
-**ORA-04031: unable to allocate shared memory**
-The Shared Pool or another SGA component is exhausted. Indicates memory pressure or possible memory leak.
+**ORA-04031: 共有メモリーを割り当てることができません**
+共有プールまたは別の SGA コンポーネントが枯渇している。メモリーの圧迫またはメモリー・リークの可能性を示す。
 
 ```sql
--- Diagnose shared pool pressure
+-- 共有プールの圧迫を診断する
 SELECT pool, name, bytes/1024/1024 AS mb
 FROM   v$sgastat
 WHERE  pool = 'shared pool'
@@ -155,23 +155,23 @@ ORDER BY bytes DESC
 FETCH FIRST 20 ROWS ONLY;
 ```
 
-**ORA-00257: archiver error**
-The archiver process (ARCn) cannot write archive logs. Check disk space on the archive log destination.
+**ORA-00257: アーカイバ・エラー**
+アーカイバ・プロセス (ARCn) がアーカイブ・ログを書き込めない。アーカイブ・ログの出力先のディスク空き容量を確認すること。
 
 ```sql
--- Check archive log destinations
+-- アーカイブ・ログの出力先を確認する
 SELECT dest_id, status, target, archiver, error
 FROM   v$archive_dest
 WHERE  status != 'INACTIVE';
 ```
 
-### Warning-Level Errors (Investigate Promptly)
+### 警告レベルのエラー (速やかに調査)
 
-**ORA-01555: snapshot too old**
-Undo data was overwritten before a long-running query could finish reading it. Usually caused by undersized undo tablespace or very long transactions.
+**ORA-01555: スナップショットが古すぎます**
+長時間実行されているクエリの読み取りが完了する前に、UNDO データが上書きされた。通常は、UNDO 表領域のサイズ不足、または非常に長いトランザクションが原因である。
 
 ```sql
--- Check undo retention and tablespace size
+-- UNDO 保持と表領域サイズを確認する
 SELECT tablespace_name, retention
 FROM   dba_tablespaces
 WHERE  contents = 'UNDO';
@@ -186,36 +186,36 @@ JOIN   (SELECT tablespace_name, SUM(bytes) bytes
 WHERE  a.contents = 'UNDO';
 ```
 
-**ORA-01652: unable to extend temp segment**
-The temp tablespace is full. Indicates a large sort or hash operation, or a temp space leak from a killed session.
+**ORA-01652: 一時セグメントを拡張できません**
+一時表領域がいっぱいである。大規模なソートやハッシュ操作、あるいは強制終了されたセッションによる一時領域のリークを示している。
 
-**ORA-00060: deadlock detected**
-Two sessions are waiting on each other's locks. Oracle resolves it by killing one statement. The trace file contains the deadlock graph—always examine it.
+**ORA-00060: デッドロックが検出されました**
+2 つのセッションが互いのロックを待機している。Oracle は一方の文を強制終了することで解決する。トレース・ファイルにはデッドロック・グラフが含まれているため、必ず確認すること。
 
-**ORA-03113 / ORA-03114: end-of-file on communication channel**
-Client lost connection to the server. Usually indicates a crashed server process; look for matching trace files.
+**ORA-03113 / ORA-03114: 通信チャネルでファイル末尾が検出されました**
+クライアントがサーバーへの接続を失った。通常はサーバー・プロセスのクラッシュを示しており、一致するトレース・ファイルを探すこと。
 
-**ORA-12514 / ORA-12541: TNS errors**
-Listener-related issues. Check `listener.log` and run `lsnrctl status`.
+**ORA-12514 / ORA-12541: TNS エラー**
+リスナー関連の問題。`listener.log` を確認し、`lsnrctl status` を実行すること。
 
-### Informational Messages (Baseline Awareness)
+### 情報メッセージ (ベースラインの把握)
 
-- `Thread 1 advanced to log sequence` — Redo log switch; monitor frequency
-- `Completed checkpoint up to RBA` — Checkpoint completed; normal
-- `Starting ORACLE instance` / `Shutting down instance` — Instance lifecycle events
-- `ALTER TABLESPACE ... ADD DATAFILE` — Administrative DDL recorded
-- `ORA-00942: table or view does not exist` in alert log — Usually a startup script issue
+- `Thread 1 advanced to log sequence` — REDO ログのスイッチ。頻度を監視すること。
+- `Completed checkpoint up to RBA` — チェックポイントが完了。正常。
+- `Starting ORACLE instance` / `Shutting down instance` — インスタンスの生涯サイクル・イベント。
+- `ALTER TABLESPACE ... ADD DATAFILE` — 記録された管理 DDL。
+- アラート・ログ内の `ORA-00942: 表またはビューが存在しません` — 通常は起動スクリプトの問題。
 
 ---
 
-## Patterns to Watch For
+## 注目すべきパターン
 
-### Redo Log Switch Frequency
+### REDO ログ・スイッチの頻度
 
-Frequent log switches (more than once every 15-20 minutes) indicate the redo logs are undersized, leading to performance overhead and increased I/O:
+頻繁なログ・スイッチ (15〜20 分に 1 回以上) は、REDO ログのサイズが不足していることを示し、パフォーマンスのオーバーヘッドや I/O の増加につながる。
 
 ```sql
--- Log switch frequency by hour over the last 7 days
+-- 過去 7 日間の 1 時間ごとのログ・スイッチ頻度
 SELECT TRUNC(first_time, 'HH24') AS switch_hour,
        COUNT(*)                  AS switches
 FROM   v$log_history
@@ -224,9 +224,9 @@ GROUP BY TRUNC(first_time, 'HH24')
 ORDER BY switch_hour;
 ```
 
-### Checkpoint Not Complete
+### チェックポイントが未完了
 
-The message `checkpoint not complete` in the alert log means Oracle cannot reuse a redo log group because the checkpoint has not finished writing dirty buffers to disk. This causes the log writer to wait, stalling all DML:
+アラート・ログ内の `checkpoint not complete` というメッセージは、チェックポイントによるダーティ・バッファのディスクへの書き込みが完了していないため、Oracle が REDO ログ・グループを再利用できないことを意味する。これによりログ・ライターが待機状態となり、すべての DML が停止する。
 
 ```
 Thread 1 cannot allocate new log, sequence 9823
@@ -234,19 +234,19 @@ Checkpoint not complete
   Current log# 3 seq# 9823 mem# 0: /u01/oradata/orcl/redo03.log
 ```
 
-Remediation: Add more redo log groups, increase redo log file size, or tune checkpoint frequency (`FAST_START_MTTR_TARGET`).
+修正策: REDO ログ・グループの追加、REDO ログ・ファイルのサイズ拡大、またはチェックポイント頻度の調整 (`FAST_START_MTTR_TARGET`)。
 
-### ORA-00600 / ORA-07445 Frequency
+### ORA-00600 / ORA-07445 の頻度
 
-Any occurrence should be investigated. Repeated occurrences of the same error code arguments point to a specific bug—search My Oracle Support (MOS) for the argument signature.
+いかなる発生も調査すべきである。同じエラー・コードと引数が繰り返し発生する場合は、特定のバグを指している可能性がある。引数のシグネチャを使用して、My Oracle Support (MOS) を検索すること。
 
-### Growing Trace File Directory
+### 増加するトレース・ファイル・ディレクトリ
 
 ```sql
--- Check ADR incident count
+-- ADR インシデント数を確認する
 SELECT COUNT(*) FROM v$diag_incident;
 
--- Incidents by problem key (groups similar errors)
+-- 問題キーごとのインシデント（同様のエラーをグループ化）
 SELECT problem_key, COUNT(*) AS incident_count
 FROM   v$diag_incident
 GROUP BY problem_key
@@ -255,87 +255,87 @@ ORDER BY incident_count DESC;
 
 ---
 
-## Finding Errors with adrci
+## adrci によるエラーの検索
 
-`adrci` (ADR Command Interpreter) is the command-line tool for working with ADR content, including the alert log. See the companion `adrci-usage.md` guide for full details.
+`adrci` (ADR Command Interpreter) は、アラート・ログを含む ADR コンテンツを操作するためのコマンドライン・ツールである。詳細は、関連ガイドの `adrci-usage.md` を参照すること。
 
-Quick reference for alert log work:
+アラート・ログ操作のクイック・リファレンス:
 
 ```bash
-# Launch adrci
+# adrci を起動
 adrci
 
-# Set the ADR home (if multiple homes exist)
+# ADR ホームを設定 (複数のホームが存在する場合)
 adrci> SET HOMEPATH diag/rdbms/orcl/orcl
 
-# Show last 20 lines of the alert log (text equivalent)
+# アラート・ログの最後の 20 行を表示 (text の tail に相当)
 adrci> SHOW ALERT -TAIL 20
 
-# Show alert log with errors only
+# エラーのみを含むアラート・ログを表示
 adrci> SHOW ALERT -P "MESSAGE_TEXT LIKE '%ORA-%'"
 
-# Show alert log for a time window
+# 時間帯を指定してアラート・ログを表示
 adrci> SHOW ALERT -P "ORIGINATING_TIMESTAMP > TIMESTAMP '2026-03-06 00:00:00'"
 
-# Show all problems (grouped incidents)
+# すべての問題 (グループ化されたインシデント) を表示
 adrci> SHOW PROBLEM
 
-# Show incidents
+# インシデントを表示
 adrci> SHOW INCIDENT
 ```
 
 ---
 
-## Automating Alert Log Monitoring
+## アラート・ログ監視の自動化
 
-### Shell Script Approach
+### シェル・スクリプトによるアプローチ
 
-A common and effective pattern is to track the last-read position of the text alert log and scan only new content on each execution:
+定石として、テキスト形式アラート・ログの最後に読み取った位置を追跡し、実行のたびに新しいコンテンツのみをスキャンする方法がある。
 
 ```bash
 #!/bin/bash
-# monitor_alert.sh — Scan Oracle alert log for new ORA- errors
-# Run via cron every 5-10 minutes
+# monitor_alert.sh — 新しい ORA- エラーがないか Oracle アラート・ログをスキャン
+# cron を使用して 5〜10 分おきに実行
 
 ORACLE_SID=orcl
 ALERT_LOG="/u01/app/oracle/diag/rdbms/orcl/orcl/trace/alert_${ORACLE_SID}.log"
 STATE_FILE="/tmp/alert_log_offset_${ORACLE_SID}"
 EMAIL="dba@example.com"
 
-# Get current file size
+# 現在のファイル・サイズを取得
 CURRENT_SIZE=$(wc -c < "$ALERT_LOG")
 
-# Read last offset (default 0)
+# 最後に読み取ったオフセットを取得 (デフォルトは 0)
 LAST_OFFSET=0
 [ -f "$STATE_FILE" ] && LAST_OFFSET=$(cat "$STATE_FILE")
 
-# Only process if file has grown
+# ファイルが増分している場合のみ処理
 if [ "$CURRENT_SIZE" -gt "$LAST_OFFSET" ]; then
-    # Extract new content and search for errors
+    # 新しいコンテンツを抽出し、エラーを検索
     NEW_ERRORS=$(tail -c +$((LAST_OFFSET + 1)) "$ALERT_LOG" | \
                  grep -E "ORA-[0-9]+" | \
                  grep -v "ORA-00000")
 
     if [ -n "$NEW_ERRORS" ]; then
-        echo "$NEW_ERRORS" | mail -s "Oracle Alert: $ORACLE_SID errors detected" "$EMAIL"
+        echo "$NEW_ERRORS" | mail -s "Oracle Alert: $ORACLE_SID でエラーを検出" "$EMAIL"
     fi
 
-    # Update offset
+    # オフセットを更新
     echo "$CURRENT_SIZE" > "$STATE_FILE"
 fi
 ```
 
-Add to crontab:
+crontab への追加:
 ```
 */5 * * * * /opt/scripts/monitor_alert.sh
 ```
 
-### SQL-Based Monitoring (Cloud Control / Custom)
+### SQL ベースの監視 (Cloud Control / カスタム)
 
-Using `V$DIAG_ALERT_EXT`, you can build a SQL-based monitoring query that any scheduler (DBMS_SCHEDULER, Enterprise Manager, Grafana with JDBC) can execute:
+`V$DIAG_ALERT_EXT` を使用すると、任意のスケジューラ (DBMS_SCHEDULER、Enterprise Manager、JDBC を使用した Grafana など) が実行できる SQL ベースの監視クエリを構築できる。
 
 ```sql
--- Errors in the last monitoring window (parameterize as needed)
+-- 監視ウィンドウ内のエラー (必要に応じてパラメータ化)
 SELECT originating_timestamp AS error_time,
        message_text
 FROM   v$diag_alert_ext
@@ -346,10 +346,10 @@ AND    (message_text LIKE 'ORA-%'
 ORDER BY originating_timestamp;
 ```
 
-### DBMS_SCHEDULER-Based Approach
+### DBMS_SCHEDULER ベースのアプローチ
 
 ```sql
--- Create a procedure that checks the alert log and logs findings
+-- アラート・ログを確認し、結果を記録するプロシージャを作成
 CREATE OR REPLACE PROCEDURE check_alert_log AS
     v_count NUMBER;
 BEGIN
@@ -357,10 +357,10 @@ BEGIN
     INTO   v_count
     FROM   v$diag_alert_ext
     WHERE  originating_timestamp > SYSTIMESTAMP - INTERVAL '15' MINUTE
-    AND    message_text LIKE 'ORA-0060%';  -- deadlocks
+    AND    message_text LIKE 'ORA-00060%';  -- デッドロック
 
     IF v_count > 0 THEN
-        -- Insert into a monitoring table, send APEX notification, etc.
+        -- 監視テーブルへの挿入、APEX 通知の送信など
         INSERT INTO dba_alert_log_events (event_time, event_type, event_count)
         VALUES (SYSTIMESTAMP, 'DEADLOCK', v_count);
         COMMIT;
@@ -368,7 +368,7 @@ BEGIN
 END;
 /
 
--- Schedule to run every 15 minutes
+-- 15 分おきに実行するようにスケジュール
 BEGIN
     DBMS_SCHEDULER.create_job(
         job_name        => 'CHECK_ALERT_LOG_JOB',
@@ -384,61 +384,60 @@ END;
 
 ### Oracle Enterprise Manager
 
-In OEM / Cloud Control, configure metric thresholds on:
-- **Generic Alert Log Error Status** — Alerts when ORA- errors appear
-- **Incident** metrics — Alerts when incident count increases
-- **Archive Area Used (%)** — Alerts before archive space runs out
+OEM / Cloud Control では、以下のメトリックしきい値を構成する。
+- **Generic Alert Log Error Status** — ORA- エラーが発生したときにアラート
+- **Incident** メトリック — インシデント数が増加したときにアラート
+- **Archive Area Used (%)** — アーカイブ領域が不足する前にアラート
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Never delete or truncate the alert log directly.** Oracle rotates it automatically if needed. If size is a concern, use `adrci purge` to remove old incidents and the older XML log segments rather than manually removing the text log.
+1. **アラート・ログを直接削除または切り捨てないこと。** Oracle は必要に応じて自動的にローテートする。サイズが懸念される場合は、テキスト・ログを手動で削除するのではなく、`adrci purge` を使用して古いインシデントや古い XML ログ・セグメントを削除すること。
 
-2. **Monitor the alert log continuously in production.** A 5-10 minute polling interval catches problems before users escalate. Aim for near-real-time alerting on critical errors (ORA-00600, ORA-07445, ORA-01578).
+2. **本番環境ではアラート・ログを継続的に監視すること。** 5〜10 分の間隔でポーリングすることで、ユーザーが報告してくる前に問題を把握できる。重大なエラー (ORA-00600, ORA-07445, ORA-01578) に対しては、準リアルタイムのアラートを目指す。
 
-3. **Always examine the associated trace file.** When the alert log references a trace file (it usually names it explicitly), examine that file first before searching MOS. The trace file contains the full context, stack trace, and often the root cause.
+3. **常に関連するトレース・ファイルを確認すること。** アラート・ログがトレース・ファイルを参照している場合 (通常は明示的に名前が挙げられる)、MOS を検索する前にまずそのファイルを確認すること。トレース・ファイルには、完全なコンテキスト、スタック・トレース、そして多くの場合、根本原因が含まれている。
 
-4. **Correlate with system events.** Alert log timestamps are the starting point—correlate them with OS metrics (CPU, I/O, memory) from the same time window to distinguish Oracle bugs from resource pressure.
+4. **システム・イベントと関連付けること。** アラート・ログのタイムスタンプは出発点に過ぎない。同じ時間帯の OS メトリック (CPU, I/O, メモリー) と関連付けて、Oracle のバグとリソースの圧迫を区別すること。
 
-5. **Establish a baseline.** Know what "normal" looks like in your alert log. How often do log switches happen? Are there regular checkpoint warnings? A deviation from baseline is often the first sign of trouble.
+5. **ベースラインを確立すること。** 自身のアラート・ログにおける「正常」な状態を知っておく。ログ・スイッチはどのくらいの頻度で発生するか？ 定期的なチェックポイントの警告はあるか？ ベースラインからの逸脱が、多くの場合、トラブルの最初の兆候である。
 
-6. **Use `adrci` for production alerting workflows.** Its filtering capabilities against the XML format are more precise than grep on the text file, especially when correlating incidents with trace files.
+6. **本番環境のアラート・ワークフローには `adrci` を使用すること。** XML 形式に対するフィルタリング機能は、特にインシデントをトレース・ファイルと関連付ける際に、テキスト・ファイルに対する grep よりも正確で高速である。
 
-7. **Archive alert logs periodically.** For compliance and post-incident analysis, copy the current alert log to an archive location (with a timestamp in the filename) monthly or weekly.
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Mistake: Ignoring ORA-00600 or ORA-07445 because the database seems stable.**
-These internal errors always indicate something unexpected happened inside Oracle. Even if the database appears healthy afterward, the error may recur under heavier load. Always open a Support Request and capture the trace file.
-
-**Mistake: Grepping only for "ORA-" and missing other critical messages.**
-Not all serious alert log entries contain "ORA-". Messages like `checkpoint not complete`, `db_block_checking detected an error`, and `WARNING: Heavy swapping observed` are equally important. Build monitoring patterns that include these strings.
-
-**Mistake: Monitoring the text alert log file on a different server than the DB host.**
-If the alert log is on a shared NFS mount and the mount becomes stale, your monitoring silently stops seeing new entries. Always verify the monitoring tool can actually read the file.
-
-**Mistake: Not recording the state of the alert log before and after maintenance.**
-Before any maintenance window, note the last line or timestamp in the alert log. Afterward, review everything that was written during the window so you do not miss errors that occurred but did not surface as visible problems.
-
-**Mistake: Treating all ORA-01555 errors as a tuning problem.**
-ORA-01555 can also result from application bugs (uncommitted transactions held open), queries running inside scheduled jobs that compete with purging undo, or incorrectly sized undo. Check the full context before just increasing `UNDO_RETENTION`.
-
-**Mistake: Assuming the XML and text alert logs are always in sync.**
-In rare cases (system crashes, disk issues), they can diverge. The XML log is the authoritative source; use `adrci` when precision matters.
+7. **アラート・ログを定期的にアーカイブすること。** コンプライアンスや事後分析のために、現在の実効アラート・ログをアーカイブ場所 (ファイル名にタイムスタンプを付加) に、月次または週次でコピーすることを検討する。
 
 ---
 
+## よくある間違いと回避策
 
-## Oracle Version Notes (19c vs 26ai)
+**間違い: データベースが安定しているように見えるため、ORA-00600 や ORA-07445 を無視する。**
+これらの内部エラーは、Oracle 内部で予期しないことが起こったことを常に示している。その後データベースが正常に見えても、高負荷時に再発する可能性がある。必ずサポート・リクエストを開き、トレース・ファイルを収集すること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+**間違い: "ORA-" だけを grep し、他の重要なメッセージを見逃す。**
+すべての重大なエントリに "ORA-" が含まれているわけではない。`checkpoint not complete`、`db_block_checking detected an error`、`WARNING: Heavy swapping observed` などのメッセージも同様に重要である。これらの文字列を含む監視パターンを構築すること。
 
-## Sources
+**間違い: データベース・ホストとは異なるサーバーでテキスト・アラート・ログ・ファイルを監視する。**
+アラート・ログが共有 NFS マウント上にあり、マウントが不安定になった場合、監視ツールが新しいエントリを検知できなくなってもエラーが発生しない可能性がある。監視ツールが実際にファイルを読み取れることを常に確認すること。
+
+**間違い: メンテナンスの前後でアラート・ログの状態を記録しない。**
+メンテナンス・ウィンドウの前に、アラート・ログの最後の行またはタイムスタンプを控えておく。終了後、ウィンドウ中に書き込まれたすべての内容を確認し、目に見える問題として表面化しなかったエラーを見逃さないようにすること。
+
+**間違い: すべての ORA-01555 エラーをチューニングの問題として扱う。**
+ORA-01555 は、アプリケーションのバグ (コミットされていないトランザクションの保持)、UNDO の削除と競合するスケジュール・ジョブ内のクエリ、または不適切な UNDO サイズ設定によっても発生する。単に `UNDO_RETENTION` を増やす前に、完全なコンテキストを確認すること。
+
+**間違い: XML 形式とテキスト形式のアラート・ログが常に同期していると思い込む。**
+まれなケース (システム・クラッシュやディスクの問題) では、それらが乖離することがある。XML ログが正式なソースであり、精度が重要な場合は `adrci` を使用すること。
+
+---
+
+## Oracle バージョンに関する注意 (19c vs 26ai)
+
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 19c と 26ai では、リリース更新によってデフォルト設定や非推奨機能が異なる場合があるため、両方の環境をサポートする場合は構文とパッケージの動作をテストすること。
+
+## ソース
 
 - [Oracle Database 19c Administrator's Guide — Diagnosing and Resolving Problems](https://docs.oracle.com/en/database/oracle/oracle-database/19/admin/diagnosing-and-resolving-problems.html)
 - [Oracle Database 19c Reference — V$DIAG_ALERT_EXT](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-DIAG_ALERT_EXT.html)

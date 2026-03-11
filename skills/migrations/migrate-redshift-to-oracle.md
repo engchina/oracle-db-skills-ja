@@ -1,58 +1,58 @@
-# Migrating Amazon Redshift to Oracle
+# Amazon Redshift から Oracle への移行
 
-## Overview
+## 概要
 
-Amazon Redshift is a columnar, massively parallel processing (MPP) data warehouse based on a fork of PostgreSQL 8.0. Oracle Database is a traditional row-oriented RDBMS with optional in-memory columnar processing via the In-Memory Column Store (IMCS). The migration from Redshift to Oracle involves not just syntax translation but a fundamental shift in architecture: from distribution-key-based parallelism to shared-memory or RAC-based scale-out, and from a columnar storage model to a row-based heap with optional column store overlays.
+Amazon Redshift は、PostgreSQL 8.0 をベースにした、列指向（カラムナ）の超並列処理（MPP）データウェアハウスである。これに対し、Oracle Database は伝統的な行指向の RDBMS であり、オプションのインメモリ・カラム・ストア (IMCS) を介してインメモリの列指向処理も可能である。Redshift から Oracle への移行は、単なる構文の変換にとどまらず、根本的なアーキテクチャの転換を伴う。分散キーに基づく並列処理から共有キャッシュ（または RAC）ベースのスケールアウトへ、そして列指向ストレージ・モデルから、オプションで列ストア・オーバーレイを備えた行ベースのヒープ構造への移行である。
 
-This guide covers architectural differences, SQL dialect translation, data type mapping, COPY command alternatives, and workload management equivalents.
+本ガイドでは、アーキテクチャの違い、SQL 方言の変換、データ型マッピング、COPY コマンドに代わる手法、およびワークロード管理の同等機能について解説する。
 
 ---
 
-## Architectural Differences
+## アーキテクチャの違い
 
-### Redshift MPP vs Oracle Architecture
+### Redshift MPP vs Oracle アーキテクチャ
 
-Redshift is a shared-nothing MPP cluster. Every table is physically distributed across compute nodes based on a distribution key or a round-robin/ALL strategy. Queries are compiled and executed in parallel across all nodes, with each node processing its local data slice.
+Redshift はシェアード・ナッシング MPP クラスターである。すべてのテーブルは、分散キー（Distribution Key）またはラウンドロビン/ALL 戦略に基づいて、各コンピュート・ノードに物理的に分散配置される。クエリはコンパイルされ、すべてのノードで並列実行され、各ノードがローカルのデータ・スライスを処理する。
 
-Oracle does not have a direct equivalent to Redshift's distribution model. Oracle's parallelism is:
-- **Parallel Query (PQ):** Within a single instance, multiple parallel execution servers scan and process different rowid ranges of the same table.
-- **Oracle RAC:** Multiple database instances sharing the same storage, with global cache coordination.
-- **Oracle In-Memory Column Store:** An optional column-formatted memory area that accelerates analytical queries, most closely analogous to Redshift's columnar format.
+Oracle には、Redshift の分散モデルに直接相当するものはない。Oracle の並列処理は以下の通りである：
+- **パラレル・クエリ (PQ) :** 単一インスタンス内で、複数のパラレル実行サーバーが同一テーブルの異なる ROWID 範囲をスキャン・処理する。
+- **Oracle RAC :** 複数のデータベース・インスタンスが同一のストレージを共有し、グローバル・キャッシュ・コーディネーションを行う。
+- **Oracle インメモリ・カラム・ストア :** 分析クエリを高速化する、オプションの列形式メモリー領域。Redshift の列形式ストレージに最も近い機能。
 
-| Redshift Concept | Oracle Equivalent | Notes |
+| Redshift の概念 | Oracle の同等機能 | 備考 |
 |---|---|---|
-| Distribution key | Partition key (roughly) | Oracle partitioning by a high-cardinality column achieves similar local-data access patterns |
-| Distribution style ALL | No equivalent | Redshift ALL replicates small tables to every node; Oracle handles this via buffer cache |
-| Distribution style EVEN | No equivalent | Redshift round-robin; Oracle relies on parallel query with full table scans |
-| Sort key (compound) | Index or partition | B-tree indexes, partitioning, and IMCS sorted segments |
-| Sort key (interleaved) | No equivalent | Interleaved sort keys are Redshift-specific; use Oracle bitmap indexes or column store |
-| Columnar storage | Oracle In-Memory Column Store | Optional, RAM-based; does not change on-disk format |
-| MPP node-level data | Oracle parallel query servers | Different execution model but similar query fan-out |
+| 分散キー (Distribution key) | パーティション・キー（概ね） | 高カーディナリティの列によるパーティショニングで同様のローカル・アクセスを実現 |
+| 分散スタイル ALL | 直接的な同等機能なし | Redshift の ALL は小表を全ノードに複製する。Oracle はバッファ・キャッシュでこれを処理 |
+| 分散スタイル EVEN | 直接的な同等機能なし | Redshift のラウンドロビン。Oracle は全表スキャンを伴うパラレル・クエリに依存 |
+| ソート・キー (Sort key) / 複合 | 索引またはパーティション | B-tree 索引、パーティショニング、IMCS ソート済みセグメント |
+| ソート・キー / インターリーブ | 直接的な同等機能なし | インターリーブ・ソート・キーは Redshift 固有。Oracle 独自のビットマップ索引や IMCS を使用 |
+| 列指向ストレージ | Oracle インメモリ・カラム・ストア | オプションの RAM ベース機能。ディスク上のフォーマットは変更しない |
+| MPP ノード・レベル・データ | Oracle パラレル実行サーバー | 実行モデルは異なるが、クエリのファンアウト効果は同様 |
 
-### Schema Design Implications
+### スキーマ設計への影響
 
-When moving from Redshift's columnar store:
+Redshift の列ストアから移行する場合：
 
-1. **Row-based storage is the Oracle default.** Queries that scan millions of rows and aggregate them rely on Oracle's optimizer to use indexes, partitioning, and parallel query. Add partitioning to large fact tables.
+1. **Oracle のデフォルトは行ベース・ストレージである。** 数百万行をスキャンして集計するクエリは、Oracle オプティマイザによる索引、パーティショニング、パラレル・クエリの活用に依存する。大規模なファクト表にはパーティショニングを追加すること。
 
-2. **Enable Oracle IMCS for analytical workloads.** Designate frequently scanned analytical tables to the in-memory column store:
+2. **分析ワークロードには Oracle IMCS を有効にする。** 頻繁にスキャンされる分析用テーブルをインメモリ・カラム・ストアに指定する：
 
 ```sql
--- Enable In-Memory Column Store (requires SGA configuration)
+-- インメモリ・カラム・ストアの有効化 (SGA 構成が必要)
 ALTER SYSTEM SET INMEMORY_SIZE = 10G SCOPE=SPFILE;
--- Restart required
+-- 再起動が必要
 
--- Mark a table for in-memory columnar storage
+-- テーブルをインメモリ列指向ストレージに設定
 ALTER TABLE fact_sales INMEMORY
     MEMCOMPRESS FOR QUERY HIGH
     PRIORITY HIGH;
 
--- Mark specific columns only
+-- 特定の列のみを指定
 ALTER TABLE fact_sales INMEMORY
     MEMCOMPRESS FOR QUERY HIGH (sale_amount, sale_date, product_id);
 ```
 
-3. **Use range or range-interval partitioning** on date columns for large fact tables — this mirrors Redshift's compound sort key on dates for range-scan efficiency:
+3. **大規模なファクト表の年度・日付列にはレンジまたはレンジ・インターバル・パーティショニングを使用する。** これは Redshift の日付に対する複合ソート・キー（範囲スキャンの効率化目的）に相当する。
 
 ```sql
 CREATE TABLE fact_sales (
@@ -72,48 +72,48 @@ INTERVAL (NUMTOYMINTERVAL(1, 'MONTH'))
 
 ---
 
-## Data Type Mapping
+## データ型マッピング
 
-| Redshift | Oracle | Notes |
+| Redshift | Oracle | 備考 |
 |---|---|---|
 | `SMALLINT` | `NUMBER(5)` | |
 | `INTEGER` / `INT` | `NUMBER(10)` | |
 | `BIGINT` | `NUMBER(19)` | |
-| `DECIMAL(p,s)` / `NUMERIC(p,s)` | `NUMBER(p,s)` | Direct equivalent |
-| `REAL` | `BINARY_FLOAT` | 32-bit IEEE 754 |
-| `DOUBLE PRECISION` | `BINARY_DOUBLE` | 64-bit IEEE 754 |
-| `BOOLEAN` | `NUMBER(1)` with CHECK (0,1) | Oracle 23c has native BOOLEAN |
+| `DECIMAL(p,s)` / `NUMERIC(p,s)` | `NUMBER(p,s)` | 直接的な同等物 |
+| `REAL` | `BINARY_FLOAT` | 32 ビット IEEE 754 |
+| `DOUBLE PRECISION` | `BINARY_DOUBLE` | 64 ビット IEEE 754 |
+| `BOOLEAN` | CHECK (0,1) 付きの `NUMBER(1)` | Oracle 23c 以降はネイティブの BOOLEAN あり |
 | `CHAR(n)` | `CHAR(n)` | |
-| `VARCHAR(n)` / `CHARACTER VARYING(n)` | `VARCHAR2(n)` | Redshift max 65,535; Oracle max 4000 (32767 extended) |
-| `TEXT` (aliased) | `CLOB` | |
-| `DATE` | `DATE` | Oracle DATE includes time; Redshift DATE is date-only |
+| `VARCHAR(n)` / `CHARACTER VARYING(n)` | `VARCHAR2(n)` | Redshift 最大 65,535、Oracle 最大 4000/32767 |
+| `TEXT` (エイリアス) | `CLOB` | |
+| `DATE` | `DATE` | Oracle の DATE は時刻を含むが Redshift は日付のみ |
 | `TIMESTAMP` | `TIMESTAMP` | |
 | `TIMESTAMPTZ` / `TIMESTAMP WITH TIME ZONE` | `TIMESTAMP WITH TIME ZONE` | |
-| `TIMEZONEOID` | N/A | Internal type |
-| `GEOMETRY` | `SDO_GEOMETRY` | Requires Oracle Spatial |
-| `HLLSKETCH` | No equivalent | HyperLogLog sketch; recompute using `APPROX_COUNT_DISTINCT` |
-| `SUPER` | `JSON` (21c+) or `CLOB IS JSON` | Redshift's semi-structured type |
-| `VARBYTE` | `RAW(n)` or `BLOB` | Variable-length binary |
+| `TIMEZONEOID` | 該当なし | 内部的な型 |
+| `GEOMETRY` | `SDO_GEOMETRY` | Oracle Spatial が必要 |
+| `HLLSKETCH` | 同等の型なし | HyperLogLog スケッチ。`APPROX_COUNT_DISTINCT` を使用して再計算 |
+| `SUPER` | `JSON` (21c 以降) または `CLOB IS JSON` | Redshift の半構造化型 |
+| `VARBYTE` | `RAW(n)` または `BLOB` | 可変長バイナリ |
 
 ---
 
-## Redshift SQL Quirks → Oracle Equivalents
+## Redshift SQL 独自の挙動 → Oracle の同等物
 
-### NVL2 and ISNULL
+### NVL2 と ISNULL
 
 ```sql
--- Redshift (NVL2 is also available in Oracle — same syntax)
+-- Redshift (NVL2 は Oracle でも同様の構文で利用可能)
 SELECT NVL2(phone, 'Has phone', 'No phone') FROM customers;
 
--- ISNULL is Redshift/SQL Server syntax — not available in Oracle
+-- ISNULL は Redshift/SQL Server の構文であり、Oracle では使用不可
 SELECT ISNULL(phone, 'N/A') FROM customers;      -- Redshift
 
--- Oracle equivalent
+-- Oracle 同等実装
 SELECT NVL(phone, 'N/A') FROM customers;
 SELECT COALESCE(phone, 'N/A') FROM customers;
 ```
 
-### ILIKE (Case-Insensitive LIKE)
+### ILIKE (大文字小文字を区別しない LIKE)
 
 ```sql
 -- Redshift
@@ -130,12 +130,12 @@ SELECT * FROM products WHERE UPPER(name) LIKE '%WIDGET%';
 -- Redshift
 SELECT * FROM fact_sales ORDER BY sale_date DESC LIMIT 100 OFFSET 200;
 
--- Oracle 12c+
+-- Oracle 12c 以降
 SELECT * FROM fact_sales ORDER BY sale_date DESC
 OFFSET 200 ROWS FETCH NEXT 100 ROWS ONLY;
 ```
 
-### DATEADD and DATEDIFF
+### DATEADD および DATEDIFF
 
 ```sql
 -- Redshift
@@ -145,29 +145,29 @@ SELECT DATEDIFF(day, start_date, end_date) AS days_elapsed FROM projects;
 -- Oracle
 SELECT order_date + 30 AS due_date FROM orders;
 SELECT end_date - start_date AS days_elapsed FROM projects;
--- For DATEADD with months/years:
+-- 月や年を指定した DATEADD の場合：
 SELECT ADD_MONTHS(order_date, 1) FROM orders;
 ```
 
-### GETDATE() and Other Datetime Functions
+### GETDATE() およびその他の日時関数
 
 ```sql
 -- Redshift
 SELECT GETDATE();
-SELECT SYSDATE;           -- also available
+SELECT SYSDATE;           -- Redshift でも利用可能
 SELECT CURRENT_TIMESTAMP;
 
 -- Oracle
-SELECT SYSDATE FROM DUAL;          -- no fractional seconds
-SELECT SYSTIMESTAMP FROM DUAL;     -- with fractional seconds and TZ offset
-SELECT CURRENT_TIMESTAMP FROM DUAL; -- session time zone
+SELECT SYSDATE FROM DUAL;          -- 小数秒なし
+SELECT SYSTIMESTAMP FROM DUAL;     -- 小数秒とタイムゾーンオフセットあり
+SELECT CURRENT_TIMESTAMP FROM DUAL; -- セッション・タイムゾーン
 ```
 
-### CONVERT and CAST
+### CONVERT および CAST
 
 ```sql
 -- Redshift
-SELECT CONVERT(VARCHAR, sale_date, 112);   -- SQL Server-style CONVERT
+SELECT CONVERT(VARCHAR, sale_date, 112);   -- SQL Server スタイルの CONVERT
 SELECT CAST(sale_amount AS VARCHAR(20));
 
 -- Oracle
@@ -176,36 +176,26 @@ SELECT CAST(sale_amount AS VARCHAR2(20)) FROM DUAL;
 SELECT TO_CHAR(sale_amount) FROM DUAL;
 ```
 
-### String Functions
+### 文字列関数
 
-| Redshift | Oracle Equivalent |
+| Redshift | Oracle 同等物 |
 |---|---|
-| `LISTAGG(col, ',')` | `LISTAGG(col, ',') WITHIN GROUP (ORDER BY col)` — same |
-| `NVL(a, b)` | `NVL(a, b)` — same |
-| `DECODE(expr, ...)` | `DECODE(expr, ...)` — same |
+| `LISTAGG(col, ',')` | `LISTAGG(col, ',') WITHIN GROUP (ORDER BY col)` — 同様 |
+| `NVL(a, b)` | `NVL(a, b)` — 同様 |
+| `DECODE(expr, ...)` | `DECODE(expr, ...)` — 同様 |
 | `SPLIT_PART(s, delim, n)` | `REGEXP_SUBSTR(s, '[^' \|\| delim \|\| ']+', 1, n)` |
-| `STRTOL(s, base)` | No equivalent; use PL/SQL function |
-| `TRANSLATE(s, from, to)` | `TRANSLATE(s, from, to)` — same |
+| `STRTOL(s, base)` | 同等の関数なし。PL/SQL 関数を作成する必要あり |
+| `TRANSLATE(s, from, to)` | `TRANSLATE(s, from, to)` — 同様 |
 | `CHARINDEX(sub, s)` | `INSTR(s, sub)` |
 | `LEN(s)` | `LENGTH(s)` |
 | `BTRIM(s)` | `TRIM(s)` |
 
-### Window Functions
+### ウィンドウ関数
 
-Redshift supports most standard SQL window functions. Oracle supports all of them with identical or near-identical syntax.
+Redshift は標準 SQL のウィンドウ関数の多くをサポートしている。Oracle もそれらすべてを、同一またはほぼ同一の構文でサポートしている。
 
 ```sql
--- Redshift window function
-SELECT
-    sale_id,
-    sale_date,
-    sale_amount,
-    SUM(sale_amount) OVER (PARTITION BY region_code ORDER BY sale_date
-                           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total,
-    RANK() OVER (PARTITION BY region_code ORDER BY sale_amount DESC) AS rank_in_region
-FROM fact_sales;
-
--- Oracle — identical syntax
+-- Redshift および Oracle (同一構文)
 SELECT
     sale_id,
     sale_date,
@@ -218,34 +208,32 @@ FROM fact_sales;
 
 ---
 
-## COPY Command → Oracle External Tables / SQL*Loader
+## COPY コマンド → Oracle 外部表 / SQL*Loader
 
-Redshift's `COPY` command loads data from S3 (or other sources) directly into a table with MPP parallelism. Oracle provides two main bulk loading mechanisms.
+Redshift の `COPY` コマンドは、S3 等からテーブルに MPP 並列処理で直接データをロードする。Oracle では、主に 2 つの一括ロード・メカニズムを提供する。
 
 ### Redshift COPY
 
 ```sql
--- Redshift: load from S3
+-- Redshift: S3 からのロード
 COPY fact_sales
 FROM 's3://my-bucket/data/fact_sales/'
 IAM_ROLE 'arn:aws:iam::123456789012:role/RedshiftRole'
 FORMAT AS CSV
 IGNOREHEADER 1
-DATEFORMAT 'auto'
-TIMEFORMAT 'auto'
 MAXERROR 100;
 ```
 
-### Oracle External Tables (read-only, query-based)
+### Oracle 外部表 (読み取り専用、クエリベース)
 
-External tables let Oracle read files from the OS filesystem as if they were database tables. Ideal for staging loads.
+外部表を使用すると、OS ファイルシステムのファイルをデータベース・テーブルであるかのように Oracle から読み取ることができる。ステージング・ロードに最適である。
 
 ```sql
--- Create directory object pointing to data files
+-- データ・ファイルを指すディレクトリ・オブジェクトの作成
 CREATE OR REPLACE DIRECTORY ext_data_dir AS '/opt/oracle/data/staging';
 GRANT READ ON DIRECTORY ext_data_dir TO myuser;
 
--- Create external table definition
+-- 外部表の定義を作成
 CREATE TABLE ext_fact_sales (
     sale_id      NUMBER,
     sale_date    DATE,
@@ -276,16 +264,16 @@ ORGANIZATION EXTERNAL (
 )
 REJECT LIMIT 100;
 
--- Load from external table into physical table
+-- 外部表から物理テーブルへのロード
 INSERT /*+ APPEND */ INTO fact_sales
 SELECT * FROM ext_fact_sales;
 COMMIT;
 ```
 
-### Oracle SQL*Loader (direct path load)
+### Oracle SQL*Loader (ダイレクト・パス・ロード)
 
 ```
--- SQL*Loader control file: fact_sales.ctl
+-- SQL*Loader コントロール・ファイル: fact_sales.ctl
 OPTIONS (DIRECT=TRUE, PARALLEL=TRUE, ROWS=10000, ERRORS=100)
 LOAD DATA
 INFILE '/opt/oracle/data/staging/fact_sales_*.csv'
@@ -309,24 +297,24 @@ sqlldr userid=myuser/mypass@mydb control=fact_sales.ctl log=fact_sales.log
 
 ---
 
-## Workload Management (WLM) → Oracle Resource Manager
+## ワークロード管理 (WLM) → Oracle リソース・マネージャ
 
-Redshift WLM allocates memory and concurrency slots across query queues. Oracle's equivalent is the Database Resource Manager (DBRM).
+Redshift の WLM は、クエリ・キュー全体にメモリーと同時実行スロットを割り当てる。Oracle の同等機能はデータベース・リソース・マネージャ (DBRM) である。
 
-### Redshift WLM Concepts
+### Redshift WLM の概念
 
-- **Query queues:** Named queues with memory percentage and concurrency slot allocations.
-- **Queue assignment:** Based on user group or query group labels.
-- **Short query acceleration (SQA):** Automatic prioritization of short-running queries.
+- **クエリ・キュー :** メモリー・パーセンテージと同時実行スロットが割り当てられた名前付きのキュー。
+- **キューの割り当て :** ユーザー・グループまたはクエリ・グループのラベルに基づいて行われる。
+- **短期間クエリの加速 (SQA) :** 実行時間が短いクエリの自動的な優先度付け。
 
-### Oracle Resource Manager Equivalent
+### Oracle リソース・マネージャ 同等実装
 
 ```sql
--- Create resource manager plan
+-- リソース・マネージャ・プランの作成例
 BEGIN
     DBMS_RESOURCE_MANAGER.CREATE_PENDING_AREA();
 
-    -- Create consumer groups
+    -- コンシューマ・グループの作成
     DBMS_RESOURCE_MANAGER.CREATE_CONSUMER_GROUP(
         consumer_group => 'ANALYTICS_HIGH',
         comment        => 'High-priority analytics queries'
@@ -336,13 +324,13 @@ BEGIN
         comment        => 'Low-priority batch analytics'
     );
 
-    -- Create resource plan
+    -- リソース・プランの作成
     DBMS_RESOURCE_MANAGER.CREATE_PLAN(
         plan    => 'ANALYTICS_PLAN',
         comment => 'Resource plan for analytics workload'
     );
 
-    -- Set plan directives (CPU allocation)
+    -- プラン・ディレクティブの設定 (CPU 割り当て)
     DBMS_RESOURCE_MANAGER.CREATE_PLAN_DIRECTIVE(
         plan             => 'ANALYTICS_PLAN',
         group_or_subplan => 'ANALYTICS_HIGH',
@@ -355,105 +343,96 @@ BEGIN
         comment          => 'Low priority — 20% CPU',
         cpu_p1           => 20
     );
-    DBMS_RESOURCE_MANAGER.CREATE_PLAN_DIRECTIVE(
-        plan             => 'ANALYTICS_PLAN',
-        group_or_subplan => 'OTHER_GROUPS',
-        comment          => 'Remainder',
-        cpu_p1           => 20
-    );
 
     DBMS_RESOURCE_MANAGER.VALIDATE_PENDING_AREA();
     DBMS_RESOURCE_MANAGER.SUBMIT_PENDING_AREA();
 END;
 /
 
--- Activate the plan
+-- プランの有効化
 ALTER SYSTEM SET RESOURCE_MANAGER_PLAN = 'ANALYTICS_PLAN';
 
--- Assign users to consumer groups
+-- ユーザーのコンシューマ・グループへの割り当て
 EXEC DBMS_RESOURCE_MANAGER_PRIVS.GRANT_SWITCH_CONSUMER_GROUP('analyst_user', 'ANALYTICS_HIGH', FALSE);
-BEGIN
-    DBMS_RESOURCE_MANAGER.SET_INITIAL_CONSUMER_GROUP('analyst_user', 'ANALYTICS_HIGH');
-END;
-/
+EXEC DBMS_RESOURCE_MANAGER.SET_INITIAL_CONSUMER_GROUP('analyst_user', 'ANALYTICS_HIGH');
 ```
 
 ---
 
-## Columnar to Row-Based Considerations
+## 列指向から行指向への移行に関する考慮事項
 
-When moving analytical workloads from Redshift's columnar storage to Oracle's row-based storage:
+Redshift の列指向ストレージから Oracle の行指向ストレージに分析ワークロードを移行する場合：
 
-### Query Patterns to Review
+### 見直すべきクエリ・パターン
 
-1. **Wide-table scans selecting few columns:** Redshift excels here because columnar storage only reads needed columns. Oracle full-table scans read entire row blocks. Mitigate with:
-   - Oracle In-Memory Column Store (selected tables/columns)
-   - Appropriate indexes on filter columns
-   - Partition pruning
+1. **少数の列のみを選択する幅の広いテーブルのスキャン :** Redshift は必要な列のみを読み取るため、このケースで優れている。これに対し、Oracle の全表スキャンは行ブロック全体を読み取る。これを軽減するには：
+   - Oracle インメモリ・カラム・ストアの活用 (特定のテーブル/列)
+   - フィルタ条件となる列への適切な索引設定
+   - パーティション・プルーニングの活用
 
-2. **Aggregate-heavy queries:** Redshift's vectorized columnar aggregation is very fast. Oracle's parallel query engine with IMCS can match this for in-memory data, but disk-based aggregations will be slower.
+2. **集計処理の多いクエリ :** Redshift のベクトル化された列指向集計は非常に高速である。Oracle も、IMCS を活用したパラレル・クエリ・エンジンでインメモリ・データに対しては同等の速度を実現できるが、ディスク・ベースの集計は一般に低速になる。
 
-3. **High-cardinality joins:** Both databases handle joins similarly at the SQL level, but execution plans will differ. Review Oracle explain plans for hash join vs nested loop choices.
+3. **高カーディナリティの結合 :** SQL レベルの結合処理は同様だが、実行計画は異なる。Oracle の実行計画を確認し、ハッシュ結合とネストしたループが適切に選択されているかを確認すること。
 
-### Performance Tuning Checklist for Redshift-to-Oracle
+### パフォーマンス・チューニング・チェックリスト
 
 ```sql
--- Check if IMCS is being used
+-- IMCS が使用されているかの確認
 SELECT segment_name, bytes, inmemory_size, bytes_not_populated
 FROM v$im_segments
 WHERE segment_name = 'FACT_SALES';
 
--- Check parallel query degree
+-- テーブルのパラレル度を確認
 SELECT degree FROM user_tables WHERE table_name = 'FACT_SALES';
 
--- Enable parallel query on a table
+-- テーブルのパラレル度を設定
 ALTER TABLE fact_sales PARALLEL (DEGREE 8);
 
--- Gather fresh statistics after load
+-- ロード後に最新の統計情報を収集
 EXEC DBMS_STATS.GATHER_TABLE_STATS('MYSCHEMA', 'FACT_SALES', CASCADE => TRUE);
 
--- Check partition pruning in explain plan
+-- 実行計画でパーティション・プルーニングを確認
 EXPLAIN PLAN FOR
 SELECT SUM(sale_amount) FROM fact_sales WHERE sale_date >= DATE '2024-01-01';
-SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY(FORMAT => 'ALL'));
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY());
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Profile your Redshift queries before migrating.** Export STL_QUERY and STL_SCAN logs to understand which tables are scanned most frequently and with what filter predicates. This drives the Oracle partitioning and IMCS strategy.
+1. **移行前に Redshift クエリをプロファイリングする。** STL_QUERY や STL_SCAN ログを書き出し、どのテーブルがどのような検索条件で最も頻繁にスキャンされているかを把握すること。これが Oracle のパーティショニングおよび IMCS 戦略のベースとなる。
 
-2. **Do not over-index.** Redshift uses zone maps (block-level min/max statistics) automatically. Oracle uses B-tree indexes, which require maintenance overhead. Add indexes only where queries actually benefit.
+2. **索引を過剰に作成しない。** Redshift はゾーンマップ（ブロック・レベルの最小/最大統計）を自動的に使用する。Oracle は B-tree 索引を使用するが、これにはメンテナンスのオーバーヘッドがある。索引は、クエリが実際に恩恵を受ける場合にのみ追加すること。
 
-3. **Enable compression on large Oracle tables.** Use Advanced Compression or IMCS compression to reduce storage and I/O:
+3. **大規模なテーブルには圧縮を有効にする。** アドバンスト圧縮や IMCS 圧縮を使用して、ストレージ消費と I/O を削減する：
    ```sql
-   ALTER TABLE fact_sales COMPRESS FOR OLTP;  -- or COMPRESS BASIC for read-mostly
+   ALTER TABLE fact_sales COMPRESS FOR OLTP;  -- または読み取り専用なら COMPRESS BASIC
    ```
 
-4. **Use Oracle's parallel DML for bulk loads.** Enable parallel DML for the session before large INSERT...SELECT operations:
+4. **一括ロードには Oracle のパラレル DML を使用する。**
    ```sql
    ALTER SESSION ENABLE PARALLEL DML;
    INSERT /*+ APPEND PARALLEL(t, 8) */ INTO fact_sales t SELECT ... FROM ext_fact_sales;
    ```
 
-5. **Monitor PGA and SGA sizing.** Redshift manages memory automatically per slice. Oracle requires DBA tuning of SGA (buffer cache, shared pool, IMCS) and PGA (sort area, hash join area). Use Automatic Memory Management (AMM) or Automatic Shared Memory Management (ASMM) as a starting point.
+5. **PGA および SGA のサイズ設定を監視する。** Redshift はスライスごとにメモリーを自動管理する。Oracle では、DBA が SGA（バッファ・キャッシュ、共有プール、IMCS）および PGA（ソート領域、ハッシュ結合領域）を調整する必要がある。まずは自動メモリー管理 (AMM/ASMM) から開始すること。
 
 ---
 
-## Common Migration Pitfalls
+## よくある移行の落とし穴
 
-**Pitfall 1 — Assuming Redshift SQL is standard SQL.** Redshift includes many PostgreSQL-derived extensions and AWS-specific functions. Not everything that works in Redshift is valid SQL and some of it will not translate to Oracle.
+**落とし穴 1 — Redshift SQL が標準 SQL であるという誤認：** Redshift には、PostgreSQL 由来の拡張機能や AWS 固有の関数が多く含まれている。それらすべてが Oracle で有効な SQL とは限らず、変換が必要になる。
 
-**Pitfall 2 — Distribution-key assumptions in application code.** Application code that uses distribution keys for routing (rare but possible in advanced ETL) has no Oracle equivalent. Redesign those patterns.
+**落とし穴 2 — アプリケーション・コードにおける分散キーへの依存：** 分散キーを活用したルーティングを利用するアプリ・コード（高度な ETL 等）は Oracle に同等機能がないため、再設計が必要になる。
 
-**Pitfall 3 — SUPER type migrations.** Redshift SUPER columns contain JSON-like semi-structured data. Map these to Oracle JSON columns (21c+) or CLOB with IS JSON constraints. PartiQL queries against SUPER need to be rewritten using Oracle's JSON_VALUE, JSON_TABLE, and JSON_QUERY functions.
+**落とし穴 3 — SUPER 型からの移行：** Redshift の SUPER 列は JSON のような半構造化データを保持する。これらは Oracle の JSON 列 (21c 以降) または IS JSON 制約付きの CLOB としてマップすること。SUPER 型に対する PartiQL クエリは、Oracle の JSON_VALUE, JSON_TABLE 等を使用して書き換える必要がある。
 
-**Pitfall 4 — Redshift UNLOAD → Oracle external tables.** Redshift UNLOAD exports to S3. Oracle external tables read from the local filesystem or NFS. Download S3 files to a staging server accessible by the Oracle host before loading.
+**落とし穴 4 — Redshift UNLOAD → Oracle 外部表：** Redshift の UNLOAD は S3 にエクスポートする。Oracle 外部表はローカル・ファイルシステムまたは NFS を読み取る。ロード前に、S3 のファイルを Oracle ホストからアクセス可能な場所にダウンロードしておく必要がある。
 
-**Pitfall 5 — Redshift late-binding views.** Redshift supports late-binding views that reference tables that do not yet exist at view creation time. Oracle does not; all referenced objects must exist and be accessible when the view is compiled.
+**落とし穴 5 — Redshift の遅延バインディング・ビュー：** Redshift は作成時に参照先テーブルが存在しなくてもよい遅延バインディング・ビューをサポートしている。Oracle はこれをサポートしておらず、ビューのコンパイル時にすべての参照オブジェクトが存在し、アクセス可能である必要がある。
 
-**Pitfall 6 — ZEROIFNULL and EMPTYSTRING equivalents:**
+**落とし穴 6 — ZEROIFNULL および EMPTYSTRING の同等表現：**
 ```sql
 -- Redshift
 SELECT ZEROIFNULL(revenue) FROM sales;
@@ -465,14 +444,13 @@ SELECT COALESCE(revenue, 0) FROM sales;
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ファイル内の基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c, 23c, または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 複数バージョンをサポートする環境では、リリース更新（RU）によってデフォルト値や非推奨機能が異なる場合があるため、19c と 26ai の両方で動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c SQL Language Reference — Data Types](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/Data-Types.html)
 - [Oracle Database 19c SQL Language Reference — CREATE TABLE (Partitioning)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-TABLE.html)

@@ -1,35 +1,35 @@
-# PL/SQL Best Practices
+# PL/SQL ベストプラクティス
 
-## Overview
+## 概要
 
-PL/SQL is Oracle's procedural extension to SQL. It runs inside the database server, minimizing network round trips and enabling tight integration with Oracle's SQL engine. However, poorly written PL/SQL can be orders of magnitude slower than well-written PL/SQL. The most impactful techniques are bulk processing (eliminating row-by-row context switches), proper exception handling, disciplined cursor management, and structured package design.
+PL/SQLは、OracleによるSQLの手続き型拡張である。データベース・サーバー内部で実行されるため、ネットワークのラウンドトリップを最小限に抑え、OracleのSQLエンジンとの密接な統合を可能にする。しかし、不適切に記述されたPL/SQLは、適切に記述されたものと比べて桁違いに遅くなる可能性がある。最も効果的な手法は、バルク処理（行ごとのコンテキスト・スイッチの排除）、適切な例外処理、規律あるカーソル管理、および構造化されたパッケージ設計である。
 
-This guide covers the patterns that have the greatest practical impact on performance, maintainability, and reliability.
+本ガイドでは、パフォーマンス、保守性、および信頼性に大きな実用的影響を与えるパターンについて解説する。
 
 ---
 
-## Context Switches and Why They Matter
+## コンテキスト・スイッチとその重要性
 
-The most important concept in PL/SQL performance is the **context switch**: every time PL/SQL calls the SQL engine to execute a single SQL statement, there is overhead for the transition between the PL/SQL virtual machine (PVM) and the SQL engine. When this happens once per row in a loop — the infamous "row-by-row" or "slow-by-slow" pattern — the overhead accumulates rapidly.
+PL/SQLのパフォーマンスにおいて最も重要な概念は**コンテキスト・スイッチ**である。PL/SQLがSQL文を実行するためにSQLエンジンを呼び出すたびに、PL/SQL仮想マシン（PVM）とSQLエンジン間の切り替えによるオーバーヘッドが発生する。これがループ内で1行ごとに発生する場合（悪名高い「row-by-row」または「slow-by-slow」パターン）、オーバーヘッドは急速に蓄積される。
 
 ```plsql
--- SLOW: context switch on every iteration
+-- 遅い例: 反復ごとにコンテキスト・スイッチが発生
 FOR rec IN (SELECT employee_id, salary FROM employees WHERE department_id = 50) LOOP
   UPDATE employees
   SET    salary = rec.salary * 1.1
-  WHERE  employee_id = rec.employee_id;   -- one SQL call per row
+  WHERE  employee_id = rec.employee_id;   -- 1行ごとに1回のSQL呼び出し
 END LOOP;
 ```
 
-The fix is to push work into the SQL engine, either as a set-based SQL statement or via bulk operations.
+この解決策は、集合ベースのSQL文、またはバルク操作を使用して、処理をSQLエンジン側に押し込むことである。
 
 ---
 
-## BULK COLLECT and FORALL
+## BULK COLLECT と FORALL
 
 ### BULK COLLECT
 
-`BULK COLLECT` fetches multiple rows into a collection in a single SQL call, eliminating the per-row context switch on the fetch side.
+`BULK COLLECT` は、1回のSQL呼び出しで複数の行をコレクションにフェッチし、フェッチ側の行ごとのコンテキスト・スイッチを排除する。
 
 ```plsql
 DECLARE
@@ -39,7 +39,7 @@ DECLARE
   v_emp_ids  emp_id_list;
   v_salaries salary_list;
 BEGIN
-  -- Single SQL call fetches all matching rows
+  -- 1回のSQL呼び出しですべての一致する行をフェッチ
   SELECT employee_id, salary
   BULK COLLECT INTO v_emp_ids, v_salaries
   FROM   employees
@@ -50,9 +50,9 @@ END;
 /
 ```
 
-### Limiting Bulk Collect with LIMIT (Memory Management)
+### LIMIT を使用した Bulk Collect の制限（メモリ管理）
 
-For very large result sets, fetching everything at once can exhaust PGA memory. Use `LIMIT` with a cursor loop to process in batches:
+非常に大きな結果セットの場合、一度にすべてをフェッチするとPGAメモリを使い果たす可能性がある。バッチで処理するには、カーソル・ループで `LIMIT` を使用する。
 
 ```plsql
 DECLARE
@@ -71,14 +71,14 @@ BEGIN
     FETCH emp_cur BULK COLLECT INTO v_batch LIMIT c_limit;
     EXIT WHEN v_batch.COUNT = 0;
 
-    -- Process each batch
+    -- 各バッチを処理
     FOR i IN 1..v_batch.COUNT LOOP
-      -- business logic here
+      -- ビジネスロジックをここに記述
       NULL;
     END LOOP;
 
     v_total := v_total + v_batch.COUNT;
-    COMMIT;  -- commit each batch to avoid large undo segments
+    COMMIT;  -- 巨大なUNDOセグメントを避けるためにバッチごとにコミット
   END LOOP;
   CLOSE emp_cur;
 
@@ -89,7 +89,7 @@ END;
 
 ### FORALL
 
-`FORALL` executes a DML statement once for each element in a collection, but sends all DML as a single batch to the SQL engine — a single context switch for the entire operation.
+`FORALL` は、コレクション内の各要素に対してDML文を1回実行するが、すべてのDMLを一括してSQLエンジンに送信する。操作全体に対してコンテキスト・スイッチは1回のみとなる。
 
 ```plsql
 DECLARE
@@ -99,13 +99,13 @@ DECLARE
   v_emp_ids   emp_id_list;
   v_new_sals  salary_list;
 BEGIN
-  -- Fetch the data
+  -- データをフェッチ
   SELECT employee_id, salary * 1.1
   BULK COLLECT INTO v_emp_ids, v_new_sals
   FROM   employees
   WHERE  department_id = 50;
 
-  -- Apply the updates in bulk — one context switch for all rows
+  -- バルクで更新を適用 — すべての行に対して1回のコンテキスト・スイッチ
   FORALL i IN 1..v_emp_ids.COUNT
     UPDATE employees
     SET    salary = v_new_sals(i)
@@ -117,14 +117,14 @@ END;
 /
 ```
 
-### FORALL with SAVE EXCEPTIONS
+### SAVE EXCEPTIONS を使用した FORALL
 
-By default, `FORALL` stops on the first DML error. `SAVE EXCEPTIONS` continues processing and collects all errors for review:
+デフォルトでは、`FORALL` は最初のDMLエラーで停止する。`SAVE EXCEPTIONS` を使用すると処理を続行し、すべてのエラーをレビュー用に収集する。
 
 ```plsql
 DECLARE
   TYPE id_list IS TABLE OF NUMBER;
-  v_ids       id_list := id_list(101, 999999, 102, 103);  -- 999999 doesn't exist
+  v_ids       id_list := id_list(101, 999999, 102, 103);  -- 999999 は存在しない
   e_dml_errors EXCEPTION;
   PRAGMA EXCEPTION_INIT(e_dml_errors, -24381);
 BEGIN
@@ -145,14 +145,14 @@ END;
 
 ---
 
-## Exception Handling Patterns
+## 例外処理パターン
 
-### Always Name Your Exceptions
+### 例外には必ず名前を付ける
 
 ```plsql
 DECLARE
   e_invalid_salary  EXCEPTION;
-  PRAGMA EXCEPTION_INIT(e_invalid_salary, -20001);  -- links ORA-20001 to the name
+  PRAGMA EXCEPTION_INIT(e_invalid_salary, -20001);  -- ORA-20001を名前にリンク
 
   e_emp_not_found   EXCEPTION;
   PRAGMA EXCEPTION_INIT(e_emp_not_found, -20002);
@@ -162,7 +162,7 @@ END;
 /
 ```
 
-### The Standard Exception Block Pattern
+### 標準的な例外ブロック・パターン
 
 ```plsql
 CREATE OR REPLACE PROCEDURE update_salary (
@@ -172,24 +172,24 @@ CREATE OR REPLACE PROCEDURE update_salary (
 ) AS
   v_old_salary  employees.salary%TYPE;
 BEGIN
-  -- Input validation
+  -- 入力バリデーション
   IF p_new_salary <= 0 THEN
     RAISE_APPLICATION_ERROR(-20001, 'Salary must be positive.');
   END IF;
 
-  -- Get current value for audit
+  -- 監査のために現在の値を取得
   SELECT salary INTO v_old_salary
   FROM   employees
   WHERE  employee_id = p_employee_id
-  FOR UPDATE NOWAIT;  -- lock immediately or raise error
+  FOR UPDATE NOWAIT;  -- 即座にロック、不可ならエラー
 
-  -- Apply change
+  -- 変更を適用
   UPDATE employees
   SET    salary = p_new_salary,
          last_updated = SYSDATE
   WHERE  employee_id = p_employee_id;
 
-  -- Audit trail
+  -- 監査ログ
   INSERT INTO salary_audit(employee_id, old_salary, new_salary, changed_by, changed_on)
   VALUES (p_employee_id, v_old_salary, p_new_salary, p_updated_by, SYSTIMESTAMP);
 
@@ -204,38 +204,38 @@ EXCEPTION
       'Record is locked by another user. Try again.');
   WHEN OTHERS THEN
     ROLLBACK;
-    -- Log the unexpected error before re-raising
+    -- 予期しないエラーを再発生させる前にログ出力
     INSERT INTO error_log(proc_name, error_code, error_msg, logged_on)
     VALUES ('update_salary', SQLCODE, SQLERRM, SYSTIMESTAMP);
-    COMMIT;  -- commit the log entry even though business transaction rolled back
-    RAISE;   -- re-raise the original error to the caller
+    COMMIT;  -- ビジネス・トランザクションがロールバックされてもログ・エントリはコミット
+    RAISE;   -- 元のエラーを呼び出し元に再発生させる
 END;
 /
 ```
 
-### Never Swallow Exceptions Silently
+### 例外を黙って無視しない
 
 ```plsql
--- BAD: hides all errors; impossible to diagnose production issues
+-- 悪い例: すべてのエラーを隠蔽し、本番環境の問題診断を不可能にする
 EXCEPTION
   WHEN OTHERS THEN
     NULL;
 
--- BAD: catches OTHERS but only logs to DBMS_OUTPUT (lost in production)
+-- 悪い例: OTHERSをキャッチするが DBMS_OUTPUT にのみ出力（本番では失われる）
 EXCEPTION
   WHEN OTHERS THEN
     DBMS_OUTPUT.PUT_LINE('Error: ' || SQLERRM);
 
--- GOOD: log to a table, then re-raise or raise_application_error
+-- 良い例: テーブルにログ出力した後、再発生させる、または raise_application_error
 EXCEPTION
   WHEN OTHERS THEN
     log_error(p_context => 'update_salary', p_sqlcode => SQLCODE, p_sqlerrm => SQLERRM);
     RAISE;
 ```
 
-### Using DBMS_UTILITY.FORMAT_ERROR_BACKTRACE
+### DBMS_UTILITY.FORMAT_ERROR_BACKTRACE の使用
 
-`SQLERRM` only reports the error message. `FORMAT_ERROR_BACKTRACE` returns the full call stack showing exactly which line raised the error — invaluable for debugging nested procedure calls.
+`SQLERRM` はエラー・メッセージのみを報告する。`FORMAT_ERROR_BACKTRACE` は、エラーが発生した正確な行を示すフル・コール・スタックを返すため、ネストされたプロシージャ呼び出しのデバッグに非常に有用である。
 
 ```plsql
 EXCEPTION
@@ -245,7 +245,7 @@ EXCEPTION
       'my_procedure',
       SQLCODE,
       SQLERRM,
-      DBMS_UTILITY.FORMAT_ERROR_BACKTRACE,  -- shows line numbers
+      DBMS_UTILITY.FORMAT_ERROR_BACKTRACE,  -- 行番号を表示
       SYSTIMESTAMP
     );
     COMMIT;
@@ -256,13 +256,13 @@ END;
 
 ---
 
-## Cursor Management
+## カーソル管理
 
-### Implicit vs. Explicit Cursors
+### 暗黙的カーソル vs. 明示的カーソル
 
 ```plsql
--- IMPLICIT cursor (single-row SELECT INTO): simplest form
--- Oracle automatically opens, fetches, and closes it
+-- 暗黙的カーソル（単一行SELECT INTO）: 最も単純な形式
+-- Oracleが自動的にオープン、フェッチ、クローズを行う
 DECLARE
   v_name VARCHAR2(100);
 BEGIN
@@ -274,7 +274,7 @@ EXCEPTION
 END;
 /
 
--- EXPLICIT cursor (multi-row): full control over open/fetch/close
+-- 明示的カーソル（複数行）: オープン/フェッチ/クローズを完全に制御
 DECLARE
   CURSOR dept_cur IS
     SELECT department_id, department_name FROM departments ORDER BY department_name;
@@ -286,35 +286,35 @@ BEGIN
     EXIT WHEN dept_cur%NOTFOUND;
     DBMS_OUTPUT.PUT_LINE(v_rec.department_id || ': ' || v_rec.department_name);
   END LOOP;
-  CLOSE dept_cur;  -- always close explicitly opened cursors
+  CLOSE dept_cur;  -- 明示的にオープンしたカーソルは常にクローズする
 END;
 /
 ```
 
-### Cursor FOR Loop (Preferred for Simplicity)
+### カーソル FOR ループ（簡潔さのため推奨）
 
-The cursor FOR loop opens, fetches, and closes the cursor automatically. Use it when not doing bulk operations.
+カーソル FOR ループは、カーソルのオープン、フェッチ、およびクローズを自動的に行う。バルク操作を行わない場合に使用する。
 
 ```plsql
 BEGIN
   FOR rec IN (SELECT department_id, department_name FROM departments ORDER BY department_name) LOOP
     DBMS_OUTPUT.PUT_LINE(rec.department_id || ': ' || rec.department_name);
   END LOOP;
-  -- cursor is automatically closed here
+  -- カーソルはここで自動的にクローズされる
 END;
 /
 ```
 
-### Always Close Explicitly Opened Cursors
+### 明示的にオープンしたカーソルは必ずクローズする
 
 ```plsql
--- Pattern: use a nested block with exception handling to guarantee cursor closure
+-- パターン: カーソルの確実なクローズを保証するために例外処理を伴うネストされたブロックを使用
 DECLARE
   v_cur SYS_REFCURSOR;
 BEGIN
   BEGIN
     OPEN v_cur FOR SELECT * FROM employees WHERE department_id = 50;
-    -- process...
+    -- 処理...
     CLOSE v_cur;
   EXCEPTION
     WHEN OTHERS THEN
@@ -327,7 +327,7 @@ END;
 /
 ```
 
-### Parameterized Cursors
+### パラメータ付カーソル
 
 ```plsql
 DECLARE
@@ -346,17 +346,17 @@ END;
 
 ---
 
-## Package Structure
+## パッケージ構造
 
-Packages are the fundamental unit of organization in PL/SQL. They provide encapsulation, state management, and significant performance benefits (entire package is loaded into shared pool on first use).
+パッケージはPL/SQLにおける構成の基本単位である。カプセル化、状態管理、および大幅なパフォーマンス上の利点（初回使用時にパッケージ全体が共有プールにロードされる）を提供する。
 
-### Recommended Package Layout
+### 推奨されるパッケージ・レイアウト
 
 ```plsql
--- SPECIFICATION (public interface — the contract)
+-- 仕様部（パブリック・インターフェース — 規約）
 CREATE OR REPLACE PACKAGE emp_mgmt AS
 
-  -- Public types
+  -- パブリック型
   TYPE emp_salary_rec IS RECORD (
     employee_id  employees.employee_id%TYPE,
     last_name    employees.last_name%TYPE,
@@ -364,10 +364,10 @@ CREATE OR REPLACE PACKAGE emp_mgmt AS
   );
   TYPE emp_salary_tab IS TABLE OF emp_salary_rec;
 
-  -- Public constants
+  -- パブリック定数
   c_max_salary_increase CONSTANT NUMBER := 0.30;  -- 30%
 
-  -- Public procedure/function signatures
+  -- パブリック・プロシージャ/ファンクションのシグネチャ
   PROCEDURE update_salary (
     p_employee_id IN  employees.employee_id%TYPE,
     p_new_salary  IN  employees.salary%TYPE
@@ -384,14 +384,14 @@ CREATE OR REPLACE PACKAGE emp_mgmt AS
 END emp_mgmt;
 /
 
--- BODY (implementation — can change without recompiling dependent objects
---       as long as the spec signature doesn't change)
+-- 本体部（実装 — 仕様部のシグネチャが変わらない限り、
+--         依存オブジェクトを再コンパイルせずに変更可能）
 CREATE OR REPLACE PACKAGE BODY emp_mgmt AS
 
-  -- Private constant (not visible outside the package)
+  -- プライベート定数（パッケージ外からは見えない）
   c_min_salary CONSTANT NUMBER := 2000;
 
-  -- Private helper (not in spec — internal use only)
+  -- プライベート・ヘルパー（仕様部にはない — 内部使用のみ）
   PROCEDURE validate_salary (p_salary IN NUMBER) AS
   BEGIN
     IF p_salary < c_min_salary THEN
@@ -426,7 +426,7 @@ CREATE OR REPLACE PACKAGE BODY emp_mgmt AS
     RETURN v_total;
   END get_department_payroll;
 
-  -- Pipelined function: returns rows one at a time, enabling streaming
+  -- パイプライン・ファンクション: 1行ずつ返し、ストリーミングを可能にする
   FUNCTION get_high_earners (
     p_threshold IN NUMBER
   ) RETURN emp_salary_tab PIPELINED AS
@@ -445,11 +445,11 @@ END emp_mgmt;
 /
 ```
 
-### Package-Level Variables for Session State
+### セッション状態のためのパッケージ・レベル変数
 
 ```plsql
 CREATE OR REPLACE PACKAGE session_context AS
-  -- Package variables persist for the duration of the session
+  -- パッケージ変数はセッションの間保持される
   g_current_user    VARCHAR2(100);
   g_audit_enabled   BOOLEAN := TRUE;
 
@@ -473,16 +473,16 @@ END session_context;
 /
 ```
 
-**Caution:** Package-level variables are session-specific and not shared across sessions. In a connection pool, a new call on a reused connection may see stale package state from a previous user. Always initialize package state at the start of each logical transaction.
+**注意:** パッケージ・レベル変数はセッション固有であり、セッション間で共有されない。接続プールでは、再利用された接続での新しい呼び出しにおいて、前のユーザーの古いパッケージ状態が見えてしまう可能性がある。論理的なトランザクションごとに、必ずパッケージ状態を初期化すること。
 
 ---
 
-## The NOCOPY Hint
+## NOCOPY ヒント
 
-By default, PL/SQL passes `IN OUT` and `OUT` parameters by value (a copy is made). For large collections or CLOBs, this copying is expensive. `NOCOPY` instructs the compiler to pass by reference instead.
+デフォルトでは、PL/SQLは `IN OUT` および `OUT` パラメータを値渡し（コピーが作成される）する。大きなコレクションやCLOBの場合、このコピーはコストが高くなる。`NOCOPY` は、代わりに参照渡しを行うようコンパイラに指示する。
 
 ```plsql
--- Without NOCOPY: large collection is copied on call and on return
+-- NOCOPYなし: 大きなコレクションが呼び出し時と復帰時にコピーされる
 CREATE OR REPLACE PROCEDURE process_data_slow (
   p_data IN OUT large_collection_type
 ) AS
@@ -491,7 +491,7 @@ BEGIN
 END;
 /
 
--- With NOCOPY: passed by reference, no copy overhead
+-- NOCOPYあり: 参照渡し、コピーのオーバーヘッドなし
 CREATE OR REPLACE PROCEDURE process_data_fast (
   p_data IN OUT NOCOPY large_collection_type
 ) AS
@@ -501,16 +501,16 @@ END;
 /
 ```
 
-**Trade-off:** With `NOCOPY`, if an exception occurs inside the procedure, changes to the parameter are visible to the caller even after the exception, since there is no copy to discard. Use `NOCOPY` only when the performance gain is worth accepting this behavior — typically for read-only large collections passed to processing routines.
+**使い分け:** `NOCOPY` を使用すると、プロシージャ内で例外が発生した場合、コピーが破棄されないため、パラメータへの変更が呼び出し元に見えたままになる。この動作を受け入れてでもパフォーマンス向上の価値がある場合にのみ `NOCOPY` を使用すること — 通常、処理ルーチンに渡される読み取り専用の大きなコレクションに適している。
 
 ---
 
-## Avoiding Context Switches: SET-Based vs. Row-by-Row
+## コンテキスト・スイッチの回避: 集合ベース vs. 行ごと
 
-Always prefer a single SQL statement over a procedural loop when the logic can be expressed in SQL:
+ロジックをSQLで表現できる場合は、手続き型のループよりも単一のSQL文を常に優先すること。
 
 ```plsql
--- SLOW: PL/SQL loop with per-row UPDATE
+-- 遅い例: 行ごとの UPDATE を伴う PL/SQL ループ
 BEGIN
   FOR rec IN (SELECT employee_id FROM employees WHERE department_id = 50) LOOP
     UPDATE employees
@@ -521,7 +521,7 @@ BEGIN
 END;
 /
 
--- FAST: single SQL statement — zero context switches
+-- 速い例: 単一の SQL 文 — コンテキスト・スイッチがゼロ
 BEGIN
   UPDATE employees
   SET    salary = salary * 1.1
@@ -530,7 +530,7 @@ BEGIN
 END;
 /
 
--- FAST (when row-by-row logic is unavoidable): BULK COLLECT + FORALL
+-- 速い例（行ごとのロジックが避けられない場合）: BULK COLLECT + FORALL
 DECLARE
   TYPE id_list IS TABLE OF employees.employee_id%TYPE;
   v_ids id_list;
@@ -547,9 +547,9 @@ END;
 
 ---
 
-## Logging Patterns
+## ログ記録パターン
 
-### Error Log Table
+### エラー・ログ・テーブル
 
 ```sql
 CREATE TABLE error_log (
@@ -565,7 +565,7 @@ CREATE TABLE error_log (
 );
 ```
 
-### Logging Package
+### ログ記録パッケージ
 
 ```plsql
 CREATE OR REPLACE PACKAGE app_logger AS
@@ -583,8 +583,8 @@ END app_logger;
 
 CREATE OR REPLACE PACKAGE BODY app_logger AS
 
-  -- Uses an autonomous transaction so the log is committed
-  -- even if the calling transaction rolls back
+  -- 自律型トランザクションを使用。呼び出し元のトランザクションが
+  -- ロールバックされてもログはコミットされる。
   PROCEDURE log_error (
     p_program    IN VARCHAR2,
     p_extra_info IN VARCHAR2 DEFAULT NULL
@@ -618,7 +618,7 @@ END app_logger;
 /
 ```
 
-**Usage in exception handlers:**
+**例外ハンドラでの使用例:**
 
 ```plsql
 EXCEPTION
@@ -633,43 +633,42 @@ END;
 
 ---
 
-## Best Practices Summary
+## ベストプラクティスのまとめ
 
-- **Use BULK COLLECT + FORALL** for any loop that processes more than a few hundred rows.
-- **Limit BULK COLLECT** with a batch size (1000–10000) for large tables to control PGA usage.
-- **Always re-raise or translate** exceptions — never swallow them silently.
-- **Include FORMAT_ERROR_BACKTRACE** in error logs, not just SQLERRM.
-- **Close every cursor** you explicitly open, even in exception paths.
-- **Organize code in packages** — never deploy standalone procedures or functions in a large system.
-- **Keep package specs stable** — changing a spec invalidates all dependent objects; the body can change freely.
-- **Use NOCOPY** for large `IN OUT` collection parameters where exceptions are not a concern.
-- **Log with autonomous transactions** so log entries survive a rollback.
-- **Initialize package-level state** at the start of each request in pooled connection environments.
+- **BULK COLLECT + FORALL を使用する。** 数百行以上を処理するループに適用。
+- **BULK COLLECT に制限を設ける。** PGAの使用量を制御するため、大きなテーブルにはバッチ・サイズ（1000〜10000）を使用。
+- **例外は必ず再発生または変換する。** 決して黙って無視してはならない。
+- **FORMAT_ERROR_BACKTRACE を含める。** エラー・ログには SQLERRM だけでなく、バックトレースも含める。
+- **すべてのカーソルを閉じる。** 明示的にオープンしたカーソルは、例外パスであっても必ず閉じる。
+- **コードをパッケージにまとめる。** 大規模システムでは、スタンドアロンのプロシージャやファンクションをデプロイしてはならない。
+- **パッケージ仕様部は安定させる。** 仕様部の変更はすべての依存オブジェクトを無効化する。本体部は自由に変更可能。
+- **NOCOPY を使用する。** 例外が問題にならない読み取り専用の大きなコレクション型パラメータに適用。
+- **自律型トランザクションでログ出力する。** ログ・エントリがロールバックに耐えられるようにする。
+- **パッケージ・レベルの状態を初期化する。** 接続プール環境では、各リクエストの開始時に初期化を行う。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Problem | Fix |
+| 間違い | 問題点 | 解決策 |
 |---|---|---|
-| Row-by-row DML in a loop | Thousands of context switches; very slow | Use a set-based UPDATE/DELETE, or BULK COLLECT + FORALL |
-| `WHEN OTHERS THEN NULL` | Silently discards all errors | Always log and re-raise |
-| Forgetting to close explicit cursors | Open cursor leak; eventually hits `ORA-01000: maximum open cursors exceeded` | Use cursor FOR loops or close in exception handler |
-| `DBMS_OUTPUT.PUT_LINE` for error logging | Output is buffered; lost in production; async jobs never display it | Log to an error table using an autonomous transaction |
-| Large `BULK COLLECT` without `LIMIT` | PGA exhaustion on tables with millions of rows | Always use `LIMIT c_limit` in a fetch loop |
-| Package state in connection pools | Session variable holds value from previous user's session | Initialize package state at request start via an initialization call |
-| Using `PRAGMA AUTONOMOUS_TRANSACTION` for business logic | Hides changes from the calling transaction; makes rollback impossible | Use autonomous transactions only for logging/auditing |
+| ループ内での行ごとの DML | 数千のコンテキスト・スイッチが発生し、非常に遅くなる | 集合ベースの UPDATE/DELETE、または BULK COLLECT + FORALL を使用する |
+| `WHEN OTHERS THEN NULL` | すべてのエラーを黙って破棄する | 常にログ出力して再発生させる |
+| 明示的カーソルのクローズ忘れ | オープン・カーソル・リークが発生し、最終的に `ORA-01000: 最大オープン・カーソル数を超えました` に達する | カーソル FOR ループを使用するか、例外ハンドラでクローズする |
+| エラー・ログに `DBMS_OUTPUT.PUT_LINE` を使用 | 出力がバッファリングされ、本番環境では失われる。非同期ジョブでは表示されない | 自律型トランザクションを使用してエラー・テーブルにログを出力する |
+| `LIMIT` なしの大きな `BULK COLLECT` | 数百万行のテーブルで PGA が枯渇する | フェッチ・ループ内で常に `LIMIT c_limit` を使用する |
+| 接続プールでのパッケージ状態の放置 | セッション変数が前のユーザーのセッションの値を保持してしまう | リクエスト開始時に初期化呼び出しを通じてパッケージ状態を初期化する |
+| ビジネス・ロジックに `PRAGMA AUTONOMOUS_TRANSACTION` を使用 | 呼び出し元のトランザクションから変更が見えなくなり、ロールバックが不可能になる | 自律型トランザクションはログ記録/監査のみに使用する |
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ガイドの基本的な指針は、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- ハイブリッド環境では、デフォルトや非推奨がリリース更新によって異なる場合があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c PL/SQL Language Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/)
 - [Oracle Database 19c SQL Tuning Guide (TGSQL)](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgsql/)

@@ -1,95 +1,95 @@
-# Migrating Sybase ASE to Oracle
+# Sybase ASE から Oracle への移行
 
-## Overview
+## 概要
 
-Sybase Adaptive Server Enterprise (ASE), now SAP ASE, shares a common lineage with Microsoft SQL Server — both descended from Sybase's original database engine. As a result, Sybase ASE and SQL Server have very similar Transact-SQL (T-SQL) dialects, procedural language syntax, and architecture. Many of the concepts in the SQL Server migration guide (`migrate-sqlserver-to-oracle.md`) apply to Sybase ASE as well.
+Sybase Adaptive Server Enterprise (ASE、現在は SAP ASE) は、Microsoft SQL Server と共通の系統を持っており、共に Sybase のオリジナルのデータベース・エンジンを祖先としている。その結果、Sybase ASE と SQL Server は、Transact-SQL (T-SQL) 方言、手続き型言語の構文、およびアーキテクチャが非常によく似ている。SQL Server 移行ガイド (`migrate-sqlserver-to-oracle.md`) に記載されている概念の多くは、Sybase ASE にも適用可能である。
 
-This guide focuses on Sybase-specific behaviors and the differences between Sybase T-SQL and Oracle PL/SQL. Key areas include data type mapping, stored procedure conversion (Sybase T-SQL procedures vs Oracle PL/SQL), transaction handling differences (Sybase's chained/unchained modes), BCP (Bulk Copy Program) to SQL*Loader mapping, and Sybase-specific SQL syntax.
+本ガイドでは、Sybase 固有の挙動、および Sybase T-SQL と Oracle PL/SQL の違いに焦点を当てる。主なトピックには、データ型マッピング、ストアド・プロシージャの変換（Sybase T-SQL プロシージャ vs Oracle PL/SQL）、トランザクション処理の違い（Sybase の chained / unchained モード）、BCP (Bulk Copy Program) から SQL*Loader へのマッピング、および Sybase 固有の SQL 構文が含まれる。
 
 ---
 
-## Sybase ASE to Oracle Type Mapping
+## Sybase ASE から Oracle への型マッピング
 
-### Numeric Types
+### 数値型
 
-| Sybase ASE | Oracle | Notes |
+| Sybase ASE | Oracle | 備考 |
 |---|---|---|
-| `TINYINT` | `NUMBER(3)` | 0–255 |
-| `SMALLINT` | `NUMBER(5)` | −32,768–32,767 |
+| `TINYINT` | `NUMBER(3)` | 0 ～ 255 |
+| `SMALLINT` | `NUMBER(5)` | −32,768 ～ 32,767 |
 | `INT` / `INTEGER` | `NUMBER(10)` | |
-| `BIGINT` | `NUMBER(19)` | ASE 15.0+ |
-| `DECIMAL(p,s)` / `DEC(p,s)` | `NUMBER(p,s)` | Direct equivalent |
-| `NUMERIC(p,s)` / `NUM(p,s)` | `NUMBER(p,s)` | Direct equivalent |
-| `FLOAT(n)` | `BINARY_FLOAT` or `BINARY_DOUBLE` | |
-| `REAL` | `BINARY_FLOAT` | IEEE 754 32-bit |
-| `DOUBLE PRECISION` | `BINARY_DOUBLE` | IEEE 754 64-bit |
-| `MONEY` | `NUMBER(19,4)` | 8-byte Sybase money type |
-| `SMALLMONEY` | `NUMBER(10,4)` | 4-byte |
-| `BIT` | `NUMBER(1)` with CHECK (0,1) | Boolean bit |
+| `BIGINT` | `NUMBER(19)` | ASE 15.0 以降 |
+| `DECIMAL(p,s)` / `DEC(p,s)` | `NUMBER(p,s)` | 直接的な同等物 |
+| `NUMERIC(p,s)` / `NUM(p,s)` | `NUMBER(p,s)` | 直接的な同等物 |
+| `FLOAT(n)` | `BINARY_FLOAT` または `BINARY_DOUBLE` | |
+| `REAL` | `BINARY_FLOAT` | IEEE 754 32 ビット |
+| `DOUBLE PRECISION` | `BINARY_DOUBLE` | IEEE 754 64 ビット |
+| `MONEY` | `NUMBER(19,4)` | 8 バイトの Sybase 通貨型 |
+| `SMALLMONEY` | `NUMBER(10,4)` | 4 バイト |
+| `BIT` | CHECK (0,1) 付きの `NUMBER(1)` | 論理ビット型 |
 
-### String Types
+### 文字列型
 
-| Sybase ASE | Oracle | Notes |
+| Sybase ASE | Oracle | 備考 |
 |---|---|---|
-| `CHAR(n)` | `CHAR(n)` | Sybase max 255 bytes; Oracle max 2,000 |
-| `VARCHAR(n)` | `VARCHAR2(n)` | Sybase max 16,383 bytes; Oracle max 4,000/32,767 |
-| `NCHAR(n)` | `NCHAR(n)` | Unicode fixed-length |
-| `NVARCHAR(n)` | `NVARCHAR2(n)` | Unicode variable-length |
-| `TEXT` | `CLOB` | Up to 2 GB in Sybase |
-| `UNITEXT` | `NCLOB` | Unicode TEXT (ASE 15.0+) |
-| `IMAGE` | `BLOB` | Binary large object |
+| `CHAR(n)` | `CHAR(n)` | Sybase 最大 255 バイト、Oracle 最大 2,000 |
+| `VARCHAR(n)` | `VARCHAR2(n)` | Sybase 最大 16,383 バイト、Oracle 最大 4,000/32,767 |
+| `NCHAR(n)` | `NCHAR(n)` | Unicode 固定長 |
+| `NVARCHAR(n)` | `NVARCHAR2(n)` | Unicode 可変長 |
+| `TEXT` | `CLOB` | Sybase 最大 2 GB |
+| `UNITEXT` | `NCLOB` | Unicode TEXT (ASE 15.0 以降) |
+| `IMAGE` | `BLOB` | バイナリ・ラージ・オブジェクト |
 
-### Date / Time Types
+### 日付 / 時刻型
 
-| Sybase ASE | Oracle | Notes |
+| Sybase ASE | Oracle | 備考 |
 |---|---|---|
-| `DATETIME` | `TIMESTAMP` | Sybase resolution: 1/300th second |
-| `SMALLDATETIME` | `DATE` | Minute precision |
-| `DATE` | `DATE` | ASE 12.5.1+; Sybase DATE is date-only; Oracle includes time |
-| `TIME` | No equivalent | Use `VARCHAR2(12)` or `NUMBER` |
-| `BIGDATETIME` | `TIMESTAMP(6)` | ASE 15.7+; microsecond precision |
-| `BIGTIME` | No equivalent | ASE 15.7+; microsecond time |
+| `DATETIME` | `TIMESTAMP` | Sybase 精度：1/300 秒 |
+| `SMALLDATETIME` | `DATE` | 1 分単位の精度 |
+| `DATE` | `DATE` | ASE 12.5.1 以降。Sybase の DATE は日付のみ、Oracle は時刻も含む |
+| `TIME` | 同等の型なし | `VARCHAR2(12)` または `NUMBER` を使用 |
+| `BIGDATETIME` | `TIMESTAMP(6)` | ASE 15.7 以降。マイクロ秒の精度 |
+| `BIGTIME` | 同等の型なし | ASE 15.7 以降。マイクロ秒単位の時刻 |
 
-### Binary and Other Types
+### バイナリおよびその他の型
 
-| Sybase ASE | Oracle | Notes |
+| Sybase ASE | Oracle | 備考 |
 |---|---|---|
-| `BINARY(n)` | `RAW(n)` | Fixed-length binary; max 255 bytes in Sybase |
-| `VARBINARY(n)` | `RAW(n)` | Variable-length binary |
-| `TIMESTAMP` (row version) | No equivalent | Sybase TIMESTAMP is a row version counter, not a datetime; use `ORA_ROWSCN` |
-| `UNICHAR(n)` | `NCHAR(n)` | Sybase Unicode fixed |
-| `UNIVARCHAR(n)` | `NVARCHAR2(n)` | Sybase Unicode variable |
+| `BINARY(n)` | `RAW(n)` | 固定長バイナリ。Sybase 最大 255 バイト |
+| `VARBINARY(n)` | `RAW(n)` | 可変長バイナリ |
+| `TIMESTAMP` (行バージョン) | 同等の型なし | Sybase の TIMESTAMP は日時ではなく行バージョン・カウンタ。`ORA_ROWSCN` を使用 |
+| `UNICHAR(n)` | `NCHAR(n)` | Sybase Unicode 固定長 |
+| `UNIVARCHAR(n)` | `NVARCHAR2(n)` | Sybase Unicode 可変長 |
 
-**Important distinction:** Sybase `TIMESTAMP` is a binary(8) row version number (like SQL Server's ROWVERSION), NOT a date/time type. Applications that use Sybase TIMESTAMP for optimistic concurrency control need to be redesigned in Oracle:
+**重要な相違点：** Sybase の `TIMESTAMP` は 8 バイト・バイナリの行バージョン番号（SQL Server の ROWVERSION と同様）であり、日付/時刻型ではない。楽観的排他制御のために Sybase TIMESTAMP を使用しているアプリケーションは、Oracle では再設計が必要である。
 
 ```sql
--- Sybase: row version for optimistic locking
+-- Sybase: 楽観的ロック用の行バージョン
 CREATE TABLE products (
     product_id   INT          IDENTITY NOT NULL,
     product_name VARCHAR(200) NOT NULL,
     price        MONEY,
-    row_version  TIMESTAMP    NOT NULL  -- auto-updated binary counter
+    row_version  TIMESTAMP    NOT NULL  -- 自動更新されるバイナリ・カウンタ
 );
 
--- Oracle: use ORA_ROWSCN or add an explicit version column
+-- Oracle: ORA_ROWSCN を使用するか、明示的なバージョン列を追加する
 CREATE TABLE products (
     product_id   NUMBER       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     product_name VARCHAR2(200) NOT NULL,
     price        NUMBER(19,4),
-    version_num  NUMBER(10)   DEFAULT 0 NOT NULL  -- application-managed version
+    version_num  NUMBER(10)   DEFAULT 0 NOT NULL  -- アプリケーション管理のバージョン
 );
--- Or use ORA_ROWSCN pseudo-column (system-maintained SCN)
+-- または ORA_ROWSCN 擬似列（システム管理の SCN）を使用
 SELECT ORA_ROWSCN, product_id FROM products WHERE product_id = 42;
 ```
 
 ---
 
-## Sybase Stored Procedure Conversion to PL/SQL
+## Sybase ストアド・プロシージャの PL/SQL への変換
 
-### Basic Procedure Structure
+### 基本的なプロシージャ構造
 
 ```sql
--- Sybase T-SQL stored procedure
+-- Sybase T-SQL ストアド・プロシージャ
 CREATE PROCEDURE sp_update_salary
     @emp_id        INT,
     @new_salary    MONEY,
@@ -113,7 +113,7 @@ BEGIN
 END;
 GO
 
--- Oracle PL/SQL equivalent
+-- Oracle PL/SQL 同等実装
 CREATE OR REPLACE PROCEDURE sp_update_salary(
     p_emp_id        IN  NUMBER,
     p_new_salary    IN  NUMBER,
@@ -135,7 +135,7 @@ END sp_update_salary;
 /
 ```
 
-### Variable Declaration
+### 変数の宣言
 
 ```sql
 -- Sybase
@@ -157,7 +157,7 @@ END;
 /
 ```
 
-### Control Flow
+### 制御フロー
 
 ```sql
 -- Sybase: IF / ELSE
@@ -179,7 +179,7 @@ END IF;
 ```
 
 ```sql
--- Sybase: WHILE loop with BREAK/CONTINUE
+-- Sybase: BREAK/CONTINUE を使用した WHILE ループ
 DECLARE @i INT = 1;
 WHILE @i <= 100
 BEGIN
@@ -210,12 +210,12 @@ END;
 /
 ```
 
-### Error Handling
+### エラー処理
 
-Sybase T-SQL uses `@@ERROR` (a global variable that must be checked after each statement) and `RAISERROR`. Oracle uses structured exception handling blocks.
+Sybase T-SQL は `@@ERROR`（各ステートメントの後にチェックする必要があるグローバル変数）と `RAISERROR` を使用する。Oracle は構造化された例外処理ブロックを使用する。
 
 ```sql
--- Sybase: check @@ERROR after each statement
+-- Sybase: 各ステートメントの後に @@ERROR をチェック
 BEGIN TRANSACTION;
 
 INSERT INTO orders (customer_id, total) VALUES (@cust_id, @total);
@@ -238,7 +238,7 @@ END;
 COMMIT TRANSACTION;
 RETURN 0;
 
--- Oracle PL/SQL: structured exception handling
+-- Oracle PL/SQL: 構造化例外処理
 BEGIN
     INSERT INTO orders (customer_id, total) VALUES (v_cust_id, v_total);
     UPDATE customer_stats SET order_count = order_count + 1
@@ -255,10 +255,10 @@ END;
 /
 ```
 
-### Temporary Tables
+### 一時テーブル
 
 ```sql
--- Sybase: local temp table (session-scoped)
+-- Sybase: ローカル一時テーブル (セッション・スコープ)
 CREATE TABLE #staging (
     id    INT IDENTITY,
     value VARCHAR(100)
@@ -267,26 +267,26 @@ INSERT INTO #staging (value) VALUES ('test');
 SELECT * FROM #staging;
 DROP TABLE #staging;
 
--- Sybase: global temp table (accessible across sessions)
+-- Sybase: グローバル一時テーブル (セッションを跨いでアクセス可能)
 CREATE TABLE ##global_staging (id INT, value VARCHAR(100));
 
--- Oracle: Global Temporary Table (created once, data is session-scoped)
+-- Oracle: グローバル一時表 (一度作成すれば、データはセッション・スコープ)
 CREATE GLOBAL TEMPORARY TABLE staging (
     id    NUMBER,
     value VARCHAR2(100)
 )
-ON COMMIT DELETE ROWS;  -- or ON COMMIT PRESERVE ROWS
+ON COMMIT DELETE ROWS;  -- または ON COMMIT PRESERVE ROWS
 
--- Usage (same as regular table; Oracle GTTs persist across sessions but not their data)
+-- 使用方法 (通常のテーブルと同様。Oracle の GTT 自体はセッションを跨いで永続するがデータは永続しない)
 INSERT INTO staging (id, value) VALUES (1, 'test');
 SELECT * FROM staging;
--- Data automatically cleared at end of transaction (DELETE ROWS) or session (PRESERVE ROWS)
+-- データの削除タイミング：トランザクション終了時 (DELETE ROWS) またはセッション終了時 (PRESERVE ROWS)
 ```
 
-### Cursors
+### カーソル
 
 ```sql
--- Sybase cursor
+-- Sybase カーソル
 DECLARE order_cursor CURSOR FOR
     SELECT order_id, total FROM orders WHERE status = 'pending';
 
@@ -294,22 +294,22 @@ OPEN order_cursor;
 FETCH order_cursor INTO @oid, @total;
 WHILE @@SQLSTATUS = 0
 BEGIN
-    -- process @oid, @total
+    -- @oid, @total の処理...
     FETCH order_cursor INTO @oid, @total;
 END;
 CLOSE order_cursor;
 DEALLOCATE CURSOR order_cursor;
 
--- Oracle PL/SQL cursor (recommended FOR loop approach)
+-- Oracle PL/SQL カーソル (推奨される FOR ループ・アプローチ)
 BEGIN
     FOR rec IN (SELECT order_id, total FROM orders WHERE status = 'pending') LOOP
-        -- process rec.order_id, rec.total
+        -- rec.order_id, rec.total を使用した処理...
         NULL;
     END LOOP;
 END;
 /
 
--- Oracle explicit cursor (for more control)
+-- Oracle 明示的カーソル (より細かな制御が必要な場合)
 DECLARE
     CURSOR order_cur IS
         SELECT order_id, total FROM orders WHERE status = 'pending';
@@ -320,7 +320,7 @@ BEGIN
     LOOP
         FETCH order_cur INTO v_oid, v_total;
         EXIT WHEN order_cur%NOTFOUND;
-        -- process
+        -- 処理...
     END LOOP;
     CLOSE order_cur;
 END;
@@ -329,42 +329,42 @@ END;
 
 ---
 
-## Transaction Handling Differences
+## トランザクション処理の違い
 
-This is one of the most critical areas of Sybase-to-Oracle migration.
+これは、Sybase から Oracle への移行における最も重要な領域の 1 つである。
 
-### Sybase Transaction Modes
+### Sybase のトランザクション・モード
 
-Sybase ASE operates in two modes:
+Sybase ASE は 2 つのモードで動作する。
 
-**Unchained mode (default):** Each DML statement is its own implicit transaction. You must explicitly `BEGIN TRANSACTION` to group statements.
+**Unchained モード (デフォルト) :** 各 DML ステートメントがそれぞれ暗黙のトランザクションとなる。ステートメントをグループ化するには、明示的に `BEGIN TRANSACTION` を実行する必要がある。
 
-**Chained mode (ANSI-compatible):** Each DML statement begins an implicit transaction that must be explicitly committed or rolled back (similar to Oracle's behavior).
+**Chained モード (ANSI 準拠) :** 各 DML ステートメントが暗黙のトランザクションを開始し、明示的にコミットまたはロールバックする必要がある（Oracle の動作に近い）。
 
 ```sql
--- Sybase unchained mode (default): each statement auto-commits
+-- Sybase unchained モード (デフォルト) : 各ステートメントはオートコミットされる
 UPDATE accounts SET balance = balance - 100 WHERE id = 1;
--- ^ This is immediately committed — no explicit COMMIT needed
+-- ^ これは即座にコミットされ、明示的な COMMIT は不要
 
--- Sybase: explicit transaction grouping
+-- Sybase: 明示的なトランザクションのグループ化
 BEGIN TRANSACTION;
 UPDATE accounts SET balance = balance - 100 WHERE id = 1;
 UPDATE accounts SET balance = balance + 100 WHERE id = 2;
 COMMIT TRANSACTION;
 ```
 
-### Oracle Transaction Model
+### Oracle のトランザクション・モデル
 
-Oracle always operates in chained (ANSI) mode. Every DML statement is part of an open transaction until explicitly committed or rolled back. DDL auto-commits.
+Oracle は常に chained (ANSI) モードで動作する。すべての DML ステートメントは、明示的にコミットまたはロールバックされるまで、開いているトランザクションの一部である。DDL はオートコミットされる。
 
 ```sql
--- Oracle: implicit transaction for all DML
+-- Oracle: すべての DML は暗黙のトランザクション内にある
 UPDATE accounts SET balance = balance - 100 WHERE id = 1;
--- NOT committed yet — must COMMIT explicitly
+-- 未コミットのため、明示的に COMMIT する必要がある
 UPDATE accounts SET balance = balance + 100 WHERE id = 2;
 COMMIT;
 
--- Rollback if something goes wrong
+-- エラー発生時のロールバック
 BEGIN
     UPDATE accounts SET balance = balance - 100 WHERE id = 1;
     UPDATE accounts SET balance = balance + 100 WHERE id = 2;
@@ -377,7 +377,7 @@ END;
 /
 ```
 
-**Migration implication:** Sybase applications running in unchained mode have auto-commit behavior for individual statements. When migrating to Oracle, these applications will find that uncommitted DML is visible within the same session but NOT to other sessions. Application connection management and transaction scoping must be reviewed carefully.
+**移行への影響：** unchained モードで動作している Sybase アプリケーションは、個々のステートメントに対してオートコミット動作を行う。Oracle に移行すると、これらのアプリケーションでは、コミットされていない DML が同じセッション内では見えるが、他のセッションからは見えないことに注意が必要である。アプリケーションの接続管理とトランザクション・スコープを慎重に見直すこと。
 
 ### SAVE TRANSACTION → SAVEPOINT
 
@@ -387,43 +387,43 @@ BEGIN TRANSACTION;
 INSERT INTO t1 (col) VALUES ('a');
 SAVE TRANSACTION sp1;
 INSERT INTO t2 (col) VALUES ('b');
--- Something went wrong:
-ROLLBACK TRANSACTION sp1;  -- rolls back to savepoint, not full transaction
+-- エラー発生時：
+ROLLBACK TRANSACTION sp1;  -- トランザクション全体ではなくセーブポイントまで戻る
 COMMIT TRANSACTION;
 
 -- Oracle
 INSERT INTO t1 (col) VALUES ('a');
 SAVEPOINT sp1;
 INSERT INTO t2 (col) VALUES ('b');
--- Something went wrong:
+-- エラー発生時：
 ROLLBACK TO SAVEPOINT sp1;
 COMMIT;
 ```
 
 ---
 
-## BCP to SQL*Loader
+## BCP から SQL*Loader へ
 
-Sybase's Bulk Copy Program (BCP) is the primary tool for bulk data export and import.
+Sybase の Bulk Copy Program (BCP) は、一括データの抽出およびロードに使用される主要なツールである。
 
-### BCP Export from Sybase
+### Sybase からの BCP エクスポート
 
 ```bash
-# BCP export — native format (binary, Sybase-specific)
+# BCP エクスポート — ネイティブ形式 (バイナリ、Sybase 固有)
 bcp mydb..customers out /data/customers.dat -Smyhost -Umyuser -Pmypass -n
 
-# BCP export — character format (portable, recommended for Oracle migration)
+# BCP エクスポート — 文字形式 (移植性があり、Oracle への移行に推奨)
 bcp mydb..customers out /data/customers.csv -Smyhost -Umyuser -Pmypass -c -t"," -r"\n"
 
-# BCP export with format file
+# フォーマット・ファイルを使用した BCP エクスポート
 bcp mydb..customers format nul -Smyhost -Umyuser -Pmypass -c -t"," -f customers.fmt
 bcp mydb..customers out /data/customers.dat -Smyhost -Umyuser -Pmypass -f customers.fmt
 ```
 
-### SQL*Loader Import to Oracle
+### Oracle への SQL*Loader インポート
 
 ```
--- SQL*Loader control file: customers.ctl
+-- SQL*Loader コントロール・ファイル: customers.ctl
 OPTIONS (DIRECT=TRUE, ROWS=5000, ERRORS=100)
 LOAD DATA
 INFILE '/data/customers.csv'
@@ -448,26 +448,26 @@ sqlldr userid=myuser/mypass@mydb control=customers.ctl log=customers.log bad=cus
 
 ---
 
-## Sybase-Specific SQL → Oracle Equivalents
+## Sybase 固有の SQL → Oracle の同等物
 
-### Global Variables → Context Functions
+### グローバル変数 → コンテキスト関数
 
-| Sybase | Oracle Equivalent |
+| Sybase | Oracle 同等物 |
 |---|---|
-| `@@ROWCOUNT` | `SQL%ROWCOUNT` (in PL/SQL) |
-| `@@ERROR` | `SQLCODE` (in PL/SQL exception section) |
-| `@@TRANCOUNT` | No direct equivalent |
-| `@@IDENTITY` | Use `RETURNING INTO` clause |
+| `@@ROWCOUNT` | `SQL%ROWCOUNT` (PL/SQL 内) |
+| `@@ERROR` | `SQLCODE` (PL/SQL 例外セクション内) |
+| `@@TRANCOUNT` | 直接的な同等物なし |
+| `@@IDENTITY` | `RETURNING INTO` 句を使用 |
 | `@@SPID` | `SYS_CONTEXT('USERENV', 'SID')` |
 | `@@VERSION` | `SELECT * FROM v$version` |
 | `@@SERVERNAME` | `SYS_CONTEXT('USERENV', 'DB_NAME')` |
 | `@@DBTS` | `SELECT SYSTIMESTAMP FROM DUAL` |
-| `GETDATE()` | `SYSDATE` or `SYSTIMESTAMP` |
+| `GETDATE()` | `SYSDATE` または `SYSTIMESTAMP` |
 | `OBJECT_ID('tablename')` | `SELECT object_id FROM user_objects WHERE object_name = 'TABLENAME'` |
 
-### String Functions
+### 文字列関数
 
-| Sybase Function | Oracle Equivalent |
+| Sybase 関数 | Oracle 同等物 |
 |---|---|
 | `CHARINDEX(sub, s [, start])` | `INSTR(s, sub [, start])` |
 | `PATINDEX('%pat%', s)` | `REGEXP_INSTR(s, 'pat')` |
@@ -475,24 +475,24 @@ sqlldr userid=myuser/mypass@mydb control=customers.ctl log=customers.log bad=cus
 | `RIGHT(s, n)` | `SUBSTR(s, -n)` |
 | `STUFF(s, start, len, replacement)` | `SUBSTR(s,1,start-1) \|\| replacement \|\| SUBSTR(s,start+len)` |
 | `SPACE(n)` | `RPAD(' ', n)` |
-| `REPLICATE(s, n)` | Custom PL/SQL function or `RPAD(s, n*LENGTH(s), s)` |
-| `REVERSE(s)` | Custom PL/SQL function |
+| `REPLICATE(s, n)` | カスタム PL/SQL 関数、または `RPAD(s, n*LENGTH(s), s)` |
+| `REVERSE(s)` | カスタム PL/SQL 関数 |
 | `STR(n, len, dec)` | `TO_CHAR(n, RPAD('9', len-dec-1, '9') \|\| '.' \|\| RPAD('0', dec, '0'))` |
-| `ASCII(s)` | `ASCII(s)` — same |
+| `ASCII(s)` | `ASCII(s)` — 同様 |
 | `CHAR(n)` | `CHR(n)` |
-| `SOUNDEX(s)` | `SOUNDEX(s)` — same |
-| `DIFFERENCE(s1, s2)` | No equivalent; compare SOUNDEX values |
+| `SOUNDEX(s)` | `SOUNDEX(s)` — 同様 |
+| `DIFFERENCE(s1, s2)` | 同等の関数なし。SOUNDEX 値を手動で比較 |
 
-### Date Functions
+### 日付関数
 
-| Sybase Function | Oracle Equivalent |
+| Sybase 関数 | Oracle 同等物 |
 |---|---|
 | `GETDATE()` | `SYSDATE` |
 | `GETUTCDATE()` | `SYS_EXTRACT_UTC(SYSTIMESTAMP)` |
-| `DATEADD(unit, n, d)` | `d + n` (days), `ADD_MONTHS(d, n)` (months), etc. |
-| `DATEDIFF(unit, d1, d2)` | `d2 - d1` (days), `MONTHS_BETWEEN(d2, d1)` (months) |
+| `DATEADD(unit, n, d)` | `d + n` (日数), `ADD_MONTHS(d, n)` (月数) など |
+| `DATEDIFF(unit, d1, d2)` | `d2 - d1` (日数), `MONTHS_BETWEEN(d2, d1)` (月数) |
 | `DATEPART(unit, d)` | `EXTRACT(unit FROM d)` |
-| `DATENAME(unit, d)` | `TO_CHAR(d, 'MONTH')` etc. |
+| `DATENAME(unit, d)` | `TO_CHAR(d, 'MONTH')` など |
 | `DAY(d)` | `EXTRACT(DAY FROM d)` |
 | `MONTH(d)` | `EXTRACT(MONTH FROM d)` |
 | `YEAR(d)` | `EXTRACT(YEAR FROM d)` |
@@ -500,31 +500,31 @@ sqlldr userid=myuser/mypass@mydb control=customers.ctl log=customers.log bad=cus
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Determine Sybase transaction mode before migrating application code.** Run `SELECT @@TRANCHAINED` in Sybase to see whether applications use chained (1) or unchained (0) mode. If unchained, the application will need explicit transaction management added for Oracle.
+1. **移行前に Sybase のトランザクション・モードを確認する。** Sybase で `SELECT @@TRANCHAINED` を実行し、アプリケーションが chained (1) または unchained (0) モードのどちらを使用しているかを確認すること。unchained の場合、Oracle では明示的なトランザクション管理を追加する必要がある。
 
-2. **Audit all @@ERROR checks.** Sybase code that checks `@@ERROR` after every statement is verbose and fragile. Oracle PL/SQL's exception handling block is cleaner — refactor the error handling during migration rather than replicating the @@ERROR pattern.
+2. **@@ERROR チェックをすべて監査する。** すべてのステートメントの後に `@@ERROR` をチェックする Sybase コードは冗長で壊れやすい。Oracle PL/SQL の例外処理ブロックの方が洗練されているため、移行時に @@ERROR パターンをそのまま再現するのではなく、エラー処理をリファクタリングすること。
 
-3. **Test IDENTITY column migration carefully.** Sybase IDENTITY columns behave like Oracle identity columns but have different starting and step options. Verify that migrated IDENTITY columns start above the maximum existing ID after data migration.
+3. **IDENTITY 列の移行を慎重にテストする。** Sybase の IDENTITY 列は Oracle のものと似ているが、開始値とステップ値のオプションが異なる。データ移行後、Oracle のアイデンティティ列の開始値が既存 ID の最大値より大きくなるように設定すること。
 
-4. **Handle TEXT and IMAGE columns specially.** Sybase TEXT/IMAGE LOBs require special handling in BCP and are stored differently from regular columns. Use the character format BCP export and validate LOB content sizes before importing to Oracle CLOB/BLOB.
+4. **TEXT および IMAGE 列を特別に処理する。** Sybase の TEXT/IMAGE LOB は、BCP での特別な処理が必要であり、通常の列とは格納方法が異なる。文字形式の BCP エクスポートを使用し、Oracle の CLOB/BLOB にインポートする前に LOB コンテンツのサイズを検証すること。
 
-5. **Map Sybase rules and defaults.** Sybase has `CREATE RULE` and `CREATE DEFAULT` objects that are bound to columns or user-defined types. These translate to Oracle CHECK constraints and DEFAULT column values respectively.
+5. **Sybase のルール（Rules）とデフォルト（Defaults）をマッピングする。** Sybase には列やユーザー定義型にバインドされる `CREATE RULE` および `CREATE DEFAULT` オブジェクトがある。これらはそれぞれ Oracle の CHECK 制約および列の DEFAULT 値に変換する。
 
 ```sql
--- Sybase rule (separate object)
+-- Sybase ルール (独立したオブジェクト)
 CREATE RULE salary_rule AS @salary >= 0;
 EXEC sp_bindrule 'salary_rule', 'employees.salary';
 
--- Oracle CHECK constraint (inline)
+-- Oracle CHECK 制約 (インライン)
 CREATE TABLE employees (
     emp_id NUMBER PRIMARY KEY,
     salary NUMBER(10,2) CHECK (salary >= 0)
 );
 ```
 
-6. **Review Sybase user-defined datatypes.** Sybase supports user-defined types that combine a base type with rules and defaults. Oracle uses domains (23c) or just base types with constraints.
+6. **Sybase のユーザー定義データ型 (UDT) を見直す。** Sybase は基本型にルールやデフォルトを組み合わせたユーザー定義型をサポートしている。Oracle ではドメイン (23c) を使用するか、単純に制約付きの基本型を使用する。
 
 ```sql
 -- Sybase UDT
@@ -532,7 +532,7 @@ EXEC sp_addtype 'phone_num', 'varchar(15)', 'NOT NULL';
 CREATE RULE phone_rule AS @p LIKE '[0-9][0-9][0-9]-[0-9][0-9][0-9]-[0-9][0-9][0-9][0-9]';
 EXEC sp_bindrule phone_rule, phone_num;
 
--- Oracle: inline constraint
+-- Oracle: インライン制約
 CREATE TABLE contacts (
     phone VARCHAR2(15) NOT NULL
                        CHECK (REGEXP_LIKE(phone, '^\d{3}-\d{3}-\d{4}$'))
@@ -541,13 +541,13 @@ CREATE TABLE contacts (
 
 ---
 
-## Common Migration Pitfalls
+## よくある移行の落とし穴
 
-**Pitfall 1 — Sybase unchained auto-commit behavior:**
-The most common source of behavioral differences. In Sybase unchained mode, each DML auto-commits. In Oracle, nothing auto-commits. Applications that rely on data being committed immediately after a single UPDATE (e.g., for visibility to other sessions) will see different behavior.
+**落とし穴 1 — Sybase unchained のオートコミット挙動：**
+挙動の相違として最も一般的な原因である。Sybase unchained モードでは各 DML がオートコミットされるが、Oracle では一切オートコミットされない。UPDATE の直後に（他のセッションから見えるように）コミットされていることを前提としたアプリケーションは、動作が異なることになる。
 
-**Pitfall 2 — RAISERROR syntax:**
-Sybase RAISERROR uses error number first, then message. Oracle RAISE_APPLICATION_ERROR takes a negative number and a message string. Custom error numbers in Sybase can be any user-defined error number; in Oracle they must be in the range -20000 to -20999.
+**落とし穴 2 — RAISERROR 構文：**
+Sybase の `RAISERROR` は、エラー番号が最初で、次にメッセージが来る。Oracle の `RAISE_APPLICATION_ERROR` は負の番号とメッセージ文字列を受け取る。また、Oracle で定義できるユーザー・エラー番号の範囲は -20000 から -20999 である。
 ```sql
 -- Sybase
 RAISERROR 20001 "Record not found";
@@ -556,44 +556,35 @@ RAISERROR 20001 "Record not found";
 RAISE_APPLICATION_ERROR(-20001, 'Record not found');
 ```
 
-**Pitfall 3 — TIMESTAMP as row version:**
-As noted in the type mapping, Sybase TIMESTAMP is NOT a datetime — it is a binary row version counter. Any Oracle code that treats this column as a date will fail. Redesign the optimistic concurrency pattern.
+**落とし穴 3 — 行バージョンとしての TIMESTAMP：**
+型マッピングで述べたように、Sybase の `TIMESTAMP` は日時ではない。この列を日付として扱う Oracle コードは失敗するため、楽観的排他制御のパターンを再設計すること。
 
-**Pitfall 4 — Subquery result comparison:**
-Sybase allows some non-standard subquery comparisons. Oracle enforces strict subquery semantics. Review all `= (subquery)` patterns to ensure the subquery truly returns exactly one row, or add appropriate handling:
+**落とし穴 4 — 副クエリ結果の比較：**
+Sybase は一部の非標準的な副クエリ比較を許可するが、Oracle は厳格な副クエリ・セマンティクスを強制する。`= (副クエリ)` パターンが、常に正確に 1 行を返すことを確認するか、適切に修正すること。
 ```sql
--- Risky in Sybase (silently returns first row if multiple rows)
+-- Sybase ではリスクあり (複数行ある場合に最初の行を黙って返す)
 WHERE emp_id = (SELECT emp_id FROM employees WHERE dept = 'IT');
 
--- Oracle: raises ORA-01427 if subquery returns more than one row
--- Fix: use IN instead
+-- Oracle: 副クエリが 2 行以上返すと ORA-01427 が発生
+-- 修正：IN を使用する
 WHERE emp_id IN (SELECT emp_id FROM employees WHERE dept = 'IT');
 ```
 
-**Pitfall 5 — Sybase lock escalation:**
-Sybase has page-level locking and row-level locking modes. Oracle uses MVCC and row-level locking exclusively. Applications designed around Sybase's locking behavior (especially those that try to read uncommitted data) need MVCC review.
+**落とし穴 5 — Sybase のロック・エスカレーション：**
+Sybase にはページ・レベルおよび行レベルのロック・モードがある。Oracle は MVCC と行レベル・ロックを排他的に使用する。Sybase のロック挙動（特に未コミット・データの読み取り）を中心とした設計のアプリケーションは、MVCC への見直しが必要である。
 
-**Pitfall 6 — NULL handling in aggregates:**
-Both Sybase and Oracle ignore NULL in aggregates (COUNT, SUM, etc.) following ANSI SQL. This is compatible, but Sybase's `ISNULL()` function needs to be replaced with Oracle's `NVL()`:
-```sql
--- Sybase
-SELECT ISNULL(phone, 'N/A') FROM contacts;
-
--- Oracle
-SELECT NVL(phone, 'N/A') FROM contacts;
-SELECT COALESCE(phone, 'N/A') FROM contacts;
-```
+**落とし穴 6 — 集計関数における NULL 処理：**
+Sybase と Oracle は共に、ANSI SQL に従って集計関数 (COUNT, SUM 等) で NULL を無視する。これは互換性があるが、Sybase の `ISNULL()` 関数は Oracle の `NVL()` または `COALESCE()` に置き換える必要がある。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ファイル内の基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c, 23c, または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 複数バージョンをサポートする環境では、リリース更新（RU）によってデフォルト値や非推奨機能が異なる場合があるため、19c と 26ai の両方で動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c SQL Language Reference — Data Types](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/Data-Types.html)
 - [Oracle Database 19c SQL Language Reference — CREATE TABLE](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-TABLE.html)

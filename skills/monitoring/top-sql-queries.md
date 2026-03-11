@@ -1,28 +1,28 @@
-# Top SQL Queries and SQL Monitoring
+# Top SQL クエリと SQL モニタリング
 
-## Overview
+## 概要
 
-Identifying and tuning the most resource-intensive SQL statements is one of the highest-leverage activities a DBA can perform. A single poorly-written query can consume 90% of the CPU on a busy system, and addressing it can deliver performance improvements that affect every user. Oracle provides multiple views and tools for finding these queries—from the real-time `V$SQL` and `V$SQLAREA` views to the historical Automatic Workload Repository (AWR) tables like `DBA_HIST_SQLSTAT`.
+最もリソースを消費する SQL ステートメントを特定し、チューニングすることは、DBA が行うことができる最も効果の高い活動の 1 つである。たった 1 つの不適切に書かれたクエリが、高負荷なシステムの CPU の 90% を消費することもあり、それに対処することで、すべてのユーザーに影響を与えるパフォーマンス向上を実現できる。Oracle は、これらのクエリを見つけるための複数のビューとツールを提供している。リアルタイムの `V$SQL` や `V$SQLAREA` ビューから、`DBA_HIST_SQLSTAT` のような過去の自動ワークロード・リポジトリ (AWR) の表まで多岐にわたる。
 
-This guide covers the key views for finding top SQL by various resource dimensions, AWR-based historical analysis, and the real-time SQL monitoring feature (`V$SQL_MONITOR`) that provides execution-level visibility into long-running queries.
+このガイドでは、さまざまなリポジトリ次元で Top SQL を見つけるための主要なビュー、AWR に基づく履歴分析、および実行中に長時間実行クエリの可視性を提供するリアルタイム SQL モニタリング機能 (`V$SQL_MONITOR`) について説明する。
 
 ---
 
-## Key Views: V$SQL and V$SQLAREA
+## 主要なビュー: V$SQL と V$SQLAREA
 
 ### V$SQL vs V$SQLAREA
 
-| View | Granularity | Use Case |
+| ビュー | 粒度 | ユースケース |
 |------|-------------|----------|
-| `V$SQL` | One row per child cursor (per execution context) | Detailed analysis including bind variable peeking, session-specific stats |
-| `V$SQLAREA` | One row per parent cursor (aggregates child cursors) | Summary statistics across all executions of the same SQL text |
+| `V$SQL` | 子カーソルごと (実行コンテキストごと) に 1 行 | バインド変数の覗き見、セッション固有の統計を含む詳細な分析 |
+| `V$SQLAREA` | 親カーソルごとに 1 行 (子カーソルを集約) | 同じ SQL テキストのすべての実行にわたるサマリー統計 |
 
-In practice, start with `V$SQLAREA` for top-N queries by total resource consumption, then drill into `V$SQL` for specific execution plans and bind variable details.
+実際には、まず `V$SQLAREA` で総リソース消費量が多い Top-N クエリを特定し、次に `V$SQL` で特定の実行計画やバインド変数の詳細を調査する。
 
-### Essential Columns
+### 重要な列
 
 ```sql
--- Explore available columns (subset of the most important)
+-- 利用可能な列（最も重要なサブセット）を探索する
 SELECT column_name, comments
 FROM   dict_columns
 WHERE  table_name = 'V$SQLAREA'
@@ -37,32 +37,32 @@ WHERE  table_name = 'V$SQLAREA'
        );
 ```
 
-Key column descriptions:
+主要な列の説明:
 
-| Column | Unit | Description |
+| 列名 | 単位 | 説明 |
 |--------|------|-------------|
-| `SQL_ID` | — | Unique SQL identifier (14-character hash) |
-| `EXECUTIONS` | count | Number of times this cursor was executed |
-| `ELAPSED_TIME` | microseconds | Total wall-clock time across all executions |
-| `CPU_TIME` | microseconds | Total CPU time across all executions |
-| `BUFFER_GETS` | blocks | Total logical reads (memory reads) |
-| `DISK_READS` | blocks | Total physical reads from disk |
-| `ROWS_PROCESSED` | rows | Total rows returned/processed |
-| `SORTS` | count | Total sorts performed |
-| `SHARABLE_MEM` | bytes | Memory used for this cursor in shared pool |
-| `LAST_ACTIVE_TIME` | date | Last time this cursor was active |
-| `PLAN_HASH_VALUE` | number | Hash of the current execution plan |
+| `SQL_ID` | — | 一意の SQL 識別子 (14 文字のハッシュ) |
+| `EXECUTIONS` | 回数 | このカーソルが実行された回数 |
+| `ELAPSED_TIME` | マイクロ秒 | すべての実行にわたる実時間の合計 |
+| `CPU_TIME` | マイクロ秒 | すべての実行にわたる CPU 時間の合計 |
+| `BUFFER_GETS` | ブロック数 | 論理読み取り (メモリー読み取り) の合計 |
+| `DISK_READS` | ブロック数 | ディスクからの物理読み取りの合計 |
+| `ROWS_PROCESSED` | 行数 | 返された/処理された行の合計 |
+| `SORTS` | 回数 | 実行されたソートの合計 |
+| `SHARABLE_MEM` | バイト | 共有プール内のこのカーソルで使用されるメモリー |
+| `LAST_ACTIVE_TIME` | 日付 | このカーソルが最後にアクティブになった時刻 |
+| `PLAN_HASH_VALUE` | 数値 | 現在の実行計画のハッシュ値 |
 
 ---
 
-## Finding Top SQL by Resource Dimension
+## リソース次元による Top SQL の特定
 
-### Top SQL by CPU Time
+### CPU 時間による Top SQL
 
-CPU-heavy queries are often those performing full table scans, excessive sorting, or processing large result sets without appropriate filtering.
+CPU 負荷の高いクエリは、全表スキャン、過度なソート、または適切なフィルタリングなしでの大規模な結果セットの処理を行っていることが多い。
 
 ```sql
--- Top 20 SQL by total CPU time (all executions combined)
+-- 総 CPU 時間（すべての実行の合計）による Top 20 SQL
 SELECT sql_id,
        ROUND(cpu_time / 1e6, 1)              AS total_cpu_sec,
        ROUND(cpu_time / NULLIF(executions, 0) / 1e6, 3) AS avg_cpu_sec,
@@ -78,12 +78,12 @@ ORDER BY cpu_time DESC
 FETCH FIRST 20 ROWS ONLY;
 ```
 
-### Top SQL by Elapsed Time
+### 経過時間による Top SQL
 
-Elapsed time captures wall-clock time including waits (I/O, locking, network). High elapsed time with low CPU time indicates wait-bound SQL.
+経過時間 (Elapsed Time) は、待機時間 (I/O、ロック、ネットワーク) を含む実時間を捉える。CPU 時間は短いが経過時間が長い場合は、待機にボトルネックがある SQL を示している。
 
 ```sql
--- Top 20 SQL by total elapsed time
+-- 総経過時間による Top 20 SQL
 SELECT sql_id,
        ROUND(elapsed_time / 1e6, 1)               AS total_elapsed_sec,
        ROUND(elapsed_time / NULLIF(executions, 0) / 1e6, 3) AS avg_elapsed_sec,
@@ -100,12 +100,12 @@ ORDER BY elapsed_time DESC
 FETCH FIRST 20 ROWS ONLY;
 ```
 
-### Top SQL by Physical I/O (Disk Reads)
+### 物理 I/O (ディスク読み取り) による Top SQL
 
-High disk reads often indicate missing or unused indexes, full table scans on large tables, or insufficient buffer cache size.
+ディスク読み取りが多い場合は、インデックスの欠落や未使用、大規模な表の全表スキャン、またはバッファ・キャッシュ・サイズの不足を示していることが多い。
 
 ```sql
--- Top 20 SQL by total physical reads
+-- 総物理読み取りによる Top 20 SQL
 SELECT sql_id,
        disk_reads,
        ROUND(disk_reads / NULLIF(executions, 0), 0) AS avg_disk_reads,
@@ -122,12 +122,12 @@ ORDER BY disk_reads DESC
 FETCH FIRST 20 ROWS ONLY;
 ```
 
-### Top SQL by Logical Reads (Buffer Gets)
+### 論理読み取り (バッファ・ゲット) による Top SQL
 
-High buffer gets can indicate full scans, inefficient index usage, or queries that scan more data than necessary. This is a good proxy for memory pressure.
+バッファ・ゲットが多い場合は、全表スキャン、非効率なインデックス使用、または必要以上のデータをスキャンするクエリを示している。これはメモリー圧迫の目安となる。
 
 ```sql
--- Top 20 SQL by total buffer gets (logical I/O)
+-- 総論理読み取り (論理 I/O) による Top 20 SQL
 SELECT sql_id,
        buffer_gets,
        ROUND(buffer_gets / NULLIF(executions, 0), 0) AS avg_buffer_gets,
@@ -143,12 +143,12 @@ ORDER BY buffer_gets DESC
 FETCH FIRST 20 ROWS ONLY;
 ```
 
-### High-Frequency vs. High-Impact Queries
+### 高頻度クエリ vs 高負荷クエリ
 
-Some queries are expensive per execution; others are cheap per execution but run thousands of times. Distinguish between them:
+実行あたりのコストは高いクエリもあれば、実行あたりのコストは低いが数千回実行されるクエリもある。これらを区別する：
 
 ```sql
--- High frequency, low per-execution cost (potential for optimization via result caching, batching)
+-- 実行頻度が高く、実行あたりのコストが低いクエリ (結果キャッシュやバッチ化による最適化の可能性)
 SELECT sql_id,
        executions,
        ROUND(elapsed_time / NULLIF(executions, 0) / 1000, 2) AS avg_ms,
@@ -162,14 +162,14 @@ FETCH FIRST 20 ROWS ONLY;
 ```
 
 ```sql
--- Multi-dimensional ranking: top SQL by weighted impact score
+-- 多次元ランキング：加重インパクト・スコアによる Top SQL
 SELECT sql_id,
        executions,
        ROUND(elapsed_time / 1e6, 1)               AS elapsed_sec,
        ROUND(cpu_time     / 1e6, 1)               AS cpu_sec,
        buffer_gets,
        disk_reads,
-       -- Weighted composite score
+       -- 加重複合スコア
        ROUND(
            (elapsed_time / NULLIF(MAX(elapsed_time) OVER (), 0) * 40) +
            (cpu_time     / NULLIF(MAX(cpu_time)     OVER (), 0) * 30) +
@@ -183,12 +183,12 @@ ORDER BY impact_score DESC
 FETCH FIRST 30 ROWS ONLY;
 ```
 
-### Retrieving the Full SQL Text
+### 完全な SQL テキストの取得
 
-`V$SQLAREA.SQL_TEXT` is truncated to 1000 characters. Use `V$SQLTEXT` for the full statement:
+`V$SQLAREA.SQL_TEXT` は 1000 文字に切り捨てられる。完全なステートメントを取得するには `V$SQLTEXT` を使用する：
 
 ```sql
--- Get full SQL text for a specific SQL_ID
+-- 指定した SQL_ID の完全な SQL テキストを取得する
 SELECT piece,
        sql_text
 FROM   v$sqltext
@@ -197,7 +197,7 @@ ORDER BY piece;
 ```
 
 ```sql
--- Or use V$SQL.SQL_FULLTEXT (CLOB, available in 11g+)
+-- または V$SQL.SQL_FULLTEXT を使用する (CLOB, 11g 以降で利用可能)
 SELECT sql_fulltext
 FROM   v$sql
 WHERE  sql_id = 'abc123def456g'
@@ -206,30 +206,30 @@ WHERE  sql_id = 'abc123def456g'
 
 ---
 
-## AWR Top SQL Queries
+## AWR Top SQL クエリ
 
-The Automatic Workload Repository (AWR) captures snapshots of key statistics every hour (by default). This historical data is stored in `DBA_HIST_*` tables and enables trending and comparison across time periods.
+自動ワークロード・リポジトリ (AWR) は、主要な統計情報のスナップショットを 1 時間おきに (デフォルト) キャプチャする。この履歴データは `DBA_HIST_*` 表に保存され、時間の経過に伴う傾向分析や期間の比較を可能にする。
 
-**Requires:** Oracle Diagnostics Pack license for production use of AWR data.
+**必須:** 本番環境で AWR データを使用するには、Oracle Diagnostics Pack のライセンスが必要である。
 
-### Finding the Snapshot Range
+### スナップショット範囲の特定
 
 ```sql
--- Available AWR snapshots
+-- 利用可能な AWR スナップショット
 SELECT snap_id,
        begin_interval_time,
        end_interval_time
 FROM   dba_hist_snapshot
 ORDER BY snap_id DESC
-FETCH FIRST 24 ROWS ONLY;  -- Last 24 snapshots (typically 24 hours)
+FETCH FIRST 24 ROWS ONLY;  -- 直近 24 スナップショット (通常 24 時間分)
 ```
 
-### DBA_HIST_SQLSTAT: Core AWR SQL Statistics
+### DBA_HIST_SQLSTAT: AWR SQL 統計の核心
 
-`DBA_HIST_SQLSTAT` stores per-snapshot SQL statistics, linked to `DBA_HIST_SQLTEXT` for the SQL text.
+`DBA_HIST_SQLSTAT` は、スナップショットごとの SQL 統計を保存し、SQL テキストについては `DBA_HIST_SQLTEXT` とリンクされている。
 
 ```sql
--- Top SQL by elapsed time between two specific snapshots
+-- 指定した 2 つのスナップショット間での経過時間による Top SQL
 SELECT st.sql_id,
        ROUND(SUM(st.elapsed_time_delta) / 1e6, 1)        AS elapsed_sec,
        ROUND(SUM(st.cpu_time_delta)     / 1e6, 1)        AS cpu_sec,
@@ -241,7 +241,7 @@ SELECT st.sql_id,
        SUBSTR(t.sql_text, 1, 80)                          AS sql_preview
 FROM   dba_hist_sqlstat  st
 JOIN   dba_hist_sqltext  t  ON st.sql_id = t.sql_id AND st.dbid = t.dbid
-WHERE  st.snap_id BETWEEN 100 AND 120   -- substitute your snapshot IDs
+WHERE  st.snap_id BETWEEN 100 AND 120   -- 自身のスナップショット ID に置き換える
   AND  st.dbid = (SELECT dbid FROM v$database)
   AND  st.executions_delta > 0
 GROUP BY st.sql_id, t.sql_text
@@ -249,10 +249,10 @@ ORDER BY elapsed_sec DESC
 FETCH FIRST 20 ROWS ONLY;
 ```
 
-### AWR Top SQL by CPU for a Date Range
+### 日付範囲による AWR CPU 回数 Top SQL
 
 ```sql
--- Top CPU SQL in the last 7 days using AWR
+-- AWR を使用した、過去 7 日間の CPU 負荷の高い SQL
 SELECT st.sql_id,
        ROUND(SUM(st.cpu_time_delta) / 1e6, 1)           AS total_cpu_sec,
        SUM(st.executions_delta)                           AS executions,
@@ -270,11 +270,11 @@ ORDER BY total_cpu_sec DESC
 FETCH FIRST 20 ROWS ONLY;
 ```
 
-### Tracking SQL Performance Over Time (Regression Detection)
+### 時間経過に伴う SQL パフォーマンスの追跡 (退行の検出)
 
 ```sql
--- Compare average elapsed time for a specific SQL across AWR snapshots
--- Useful for detecting plan changes or performance regressions
+-- 特定の SQL の平均経過時間を AWR スナップショット間で比較する
+-- 実行計画の変更やパフォーマンスの退行を検出するのに有用
 SELECT sn.snap_id,
        sn.begin_interval_time,
        st.plan_hash_value,
@@ -290,12 +290,12 @@ WHERE  st.sql_id = 'abc123def456g'
 ORDER BY sn.snap_id;
 ```
 
-A sudden increase in `avg_elapsed_sec` combined with a change in `plan_hash_value` indicates a plan change caused the regression.
+`avg_elapsed_sec` の急激な増加と `plan_hash_value` の変更が組み合わさっている場合は、実行計画の変更が退行の原因であることを示している。
 
-### AWR SQL Plans
+### AWR SQL 実行計画
 
 ```sql
--- Execution plans stored in AWR for a specific SQL_ID
+-- 特定の SQL_ID に対して AWR に保存されている実行計画
 SELECT plan_hash_value,
        timestamp,
        operation,
@@ -312,31 +312,31 @@ ORDER BY plan_hash_value, id;
 ```
 
 ```sql
--- Generate formatted execution plan from AWR using DBMS_XPLAN
+-- DBMS_XPLAN を使用して AWR から書式設定された実行計画を生成する
 SELECT *
 FROM   TABLE(DBMS_XPLAN.display_awr(
                sql_id         => 'abc123def456g',
-               plan_hash_value => NULL,   -- NULL shows all plans
-               db_id          => NULL,    -- NULL uses current DB
+               plan_hash_value => NULL,   -- NULL の場合はすべての計画を表示
+               db_id          => NULL,    -- NULL の場合は現在の DB を使用
                format         => 'ALL'
            ));
 ```
 
 ---
 
-## V$SQL_MONITOR: Real-Time SQL Monitoring
+## V$SQL_MONITOR: リアルタイム SQL モニタリング
 
-SQL Monitoring was introduced in Oracle 11g and provides real-time, per-execution visibility into long-running SQL statements. It automatically activates for any statement that:
-- Runs for more than 5 seconds of CPU or I/O time, **or**
-- Uses parallel execution, **or**
-- Has the `MONITOR` hint applied
+SQL モニタリングは Oracle 11g で導入され、長時間実行される SQL ステートメントに対してリアルタイムで実行ごとの可視性を提供する。以下のいずれかの条件を満たすステートメントに対して、自動的に有効になる：
+- 5 秒以上の CPU 時間または I/O 時間を消費する
+- パラレル実行を使用する
+- `MONITOR` ヒントが適用されている
 
-**Requires:** Oracle Diagnostics Pack and Tuning Pack licenses.
+**必須:** Oracle Diagnostics Pack および Tuning Pack のライセンスが必要である。
 
-### Viewing Active Monitored SQL
+### 監視対象のアクティブな SQL の表示
 
 ```sql
--- Currently executing SQL with monitoring
+-- モニタリングが有効で、現在実行中の SQL
 SELECT sql_id,
        sql_exec_id,
        status,
@@ -358,7 +358,7 @@ ORDER BY elapsed_time DESC;
 ```
 
 ```sql
--- Recently completed monitored SQL (last hour)
+-- 最近完了した監視対象の SQL (過去 1 時間)
 SELECT sql_id,
        sql_exec_start,
        status,
@@ -376,12 +376,12 @@ ORDER BY elapsed_time DESC
 FETCH FIRST 30 ROWS ONLY;
 ```
 
-### Plan-Level Monitoring with V$SQL_PLAN_MONITOR
+### V$SQL_PLAN_MONITOR による実行計画レベルの監視
 
-`V$SQL_PLAN_MONITOR` provides statistics at the **execution plan operation level**—showing exactly which step in the plan is consuming the most resources:
+`V$SQL_PLAN_MONITOR` は、**実行計画の操作レベル**での統計情報を提供する。計画内のどのステップが最もリソースを消費しているかを正確に示す：
 
 ```sql
--- Per-operation statistics for a running or recently completed query
+-- 実行中または最近完了したクエリの操作ごとの統計
 SELECT pm.plan_line_id       AS line,
        pm.plan_operation     AS operation,
        pm.plan_options,
@@ -396,16 +396,16 @@ SELECT pm.plan_line_id       AS line,
        pm.physical_write_requests      AS phys_writes
 FROM   v$sql_plan_monitor pm
 WHERE  pm.sql_id      = 'abc123def456g'
-  AND  pm.sql_exec_id = 16777216     -- get from V$SQL_MONITOR
+  AND  pm.sql_exec_id = 16777216     -- V$SQL_MONITOR から取得する
 ORDER BY pm.plan_line_id;
 ```
 
-### Generating the SQL Monitor Report
+### SQL モニタ報告書の生成
 
-The most powerful way to view SQL Monitoring data is the HTML or text report, which provides a formatted view of the plan, statistics, and timing:
+SQL モニタリング・データを表示する最も強力な方法は、書式設定された HTML またはテキスト形式の報告書である。これらは実行計画、統計、およびタイミングの可視化を提供する：
 
 ```sql
--- Generate HTML SQL Monitor report (best for browser viewing)
+-- HTML 形式の SQL モニタ報告書を生成する (ブラウザ表示に最適)
 SELECT DBMS_SQLTUNE.report_sql_monitor(
            sql_id     => 'abc123def456g',
            type       => 'HTML',
@@ -415,7 +415,7 @@ FROM dual;
 ```
 
 ```sql
--- Generate text report (suitable for email or terminal)
+-- テキスト形式の報告書を生成する (メールやターミナルに適している)
 SELECT DBMS_SQLTUNE.report_sql_monitor(
            sql_id     => 'abc123def456g',
            type       => 'TEXT',
@@ -425,7 +425,7 @@ FROM dual;
 ```
 
 ```sql
--- Generate report for a specific execution (use sql_exec_id from V$SQL_MONITOR)
+-- 特定の実行に関する報告書を生成する (V$SQL_MONITOR の sql_exec_id を使用する)
 SELECT DBMS_SQLTUNE.report_sql_monitor(
            sql_id     => 'abc123def456g',
            sql_exec_id => 16777216,
@@ -436,7 +436,7 @@ FROM dual;
 ```
 
 ```sql
--- Generate an active monitoring report (real-time, auto-refreshing in browser)
+-- アクティブなモニタリング報告書を生成する (ブラウザでリアルタイムに自動更新される)
 SELECT DBMS_SQLTUNE.report_sql_monitor(
            sql_id       => 'abc123def456g',
            type         => 'ACTIVE',
@@ -445,21 +445,21 @@ SELECT DBMS_SQLTUNE.report_sql_monitor(
 FROM dual;
 ```
 
-Save the HTML output to a `.html` file and open in a browser for the interactive report that shows:
-- Real-time execution progress
-- Per-operation statistics with timing bars
-- Memory and temp usage per operation
-- Parallel execution server distribution
-- I/O statistics per operation
+HTML 出力を `.html` ファイルに保存し、ブラウザで開くと、以下の内容を含むインタラクティブな報告書を確認できる：
+- リアルタイムの実行進捗
+- 操作ごとの統計とタイミング・バー
+- 操作ごとのメモリーおよび一時領域の使用量
+- パラレル実行サーバーの分散状況
+- 操作ごとの I/O 統計情報
 
 ---
 
-## Combining V$ and AWR Data: A Practical Workflow
+## V$ ビューと AWR データの組み合わせ：実践的なワークフロー
 
-### Step 1: Identify the Worst SQL Right Now
+### ステップ 1: 現在最も負荷の高い SQL を特定する
 
 ```sql
--- Quick top-5 current offenders
+-- 現在の負荷が高い上位 5 件を迅速に特定
 SELECT sql_id,
        ROUND(elapsed_time / 1e6, 1) AS elapsed_sec,
        ROUND(cpu_time     / 1e6, 1) AS cpu_sec,
@@ -472,10 +472,10 @@ ORDER BY elapsed_time DESC
 FETCH FIRST 5 ROWS ONLY;
 ```
 
-### Step 2: Check If This Is a New Problem or Recurring
+### ステップ 2: これが新しい問題か再発している問題かを確認する
 
 ```sql
--- How did this SQL perform historically?
+-- この SQL の過去のパフォーマンスはどうだったか？
 SELECT sn.begin_interval_time,
        st.executions_delta,
        ROUND(st.elapsed_time_delta / NULLIF(st.executions_delta, 0) / 1e6, 3) AS avg_elapsed_sec,
@@ -488,10 +488,10 @@ WHERE  st.sql_id = 'abc123def456g'
 ORDER BY sn.snap_id DESC;
 ```
 
-### Step 3: View the Current Execution Plan
+### ステップ 3: 現在の実行計画を表示する
 
 ```sql
--- Current plan from library cache
+-- ライブラリ・キャッシュから現在の計画を取得
 SELECT *
 FROM   TABLE(DBMS_XPLAN.display_cursor(
                sql_id       => 'abc123def456g',
@@ -500,10 +500,10 @@ FROM   TABLE(DBMS_XPLAN.display_cursor(
            ));
 ```
 
-### Step 4: Generate SQL Monitoring Report
+### ステップ 4: SQL モニタ報告書を生成する
 
 ```sql
--- Get the latest sql_exec_id for this SQL
+-- この SQL の最新の sql_exec_id を取得
 SELECT sql_exec_id, sql_exec_start, elapsed_time/1e6 AS elapsed_sec, status
 FROM   v$sql_monitor
 WHERE  sql_id = 'abc123def456g'
@@ -511,58 +511,58 @@ ORDER BY sql_exec_start DESC
 FETCH FIRST 1 ROW ONLY;
 ```
 
-Then generate the HTML report as shown above.
+その後、上記で示したように HTML 報告書を生成する。
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Start with `V$SQLAREA` sorted by elapsed time, not CPU.** Elapsed time captures the full user experience including waits. A query that uses 100 seconds of CPU in 10 minutes of wall clock time is less urgent than one using 10 seconds of CPU while blocking others for 30 minutes.
+1. **CPU 時間ではなく、経過時間でソートされた `V$SQLAREA` から始めること。** 経過時間には、待機時間を含むユーザー・エクスペリエンスのすべてが含まれる。実時間の 10 分のうち 100 秒の CPU を使用するクエリよりも、10 秒の CPU を使用しながら他のプロセスを 30 分間ブロックしているクエリの方が緊急性が高い。
 
-2. **Always divide by executions to find per-execution cost.** Total elapsed time can be misleading if a query runs a million times. Compare per-execution averages to identify whether optimization should focus on reducing execution count (result caching, better application logic) or reducing per-execution cost (indexing, plan changes).
+2. **実行あたりのコストを確認するために、常に実行回数で割ること。** クエリが 100 万回実行される場合、総経過時間は誤解を招く可能性がある。実行あたりの平均を比較して、最適化の焦点を実行回数の削減（結果キャッシュ、アプリケーション・ロジックの改善）に置くべきか、それとも実行あたりのコストの削減（インデックス作成、実行計画の変更）に置くべきかを判断する。
 
-3. **Use `plan_hash_value` to detect plan changes.** A sudden change in `plan_hash_value` in AWR history almost always corresponds to a performance change. Keep this in mind when investigating regressions.
+3. **実行計画の変更を検出するには `plan_hash_value` を使用すること。** AWR 履歴における `plan_hash_value` の急激な変化は、ほぼ間違いなくパフォーマンスの変化に対応している。退行を調査する際は、これを念頭に置くこと。
 
-4. **Keep SQL Monitor reports for major incidents.** HTML SQL Monitor reports are invaluable post-incident artifacts. Save them to a shared location before the monitoring data ages out (default retention is 30 days for completed statements).
+4. **重大なインシデントについては SQL モニタ報告書を保存しておくこと。** HTML 形式の SQL モニタ報告書は、事後分析において非常に貴重な資料となる。モニタリング・データが期限切れになる前に（完了したステートメントのデフォルト保持期間は 30 日）、共有の場所に保存しておく。
 
-5. **Use the `MONITOR` hint to force monitoring for important short-running queries.** By default, SQL Monitoring only activates for long-running queries. For critical short-duration queries (sub-5-second but high-frequency), add `/*+ MONITOR */` during investigation to capture per-operation statistics.
+5. **重要な短時間クエリに対してモニタリングを強制するには `MONITOR` ヒントを使用すること。** デフォルトでは、SQL モニタリングは長時間実行されるクエリに対してのみ有効になる。重要だが短時間のクエリ（5 秒未満だが頻度が高い）については、調査中に `/*+ MONITOR */` を追加して操作ごとの統計をキャプチャする。
 
-6. **Investigate high `disk_reads/executions` ratios before buffer gets.** Physical I/O is orders of magnitude slower than logical I/O. A query reading 10,000 physical blocks per execution should be the first priority, even if another query reads 1,000,000 buffer blocks from cache.
+6. **バッファ・ゲットの前に `disk_reads/executions` の比率を調査すること。** 物理 I/O は論理 I/O よりも桁違いに遅い。1 実行あたりの物理ブロック読み取りが 10,000 件あるクエリは、キャッシュから 1,000,000 ブロックを読み取るクエリよりも優先順位を高くすべきである。
 
-7. **Use `DBA_HIST_SQLSTAT` for monthly capacity planning.** Trending SQL resource consumption over months helps predict when current hardware will reach saturation and builds the business case for infrastructure changes.
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Mistake: Tuning SQL based on V$SQLAREA without checking if it still runs.**
-`V$SQLAREA` persists cursor data since the last cursor flush or instance restart. A query with the highest elapsed time may not have run in days. Always check `LAST_ACTIVE_TIME` before investing tuning effort.
-
-**Mistake: Using V$SQL or V$SQLAREA without joining to get the full SQL text.**
-`SQL_TEXT` in `V$SQLAREA` is truncated to 1000 characters. You cannot correctly identify or analyze a query without the full text. Always use `V$SQLTEXT` or `V$SQL.SQL_FULLTEXT` when sending queries for tuning.
-
-**Mistake: Ignoring parse activity.**
-High `LOADS` or `INVALIDATIONS` counts in `V$SQLAREA` indicate that cursors are being hard-parsed or invalidated repeatedly. This does not show up prominently in elapsed time rankings but causes serious scalability issues. Monitor `LOADS/EXECUTIONS` ratio.
-
-**Mistake: Comparing AWR stats without accounting for different snapshot durations.**
-AWR `_delta` values accumulate over the snapshot interval. A snapshot covering 2 hours has twice as many delta values as one covering 1 hour. Normalize by dividing by the interval duration when comparing across snapshots of different lengths.
-
-**Mistake: Forgetting that SQL Monitoring requires licensing.**
-`V$SQL_MONITOR` and `DBMS_SQLTUNE.report_sql_monitor` require the Oracle Diagnostics Pack and Tuning Pack. In unlicensed environments, use `V$SQL` and `DBMS_XPLAN.display_cursor` instead—these do not require additional licensing.
-
-**Mistake: Relying solely on AWR for real-time diagnosis.**
-AWR snapshots are typically taken every hour. During a live performance crisis, use `V$SQL`, `V$SESSION`, `V$SESSION_WAIT`, and `V$SQL_MONITOR` for real-time data. AWR is for trend analysis and post-incident review.
+7. **月次のキャパシティ・プランニングには `DBA_HIST_SQLSTAT` を使用すること。** SQL リソース消費の数か月にわたる傾向を把握することで、現在のハードウェアがいつ飽和状態に達するかを予測し、インフラ変更のためのビジネス・ケースを作成するのに役立つ。
 
 ---
 
+## よくある間違いと回避策
 
-## Oracle Version Notes (19c vs 26ai)
+**間違い: 実行中かどうかを確認せずに V$SQLAREA に基づいてチューニングを行う。**
+`V$SQLAREA` には、最後のカーソルのフラッシュまたはインスタンスの再起動以降のカーソル・データが保持されている。経過時間が最も長いクエリでも、数日間実行されていない可能性がある。チューニングを行う前に、必ず `LAST_ACTIVE_TIME` を確認すること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+**間違い: 完全な SQL テキストを取得せずに V$SQL または V$SQLAREA を使用する。**
+`V$SQLAREA` の `SQL_TEXT` は 1000 文字に切り捨てられている。完全なテキストがなければ、クエリを正しく特定したり分析したりすることはできない。チューニングのためにクエリを送信する際は、必ず `V$SQLTEXT` または `V$SQL.SQL_FULLTEXT` を使用すること。
 
-## Sources
+**間違い: 解析 (Parse) アクティビティを無視する。**
+`V$SQLAREA` の `LOADS` や `INVALIDATIONS` カウントが高い場合は、カーソルが繰り返しハード・パースまたは無効化されていることを示している。これは経過時間のランキングには目立って現れないが、深刻なスケーラビリティの問題を引き起こす。`LOADS/EXECUTIONS` 比率を監視すること。
+
+**間違い: スナップショット期間の違いを考慮せずに AWR 統計を比較する。**
+AWR の `_delta` 値は、スナップショットの間隔中に蓄積されたものである。2 時間のスナップショットには、1 時間のスナップショットの 2 倍のデルタ値が含まれる。長さの異なるスナップショット間を比較する場合は、間隔の時間で割って正規化すること。
+
+**間違い: SQL モニタリングにライセンスが必要であることを忘れる。**
+`V$SQL_MONITOR` および `DBMS_SQLTUNE.report_sql_monitor` の使用には、Oracle Diagnostics Pack および Tuning Pack が必要である。ライセンスのない環境では、代わりに `V$SQL` および `DBMS_XPLAN.display_cursor` を使用すること。これらは追加ライセンスを必要としない。
+
+**間違い: リアルタイムの診断に AWR だけを頼る。**
+AWR スナップショットは通常 1 時間おきに取得される。リアルタイムのパフォーマンス危機発生時は、`V$SQL`、`V$SESSION`、`V$SESSION_WAIT`、および `V$SQL_MONITOR` を使用してリアルタイムの情報を取得すること。AWR は傾向分析や事後分析のためのものである。
+
+---
+
+
+## Oracle バージョンに関する注意 (19c vs 26ai)
+
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 19c と 26ai では、リリース更新によってデフォルト設定や非推奨機能が異なる場合があるため、両方の環境をサポートする場合は構文とパッケージの動作をテストすること。
+
+## ソース
 
 - [Oracle Database 19c SQL Tuning Guide — Identifying High-Load SQL](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgsql/identifying-high-load-sql.html)
 - [Oracle Database 19c Reference — V$SQLAREA](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-SQLAREA.html)

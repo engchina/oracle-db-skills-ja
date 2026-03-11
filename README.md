@@ -1,231 +1,231 @@
 # Oracle DB Skills
 
-Oracle DB Skills is a curated library of 100+ practical, documentation-backed guides for working with Oracle Database, organized by domain: SQL and PL/SQL development, performance tuning, security, administration, monitoring, architecture, DevOps, migrations, SQLcl, ORDS, and Oracle-specific features. Each guide includes actionable examples, best practices, common pitfalls, sources, and explicit Oracle version compatibility notes for 19c and 26ai.
+Oracle DB Skillsは、Oracle Databaseを扱うための、ドキュメントに基づいた100以上の実用的なガイドを厳選したライブラリです。SQLおよびPL/SQL開発、パフォーマンス・チューニング、セキュリティ、管理、モニタリング、アーキテクチャ、DevOps、移行、SQLcl、ORDS、およびOracle固有の機能といったドメインごとに整理されています。各ガイドには、実行可能な例、ベスト・プラクティス、よくある落とし穴、ソース、および19cと26aiに関する明示的なOracleバージョンの互換性ノートが含まれています。
 
-## Version Coverage Standard
+## バージョン対応標準
 
-- Skills that include version-specific behavior must include a section named `## Oracle Version Notes (19c vs 26ai)`.
-- Use Oracle Database 19c as the baseline compatibility target unless stated otherwise.
-- Explicitly call out features that require newer releases and provide 19c-compatible alternatives where practical.
+- バージョン固有の動作を含むスキルには、`## Oracle Version Notes (19c vs 26ai)`というセクションを含める必要があります。
+- 特に断りのない限り、Oracle Database 19cをベースラインの互換性ターゲットとして使用します。
+- 新しいリリースを必要とする機能は明示的に指摘し、可能な場合は19c互換の代替案を提供します。
 
-## GitHub Ruleset
+## GitHub ルールセット
 
-- Default-branch ruleset definition is stored in `.github/rulesets/main.json`.
-- Apply it with:
+- デフォルトブランチのルールセット定義は`.github/rulesets/main.json`に保存されています。
+- 以下のコマンドで適用します：
   - `export GITHUB_TOKEN=<token-with-repo-admin-permission>`
   - `./scripts/apply-github-ruleset.sh krisrice oracle-db-skills`
 
 ---
 
-## Categories
+## カテゴリ
 
-| Category | Files | Path |
+| カテゴリ | ファイル数 | パス |
 |----------|-------|------|
-| [Database Design & Modeling](#database-design--modeling) | 4 | `skills/design/` |
-| [SQL Development](#sql-development) | 5 | `skills/sql-dev/` |
-| [Performance & Tuning](#performance--tuning) | 7 | `skills/performance/` |
-| [Application Development](#application-development) | 8 | `skills/appdev/` |
-| [Security](#security) | 6 | `skills/security/` |
-| [Administration](#administration) | 6 | `skills/admin/` |
-| [Monitoring & Diagnostics](#monitoring--diagnostics) | 5 | `skills/monitoring/` |
-| [Architecture & Infrastructure](#architecture--infrastructure) | 5 | `skills/architecture/` |
-| [DevOps & CI/CD](#devops--cicd) | 5 | `skills/devops/` |
-| [Migrations to Oracle](#migrations-to-oracle) | 14 | `skills/migrations/` |
-| [PL/SQL Development](#plsql-development) | 12 | `skills/plsql/` |
-| [Oracle-Specific Features](#oracle-specific-features) | 6 | `skills/features/` |
+| [データベース設計とモデリング](#データベース設計とモデリング) | 4 | `skills/design/` |
+| [SQL開発](#sql開発) | 5 | `skills/sql-dev/` |
+| [パフォーマンスとチューニング](#パフォーマンスとチューニング) | 7 | `skills/performance/` |
+| [アプリケーション開発](#アプリケーション開発) | 8 | `skills/appdev/` |
+| [セキュリティ](#セキュリティ) | 6 | `skills/security/` |
+| [データベース管理](#データベース管理) | 6 | `skills/admin/` |
+| [モニタリングと診断](#モニタリングと診断) | 5 | `skills/monitoring/` |
+| [アーキテクチャとインフラストラクチャ](#アーキテクチャとインフラストラクチャ) | 5 | `skills/architecture/` |
+| [DevOpsとCI/CD](#devopsとcicd) | 5 | `skills/devops/` |
+| [Oracleへの移行](#oracleへの移行) | 14 | `skills/migrations/` |
+| [PL/SQL開発](#plsql開発) | 12 | `skills/plsql/` |
+| [Oracle固有の機能](#oracle固有の機能) | 6 | `skills/features/` |
 | [SQLcl](#sqlcl) | 8 | `skills/sqlcl/` |
 | [ORDS (Oracle REST Data Services)](#ords-oracle-rest-data-services) | 10 | `skills/ords/` |
 
 ---
 
-## Database Design & Modeling
+## データベース設計とモデリング
 
 `skills/design/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `erd-design.md` | Entity relationship design, normalization (1NF–5NF), Oracle naming conventions, reserved words |
-| `data-modeling.md` | Logical vs physical modeling, star/snowflake schemas, ODS, SCD types |
-| `partitioning-strategy.md` | Range, list, hash, composite partitioning, partition pruning, local vs global indexes |
-| `tablespace-design.md` | Sizing, bigfile vs smallfile, ASSM vs MSSM, production layout patterns |
+| `erd-design.md` | エンティティ関係設計、正規化（第1正規形〜第5正規形）、Oracleの命名規則、予約語 |
+| `data-modeling.md` | 論理モデリング vs 物理モデリング、スター/スノーフレーク・スキーマ、ODS、SCDタイプ |
+| `partitioning-strategy.md` | レンジ、リスト、ハッシュ、コンポジット・パーティショニング、パーティション・プルーニング、ローカル vs グローバル索引 |
+| `tablespace-design.md` | サイジング、bigfile vs smallfile、ASSM vs MSSM、本番環境のレイアウト・パターン |
 
 ---
 
-## SQL Development
+## SQL開発
 
 `skills/sql-dev/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `sql-tuning.md` | Execution plans, optimizer hints, SQL profiles, plan baselines |
-| `sql-injection-avoidance.md` | Bind variables, DBMS_ASSERT, safe dynamic SQL patterns |
-| `pl-sql-best-practices.md` | BULK COLLECT/FORALL, exception handling, cursor management, package structure |
-| `sql-patterns.md` | Window functions, CTEs, CONNECT BY, PIVOT/UNPIVOT, MERGE, MODEL clause |
-| `dynamic-sql.md` | EXECUTE IMMEDIATE, DBMS_SQL, parse-once/execute-many, injection prevention |
+| `sql-tuning.md` | 実行計画、オプティマイザ・ヒント、SQLプロファイル、計画ベースライン |
+| `sql-injection-avoidance.md` | バインド変数、DBMS_ASSERT、安全な動的SQLパターン |
+| `pl-sql-best-practices.md` | BULK COLLECT/FORALL、例外処理、カーソル管理、パッケージ構造 |
+| `sql-patterns.md` | 分析関数（ウィンドウ関数）、CTE（共通表式）、CONNECT BY、PIVOT/UNPIVOT、MERGE、MODEL句 |
+| `dynamic-sql.md` | EXECUTE IMMEDIATE、DBMS_SQL、1回の解析で複数回実行、インジェクション防止 |
 
 ---
 
-## Performance & Tuning
+## パフォーマンスとチューニング
 
 `skills/performance/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `awr-reports.md` | Generating and reading AWR reports, key sections, baselines, bottleneck identification |
-| `ash-analysis.md` | Active Session History, real-time vs historical analysis, ASH report generation |
-| `explain-plan.md` | DBMS_XPLAN, reading execution plans, autotrace, identifying bad plans |
-| `index-strategy.md` | B-tree, bitmap, function-based, composite, invisible indexes; rebuild vs coalesce |
-| `optimizer-stats.md` | DBMS_STATS, histograms, extended statistics, pending stats, incremental stats |
-| `wait-events.md` | Common wait events, diagnosis queries, remediation for each event type |
-| `memory-tuning.md` | SGA components, PGA management, AMM vs ASMM, advisory views |
+| `awr-reports.md` | AWRレポートの生成と読み方、主要セクション、ベースライン、ボトルネックの特定 |
+| `ash-analysis.md` | アクティブ・セッション履歴（ASH）、リアルタイム分析 vs 履歴分析、ASHレポートの生成 |
+| `explain-plan.md` | DBMS_XPLAN、実行計画の読み方、自動トレース、問題のある計画の特定 |
+| `index-strategy.md` | Bツリー、ビットマップ、関数ベース、コンポジット、不可視索引。再構築 vs 結合 |
+| `optimizer-stats.md` | DBMS_STATS、ヒストグラム、拡張統計、保留中の統計、増分統計 |
+| `wait-events.md` | 一般的な待機イベント、診断クエリ、各イベント・タイプのリメディエーション（修復策） |
+| `memory-tuning.md` | SGAコンポーネント、PGA管理、AMM vs ASMM、アドバイザ・ビュー |
 
 ---
 
-## Application Development
+## アプリケーション開発
 
 `skills/appdev/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `connection-pooling.md` | UCP, DRCP, pool sizing, connection validation, JDBC/Python/Node.js examples |
-| `transaction-management.md` | ACID properties, savepoints, autonomous transactions, distributed transactions |
-| `locking-concurrency.md` | MVCC, SELECT FOR UPDATE, NOWAIT/SKIP LOCKED, deadlock avoidance |
-| `sequences-identity.md` | Sequence caching, identity columns, UUID alternatives, gap behavior |
-| `json-in-oracle.md` | Native JSON type, JSON_VALUE/QUERY/TABLE, JSON Duality Views (23c) |
-| `xml-in-oracle.md` | XMLType storage, XQuery, XMLTable, XML indexes, XMLDB repository |
-| `spatial-data.md` | SDO_GEOMETRY, spatial indexes, SDO_RELATE, coordinate systems |
-| `oracle-text.md` | CONTEXT/CTXCAT indexes, CONTAINS, fuzzy/stemming, HIGHLIGHT/SNIPPET |
+| `connection-pooling.md` | UCP、DRCP、プール・サイジング、接続検証、JDBC/Python/Node.jsの例 |
+| `transaction-management.md` | ACID特性、セーブポイント、自律型トランザクション、分散トランザクション |
+| `locking-concurrency.md` | MVCC、SELECT FOR UPDATE、NOWAIT/SKIP LOCKED、デッドロックの回避 |
+| `sequences-identity.md` | シーケンス・キャッシュ、アイデンティティ列、UUIDの代替案、ギャップ動作 |
+| `json-in-oracle.md` | ネイティブJSON型、JSON_VALUE/QUERY/TABLE、JSON Duality Views (23c) |
+| `xml-in-oracle.md` | XMLTypeストレージ、XQuery、XMLTable、XML索引、XMLDBリポジトリ |
+| `spatial-data.md` | SDO_GEOMETRY、空間索引、SDO_RELATE、座標系 |
+| `oracle-text.md` | CONTEXT/CTXCAT索引、CONTAINS、あいまい/ステミング検索、HIGHLIGHT/SNIPPET |
 
 ---
 
-## Security
+## セキュリティ
 
 `skills/security/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `privilege-management.md` | Least privilege, roles, DBMS_PRIVILEGE_CAPTURE, avoiding PUBLIC grants |
-| `row-level-security.md` | VPD/FGAC, DBMS_RLS, application contexts, all policy types |
-| `data-masking.md` | Oracle Data Redaction (DBMS_REDACT), full/partial/regexp/random redaction |
-| `auditing.md` | Unified Auditing, CREATE AUDIT POLICY, fine-grained auditing (DBMS_FGA) |
-| `encryption.md` | TDE, Oracle Wallet setup, tablespace/column encryption, key rotation |
-| `network-security.md` | SSL/TLS, sqlnet.ora encryption, ACLs for network packages, listener hardening |
+| `privilege-management.md` | 最小権限、ロール、DBMS_PRIVILEGE_CAPTURE、PUBLICへの権限付与の回避 |
+| `row-level-security.md` | VPD/FGAC、DBMS_RLS、アプリケーション・コンテキスト、すべてのポリシー・タイプ |
+| `data-masking.md` | Oracle Data Redaction (DBMS_REDACT)、完全/部分/正規表現/ランダム・リダクション |
+| `auditing.md` | 統合監査、CREATE AUDIT POLICY、ファイングレイン監査 (DBMS_FGA) |
+| `encryption.md` | TDE, Oracleウォレットのセットアップ、表領域/列の暗号化、キーのローテーション |
+| `network-security.md` | SSL/TLS、sqlnet.oraの暗号化、ネットワーク・パッケージのACL、リスナーの要塞化 |
 
 ---
 
-## Administration
+## データベース管理
 
 `skills/admin/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `backup-recovery.md` | RMAN architecture, backup sets vs image copies, incremental backups, recovery scenarios |
-| `dataguard.md` | Physical/logical standby, Data Guard Broker, switchover vs failover, Active Data Guard |
-| `rman-basics.md` | Common RMAN commands, channel config, compression, encryption, reporting |
-| `undo-management.md` | Undo sizing, UNDO_RETENTION, ORA-01555 causes and prevention, Undo Advisor |
-| `redo-log-management.md` | Log sizing, archivelog mode, multiplexing, switch frequency monitoring |
-| `user-management.md` | CREATE USER, profiles, password policies, proxy authentication, CDB/PDB users |
+| `backup-recovery.md` | RMANアーキテクチャ、バックアップ・セット vs イメージ・コピー、増分バックアップ、リカバリ・シナリオ |
+| `dataguard.md` | フィジカル/ロジカル・スタンバイ、Data Guard Broker、スイッチオーバー vs フェイルオーバー、Active Data Guard |
+| `rman-basics.md` | 一般的なRMANコマンド、チャネル構成、圧縮、暗号化、レポート |
+| `undo-management.md` | UNDOサイズ設定、UNDO_RETENTION、ORA-01555の原因と防止、Undoアドバイザ |
+| `redo-log-management.md` | ログ・サイズ設定、アーカイブログ・モード、多重化、スイッチ頻度の監視 |
+| `user-management.md` | CREATE USER、プロファイル、パスワード・ポリシー、プロキシ認証、CDB/PDBユーザー |
 
 ---
 
-## Monitoring & Diagnostics
+## モニタリングと診断
 
 `skills/monitoring/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `alert-log-analysis.md` | Alert log location, critical ORA- errors, automated monitoring patterns |
-| `adrci-usage.md` | ADR repository, adrci commands, IPS packaging, incident correlation |
-| `health-monitor.md` | DBMS_HM health checks, SQL Tuning Advisor, Segment Advisor, Memory Advisor |
-| `space-management.md` | Tablespace monitoring, HWM, SHRINK SPACE vs MOVE, LOB space, temp space |
-| `top-sql-queries.md` | V$SQL/V$SQLAREA, top SQL by resource, AWR top SQL, V$SQL_MONITOR |
+| `alert-log-analysis.md` | アラートログの場所、重要なORA-エラー、自動監視パターン |
+| `adrci-usage.md` | ADRリポジトリ、adrciコマンド、IPSパッケージング、インシデントの相関 |
+| `health-monitor.md` | DBMS_HMヘルスチェック、SQLチューニング・アドバイザ、セグメント・アドバイザ、メモリ・アドバイザ |
+| `space-management.md` | 表領域の監視、HWM（高水位標）、SHRINK SPACE vs MOVE、LOB領域、一時領域 |
+| `top-sql-queries.md` | V$SQL/V$SQLAREA、リソース別トップSQL、AWRトップSQL、V$SQL_MONITOR |
 
 ---
 
-## Architecture & Infrastructure
+## アーキテクチャとインフラストラクチャ
 
 `skills/architecture/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `rac-concepts.md` | Cache Fusion, GCS/GES, services, node affinity, RAC wait events, TAF/FCF |
-| `multitenant.md` | CDB/PDB architecture, cloning, plugging/unplugging, resource management, Application Containers |
-| `oracle-cloud-oci.md` | ATP, ADW, Base Database Service, ExaCS, connection methods, Free Tier |
-| `exadata-features.md` | Smart Scan, Storage Indexes, HCC compression, IORM, offload monitoring |
-| `inmemory-column-store.md` | IMCS architecture, populating objects, Join Groups, In-Memory Aggregation, AIM |
+| `rac-concepts.md` | キャッシュ・フュージョン、GCS/GES、サービス、ノード・アフィニティ、RAC待機イベント、TAF/FCF |
+| `multitenant.md` | CDB/PDBアーキテクチャ、クローニング、プラグ/アンプラグ、リソース管理、アプリケーション・コンテナ |
+| `oracle-cloud-oci.md` | ATP、ADW、Base Database Service、ExaCS、接続方法、Free Tier |
+| `exadata-features.md` | スマート・スキャン、ストレージ索引、HCC圧縮、IORM、オフロード監視 |
+| `inmemory-column-store.md` | IMCSアーキテクチャ、オブジェクトのロード、結合グループ、インメモリー集計、AIM |
 
 ---
 
-## DevOps & CI/CD
+## DevOpsとCI/CD
 
 `skills/devops/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `schema-migrations.md` | Liquibase and Flyway with Oracle, versioned vs repeatable migrations, CI/CD pipelines |
-| `online-operations.md` | DBMS_REDEFINITION, online index rebuild/creation, ALTER TABLE ONLINE |
-| `edition-based-redefinition.md` | EBR for zero-downtime deployments, editioning views, crossedition triggers |
-| `database-testing.md` | utPLSQL framework, assertions, mocking, code coverage, GitHub Actions integration |
-| `version-control-sql.md` | DBMS_METADATA DDL extraction, git structure, drift detection, idempotent grants |
+| `schema-migrations.md` | OracleでのLiquibaseとFlywayの使用、バージョン管理 vs 繰り返し可能なマイグレーション、CI/CDパイプライン |
+| `online-operations.md` | DBMS_REDEFINITION、オンラインでの索引再構築/作成、ALTER TABLE ONLINE |
+| `edition-based-redefinition.md` | ゼロダウンタイム・デプロイメントのためのEBR、エディション・ビュー、クロスエディション・トリガー |
+| `database-testing.md` | utPLSQLフレームワーク、アサーション、モック、コード・カバレッジ、GitHub Actions統合 |
+| `version-control-sql.md` | DBMS_METADATA DDL抽出、git構造、ドリフト検出、べき等な権限付与 |
 
 ---
 
-## Migrations to Oracle
+## Oracleへの移行
 
 `skills/migrations/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `migrate-postgres-to-oracle.md` | Data type mapping, SQL dialect differences, SERIAL→identity, psql vs sqlplus |
-| `migrate-mysql-to-oracle.md` | AUTO_INCREMENT, LIMIT→FETCH, stored proc conversion, mysqldump to Oracle |
-| `migrate-redshift-to-oracle.md` | MPP vs Oracle, distribution/sort keys, COPY command, WLM→Resource Manager |
-| `migrate-sqlserver-to-oracle.md` | T-SQL→PL/SQL, TRY/CATCH→EXCEPTION, linked servers→DBLinks, SSMA guide |
-| `migrate-db2-to-oracle.md` | DB2 SQL dialect, REORG→MOVE, RUNSTATS→DBMS_STATS, LOCATE vs INSTR |
-| `migrate-sqlite-to-oracle.md` | Type affinity, AUTOINCREMENT, pragmas, scaling from embedded to enterprise |
-| `migrate-mongodb-to-oracle.md` | Document→relational, JSON Duality Views, aggregation pipeline→SQL |
-| `migrate-snowflake-to-oracle.md` | VARIANT/OBJECT→JSON, QUALIFY→window functions, Time Travel→Flashback |
-| `migrate-teradata-to-oracle.md` | BTEQ→SQL*Plus, multiset tables, QUALIFY, TPT→SQL*Loader |
-| `migrate-sybase-to-oracle.md` | Chained/unchained transactions, RAISERROR→RAISE_APPLICATION_ERROR, BCP→SQL*Loader |
-| `oracle-migration-tools.md` | SQL Developer Migration Workbench, AWS SCT, ora2pg, Oracle ZDM, GoldenGate |
-| `migration-assessment.md` | Pre-migration checklist, complexity scoring, risk matrix, effort estimation |
-| `migration-data-validation.md` | Row counts, ORA_HASH fingerprinting, reconciliation reports, drift detection |
-| `migration-cutover-strategy.md` | Cutover phases, parallel run, go/no-go criteria, rollback plan, stakeholder comms |
+| `migrate-postgres-to-oracle.md` | データ型のマッピング、SQL方言の違い、SERIAL→アイデンティティ列、psql vs sqlplus |
+| `migrate-mysql-to-oracle.md` | AUTO_INCREMENT、LIMIT→FETCH、ストアド・プロシージャの変換、mysqldumpからOracleへの移行 |
+| `migrate-redshift-to-oracle.md` | MPP vs Oracle、分散/ソート・キー、COPYコマンド、WLM→リソース・マネージャ |
+| `migrate-sqlserver-to-oracle.md` | T-SQL→PL/SQL、TRY/CATCH→EXCEPTION処理、リンク・サーバー→DBリンク、SSMAガイド |
+| `migrate-db2-to-oracle.md` | DB2 SQL方言、REORG→MOVE、RUNSTATS→DBMS_STATS、LOCATE vs INSTR |
+| `migrate-sqlite-to-oracle.md` | 型アフィニティ、AUTOINCREMENT, プラグマ、組み込みからエンタープライズへのスケーリング |
+| `migrate-mongodb-to-oracle.md` | ドキュメント型からリレーショナル表への変換、JSON Duality Views, 集計パイプライン→SQL |
+| `migrate-snowflake-to-oracle.md` | VARIANT/OBJECT→JSON、QUALIFY→ウィンドウ関数、タイム・トラベル→フラッシュバック |
+| `migrate-teradata-to-oracle.md` | BTEQ→SQL*Plus、マルチセット・テーブル、QUALIFY、TPT→SQL*Loader |
+| `migrate-sybase-to-oracle.md` | 連鎖/非連鎖トランザクション、RAISERROR→RAISE_APPLICATION_ERROR, BCP→SQL*Loader |
+| `oracle-migration-tools.md` | SQL Developer移行ワークベンチ、AWS SCT, ora2pg, Oracle ZDM, GoldenGate |
+| `migration-assessment.md` | 移行前チェックリスト、複雑さのスコアリング、リスク・マトリックス、作業量見積もり |
+| `migration-data-validation.md` | 行数カウント、ORA_HASHフィンガープリント、不整合レポート、ドリフト検出 |
+| `migration-cutover-strategy.md` | 切り替えフェーズ、並行稼働、Go/No-Go基準、ロールバック計画、関係者コミュニケーション |
 
 ---
 
-## PL/SQL Development
+## PL/SQL開発
 
 `skills/plsql/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `plsql-package-design.md` | Spec vs body, public/private APIs, initialization blocks, ACCESSIBLE BY, overloading |
-| `plsql-error-handling.md` | Exception hierarchy, PRAGMA EXCEPTION_INIT, FORMAT_ERROR_BACKTRACE, autonomous logging |
-| `plsql-performance.md` | Context switches, BULK COLLECT/FORALL, pipelined functions, RESULT_CACHE, PRAGMA UDF |
-| `plsql-collections.md` | Associative arrays, nested tables, varrays, collection methods, TABLE() in SQL |
-| `plsql-cursors.md` | Implicit/explicit cursors, cursor FOR loops, REF CURSORs, SYS_REFCURSOR, leak prevention |
-| `plsql-dynamic-sql.md` | EXECUTE IMMEDIATE, DBMS_SQL, parse-once/execute-many, injection prevention |
-| `plsql-security.md` | AUTHID DEFINER vs CURRENT_USER, injection vectors, DBMS_ASSERT, secure coding checklist |
-| `plsql-debugging.md` | DBMS_OUTPUT, DBMS_APPLICATION_INFO, SQL Developer debugger, PLSQL_WARNINGS, DBMS_TRACE |
-| `plsql-unit-testing.md` | utPLSQL, test packages, assertions, mocking, CI integration, code coverage |
-| `plsql-patterns.md` | TAPI pattern, autonomous transaction logging, pipelined functions, object types |
-| `plsql-compiler-options.md` | PLSQL_OPTIMIZE_LEVEL, native vs interpreted, conditional compilation, PLSQL_CCFLAGS |
-| `plsql-code-quality.md` | Naming conventions, Trivadis guidelines, anti-patterns, review checklist, PL/SQL Cop |
+| `plsql-package-design.md` | 仕様部 vs 本体、公開/非公開API, 初期化ブロック、ACCESSIBLE BY, オーバーロード |
+| `plsql-error-handling.md` | 例外階層、PRAGMA EXCEPTION_INIT, FORMAT_ERROR_BACKTRACE, 自律型ログ記録 |
+| `plsql-performance.md` | コンキテクスト・スイッチ、BULK COLLECT/FORALL, パイプライン関数、RESULT_CACHE, PRAGMA UDF |
+| `plsql-collections.md` | 結合配列、ネストした表、VARRAY, コレクション・メソッド、SQLでのTABLE()使用 |
+| `plsql-cursors.md` | 暗黙的/明示的カーソル、カーソルFORループ、REF CURSORs, SYS_REFCURSOR, リーク防止 |
+| `plsql-dynamic-sql.md` | EXECUTE IMMEDIATE, DBMS_SQL, 1回の解析で複数回実行、インジェクション防止 |
+| `plsql-security.md` | AUTHID DEFINER vs CURRENT_USER, インジェクション・ベクター、DBMS_ASSERT, セキュア・コーディング・チェックリスト |
+| `plsql-debugging.md` | DBMS_OUTPUT, DBMS_APPLICATION_INFO, SQL Developerデバッガ、PLSQL_WARNINGS, DBMS_TRACE |
+| `plsql-unit-testing.md` | utPLSQL, テスト・パッケージ、アサーション、モック、CI統合、コード・カバレッジ |
+| `plsql-patterns.md` | TAPIパターン、自律型トランザクション・ログ記録、パイプライン関数、オブジェクト型 |
+| `plsql-compiler-options.md` | PLSQL_OPTIMIZE_LEVEL, ネイティブ vs 解釈実行、条件付きコンパイル、PLSQL_CCFLAGS |
+| `plsql-code-quality.md` | 命名規則、Trivadisガイドライン、アンチパターン、レビュー・チェックリスト、PL/SQL Cop |
 
 ---
 
-## Oracle-Specific Features
+## Oracle固有の機能
 
 `skills/features/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `advanced-queuing.md` | AQ/Transactional Event Queues, DBMS_AQ/DBMS_AQADM, propagation, JMS, TEQ (21c) |
-| `dbms-scheduler.md` | Jobs, schedules, chains, event-based scheduling, windows, monitoring |
-| `virtual-columns.md` | GENERATED ALWAYS AS, indexing virtual columns, partition keys, limitations |
-| `materialized-views.md` | COMPLETE/FAST/FORCE refresh, ON COMMIT, MV logs, query rewrite |
-| `database-links.md` | Fixed/connected/shared links, distributed DML, two-phase commit, security risks |
-| `oracle-apex.md` | APEX architecture, authentication, ORDS integration, REST APIs, CI/CD deployment |
+| `advanced-queuing.md` | AQ/トランザクション・イベント・キュー、DBMS_AQ/DBMS_AQADM, 伝播、JMS, TEQ (21c) |
+| `dbms-scheduler.md` | ジョブ、スケジュール、チェーン、イベント・ベースのスケジューリング、ウィンドウ、監視 |
+| `virtual-columns.md` | GENERATED ALWAYS AS, 仮想列の索引付け、パーティション・キー、制限事項 |
+| `materialized-views.md` | COMPLETE/FAST/FORCEリフレッシュ、ON COMMIT, MVログ、クエリ・リライト |
+| `database-links.md` | 固定/接続/共有リンク、分散DML, 2フェーズ・コミット、セキュリティ・リスク |
+| `oracle-apex.md` | APEXアーキテクチャ、認証、ORDS統合、REST API, CI/CDデプロイメント |
 
 ---
 
@@ -233,16 +233,16 @@ Oracle DB Skills is a curated library of 100+ practical, documentation-backed gu
 
 `skills/sqlcl/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `sqlcl-basics.md` | Installation, connecting (TNS/Easy Connect/wallet), key differences from SQL*Plus |
-| `sqlcl-scripting.md` | JavaScript engine (Nashorn/GraalVM), script command, Java interop, automation examples |
-| `sqlcl-liquibase.md` | Built-in Liquibase, lb generate-schema, lb update/rollback, CI/CD integration |
-| `sqlcl-formatting.md` | SET SQLFORMAT modes (CSV, JSON, XML, INSERT, LOADER), COLUMN, SPOOL |
-| `sqlcl-ddl-generation.md` | DDL command, suppressing storage clauses, full schema extraction, version control |
-| `sqlcl-data-loading.md` | LOAD command for CSV/JSON, column mapping, date formats, error handling |
-| `sqlcl-cicd.md` | Headless/non-interactive mode, exit codes, wallet connections, GitHub Actions/GitLab CI |
-| `sqlcl-mcp-server.md` | MCP server setup, connecting Claude/AI assistants to Oracle, available tools, security |
+| `sqlcl-basics.md` | インストール、接続（TNS/簡易接続/ウォレット）、SQL*Plusとの主な違い |
+| `sqlcl-scripting.md` | JavaScriptエンジン（Nashorn/GraalVM）、scriptコマンド、Java相互運用性、自動化の例 |
+| `sqlcl-liquibase.md` | 組み込みのLiquibase, lb generate-schema, lb update/rollback, CI/CD統合 |
+| `sqlcl-formatting.md` | SET SQLFORMATモード（CSV, JSON, XML, INSERT, LOADER）、COLUMN, SPOOL |
+| `sqlcl-ddl-generation.md` | DDLコマンド、ストレージ句の抑制、スキーマ全体の抽出、バージョン管理 |
+| `sqlcl-data-loading.md` | CSV/JSON用LOADコマンド、列マッピング、日付形式、エラー処理 |
+| `sqlcl-cicd.md` | ヘッドレス/非対話モード、終了コード、ウォレット接続、GitHub Actions/GitLab CI |
+| `sqlcl-mcp-server.md` | MCPサーバーのセットアップ、Claude/AIアシスタントのOracleへの接続、使用可能なツール、セキュリティ |
 
 ---
 
@@ -250,40 +250,40 @@ Oracle DB Skills is a curated library of 100+ practical, documentation-backed gu
 
 `skills/ords/`
 
-| File | Description |
+| ファイル | 説明 |
 |------|-------------|
-| `ords-architecture.md` | Deployment models (Jetty/Tomcat/WebLogic/OCI), request routing, module hierarchy |
-| `ords-installation.md` | Installing ORDS, `ords config set`, wallet-based credential storage, mTLS for ATP/ADW |
-| `ords-auto-rest.md` | ORDS.ENABLE_SCHEMA/OBJECT, endpoint patterns, JSON filter syntax, pagination |
-| `ords-rest-api-design.md` | DEFINE_MODULE/TEMPLATE/HANDLER, source types, implicit bind parameters, CRUD examples |
-| `ords-authentication.md` | OAuth2 client credentials and auth code flows, JWT validation, role mapping |
-| `ords-pl-sql-gateway.md` | Calling PL/SQL from REST, REF CURSORs, APEX_JSON, error handling, CLOB/BLOB |
-| `ords-file-upload-download.md` | BLOB upload/download, multipart form data, Content-Type/Content-Disposition |
-| `ords-metadata-catalog.md` | OpenAPI 3.0 generation, Swagger UI/Postman integration, metadata views |
-| `ords-security.md` | HTTPS enforcement, CORS via `ords config set`, wallet-based secrets, request validation |
-| `ords-monitoring.md` | Log configuration, request logging, connection pool monitoring, error diagnosis |
+| `ords-architecture.md` | デプロイメント・モデル（Jetty/Tomcat/WebLogic/OCI）、リクエスト処理ルーティング、モジュール階層 |
+| `ords-installation.md` | ORDSのインストール、`ords config set`、ウォレットベースの資格証明保存、ATP/ADW用mTLS |
+| `ords-auto-rest.md` | ORDS.ENABLE_SCHEMA/OBJECT, エンドポイント・パターン、JSONフィルタ構文、ページネーション |
+| `ords-rest-api-design.md` | DEFINE_MODULE/TEMPLATE/HANDLER, ソース・タイプ、暗黙的なバインド・パラメータ、CRUDの例 |
+| `ords-authentication.md` | OAuth2 クライアント資格証明および認証コード・フロー、JWT検証、ロール・マッピング |
+| `ords-pl-sql-gateway.md` | RESTからのPL/SQL呼び出し、REF CURSORs, APEX_JSON, エラー処理、CLOB/BLOB |
+| `ords-file-upload-download.md` | BLOBのアップロード/ダウンロード、マルチパート形式データ、Content-Type/Content-Disposition |
+| `ords-metadata-catalog.md` | OpenAPI 3.0生成、Swagger UI/Postman統合、メタデータ・ビュー |
+| `ords-security.md` | HTTPSの強制、`ords config set`経由のCORS, ウォレットベースのシークレット、リクエスト検証 |
+| `ords-monitoring.md` | ログ構成、リクエスト・ログ記録、接続プール監視、エラー診断 |
 
 ---
 
-## Structure
+## 構造
 
 ```
 oracle-db-skills/
 ├── README.md
-├── skills-index.md          # Full checklist of all files with completion status
+├── skills-index.md          # すべてのファイルの完了ステータスを含むフル・チェックリスト
 └── skills/
-    ├── admin/               # Administration
-    ├── appdev/              # Application Development
-    ├── architecture/        # Architecture & Infrastructure
-    ├── design/              # Database Design & Modeling
-    ├── devops/              # DevOps & CI/CD
-    ├── features/            # Oracle-Specific Features
-    ├── migrations/          # Migrations to Oracle
-    ├── monitoring/          # Monitoring & Diagnostics
+    ├── admin/               # データベース管理
+    ├── appdev/              # アプリケーション開発
+    ├── architecture/        # アーキテクチャとインフラストラクチャ
+    ├── design/              # データベース設計とモデリング
+    ├── devops/              # DevOpsとCI/CD
+    ├── features/            # Oracle固有の機能
+    ├── migrations/          # Oracleへの移行
+    ├── monitoring/          # モニタリングと診断
     ├── ords/                # Oracle REST Data Services
-    ├── performance/         # Performance & Tuning
-    ├── plsql/               # PL/SQL Development
-    ├── security/            # Security
-    ├── sql-dev/             # SQL Development
+    ├── performance/         # パフォーマンスとチューニング
+    ├── plsql/               # PL/SQL開発
+    ├── security/            # セキュリティ
+    ├── sql-dev/             # SQL開発
     └── sqlcl/               # SQLcl
 ```

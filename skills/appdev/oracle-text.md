@@ -1,42 +1,42 @@
-# Oracle Text: Full-Text Search
+# Oracle Text: 全文検索
 
-## Overview
+## 概要
 
-Oracle Text (formerly ConText and interMedia Text) is Oracle's full-text search engine, built into the database kernel. Unlike application-level search libraries (Lucene, Elasticsearch), Oracle Text indexes live inside the database alongside the data, enabling full-text search to participate in SQL joins, transactions, and access control with no external infrastructure.
+Oracle Text（旧称 ConText および interMedia Text）は、データベース・カーネルに組み込まれた Oracle 独自の全文検索エンジンである。アプリケーション・レベルの検索ライブラリ（Lucene, Elasticsearchなど）とは異なり、Oracle Text の索引はデータベース内のデータとともに保持される。これにより、外部インフラを必要とすることなく、SQL の結合、トランザクション、およびアクセス制御に全文検索を参加させることができる。
 
-Oracle Text is ideal for:
-- Document repositories and content management systems
-- Product catalog searches (fuzzy, stemming, thematic)
-- Regulatory document search (contracts, filings, correspondence)
-- Knowledge bases and FAQ systems
-- Any table with free-text VARCHAR2, CLOB, or XMLType columns
+Oracle Text は以下の用途に最適である：
+- ドキュメント・リポジトリおよびコンテンツ管理システム
+- 製品カタログ検索（あいまい検索、ステミング、テーマ検索など）
+- 規制文書検索（契約書、申請書、通信記録など）
+- ナレッジベースおよび FAQ システム
+- VARCHAR2, CLOB, または XMLType 列を持つすべての表
 
 ---
 
-## Index Types
+## 索引タイプ
 
-Oracle Text provides four primary index types. Choosing the right one is the most important decision.
+Oracle Text は主に4つの索引タイプを提供している。適切なタイプを選択することが最も重要な決定事項となる。
 
-| Index Type | Best For | Notes |
+| 索引タイプ | 最適な用途 | 備考 |
 |---|---|---|
-| `CONTEXT` | Large documents, full-text CLOB/XMLType | Most powerful; batch or scheduled sync |
-| `CTXCAT` | Short text, catalog/e-commerce, ranked results | Supports complex query expressions; real-time |
-| `CTXRULE` | Routing/categorizing incoming documents | `MATCHES` operator; documents classified against query rules |
-| `CTXXPATH` | XPath queries on XMLType | Optimizes XMLType XPath predicates |
+| `CONTEXT` | 大規模ドキュメント、CLOB/XMLType の全文検索 | 最も強力。バッチまたはスケジュールによる同期が必要 |
+| `CTXCAT` | 短いテキスト、カタログ/ECサイト、ランク付けされた結果 | 複雑なクエリ式をサポート。リアルタイム更新 |
+| `CTXRULE` | 受信ドキュメントのルーティング/カテゴリ分け | `MATCHES` 演算子を使用。クエリ・ルールに対してドキュメントを分類 |
+| `CTXXPATH` | XMLType に対する XPath クエリ | XMLType の XPath 述語を最適化 |
 
 ---
 
-## CONTEXT Index: Full Document Search
+## CONTEXT 索引: 大規模ドキュメント検索
 
-### Creating a CONTEXT Index
+### CONTEXT 索引の作成
 
 ```sql
--- Minimal CONTEXT index (all defaults)
+-- 最小限の CONTEXT 索引 (すべてデフォルト設定)
 CREATE INDEX idx_article_text
     ON articles (content)
     INDEXTYPE IS CTXSYS.CONTEXT;
 
--- CONTEXT index with explicit preferences
+-- 明示的なプリファレンスを指定した CONTEXT 索引
 CREATE INDEX idx_product_desc
     ON products (description)
     INDEXTYPE IS CTXSYS.CONTEXT
@@ -48,8 +48,8 @@ CREATE INDEX idx_product_desc
         SYNC (ON COMMIT)
     ');
 
--- Multi-column index: index multiple text columns as one
--- First, create a user datastore that concatenates columns
+-- マルチ列索引: 複数のテキスト列を1つの索引として作成
+-- まず、列を連結するユーザ・データストアを作成する
 BEGIN
     CTX_DDL.CREATE_PREFERENCE('product_store', 'MULTI_COLUMN_DATASTORE');
     CTX_DDL.SET_ATTRIBUTE('product_store', 'COLUMNS', 'title, description, tags');
@@ -57,54 +57,54 @@ END;
 /
 
 CREATE INDEX idx_product_fulltext
-    ON products (title)  -- first column; others specified in datastore
+    ON products (title)  -- 最初の列を指定。他はデータストアで定義済み
     INDEXTYPE IS CTXSYS.CONTEXT
     PARAMETERS ('DATASTORE product_store SYNC (ON COMMIT)');
 ```
 
-### Index Synchronization Modes
+### 索引の同期モード
 
-CONTEXT indexes are not updated in real-time by default. New/modified rows must be synchronized into the index.
+CONTEXT 索引は、デフォルトではリアルタイムに更新されない。新規または変更された行は索引に同期する必要がある。
 
 ```sql
--- SYNC ON COMMIT: automatic sync after every commit (12c+; has overhead)
+-- SYNC (ON COMMIT): コミットごとに自動同期 (12c以降。オーバーヘッドあり)
 PARAMETERS ('SYNC (ON COMMIT)')
 
--- SYNC EVERY n seconds: background sync on a schedule
-PARAMETERS ('SYNC (EVERY "SYSDATE + 1/24")')  -- sync every hour
+-- SYNC (EVERY "interval"): スケジュールに基づいたバックグラウンド同期
+PARAMETERS ('SYNC (EVERY "SYSDATE + 1/24")')  -- 1時間おきに同期
 
--- Manual sync (most common for batch systems)
+-- 手動同期 (バッチ・システムで最も一般的)
 EXEC CTX_DDL.SYNC_INDEX('idx_article_text');
--- With memory allocation
+-- メモリー割り当てを指定する場合
 EXEC CTX_DDL.SYNC_INDEX('idx_article_text', '128M');
 
--- Optimize the index (merge fragmented doc lists, remove deleted doc entries)
-EXEC CTX_DDL.OPTIMIZE_INDEX('idx_article_text', 'FAST');     -- quick defrag
-EXEC CTX_DDL.OPTIMIZE_INDEX('idx_article_text', 'FULL');     -- full merge (slow but thorough)
-EXEC CTX_DDL.OPTIMIZE_INDEX('idx_article_text', 'TOKEN', maxtime => 300);  -- 5 min max
+-- 索引の最適化 (断片化したリストの結合、削除済みエントリの除去)
+EXEC CTX_DDL.OPTIMIZE_INDEX('idx_article_text', 'FAST');     -- 簡易デフラグ
+EXEC CTX_DDL.OPTIMIZE_INDEX('idx_article_text', 'FULL');     -- 完全マージ (低速だが徹底的)
+EXEC CTX_DDL.OPTIMIZE_INDEX('idx_article_text', 'TOKEN', maxtime => 300);  -- 最大5分間実行
 
--- Check pending documents not yet indexed
+-- 索引付け待ちの保留ドキュメント数を確認
 SELECT COUNT(*) FROM ctx_pending WHERE idx_name = 'IDX_ARTICLE_TEXT';
 ```
 
 ---
 
-## CTXCAT Index: Catalog Search
+## CTXCAT 索引: カタログ検索
 
-CTXCAT is designed for catalog-style searches (short text, combo text+structured filters). Unlike CONTEXT, it updates automatically with DML (no manual sync).
+CTXCAT は、カタログ検索（短いテキスト、テキスト＋構造化フィルタの組み合わせ）用に設計されている。CONTEXT とは異なり、DML と同時に自動的に更新される（手動同期は不要）。
 
 ```sql
--- Create a CTXCAT index (no sync needed)
+-- CTXCAT 索引の作成 (同期不要)
 CREATE INDEX idx_product_cat
     ON products (product_name)
     INDEXTYPE IS CTXSYS.CTXCAT;
 
--- CTXCAT with sub-indexes for structured attributes
+-- 構造化属性のためのサブ索引を含む CTXCAT
 BEGIN
     CTX_DDL.CREATE_INDEX_SET('product_idx_set');
-    CTX_DDL.ADD_INDEX('product_idx_set', 'price');        -- NUMBER
-    CTX_DDL.ADD_INDEX('product_idx_set', 'category_id');  -- NUMBER
-    CTX_DDL.ADD_INDEX('product_idx_set', 'brand');        -- VARCHAR2
+    CTX_DDL.ADD_INDEX('product_idx_set', 'price');        -- NUMBER型
+    CTX_DDL.ADD_INDEX('product_idx_set', 'category_id');  -- NUMBER型
+    CTX_DDL.ADD_INDEX('product_idx_set', 'brand');        -- VARCHAR2型
 END;
 /
 
@@ -116,29 +116,29 @@ CREATE INDEX idx_product_ctxcat
 
 ---
 
-## The CONTAINS Operator
+## CONTAINS 演算子
 
-`CONTAINS` is the primary search operator for CONTEXT indexes. It returns a relevance score (0–100, where 100 is most relevant).
+`CONTAINS` は CONTEXT 索引に対する主要な検索演算子である。関連性スコア（0–100、100が最も高い関連性）を返す。
 
 ```sql
--- Basic keyword search (single word)
+-- 基本的なキーワード検索 (単一単語)
 SELECT product_id, product_name
 FROM   products
 WHERE  CONTAINS(description, 'widget') > 0;
 
--- Multiple words (implicit AND)
+-- 複数単語 (暗黙的な AND)
 SELECT product_id, product_name
 FROM   products
 WHERE  CONTAINS(description, 'industrial widget') > 0;
 
--- Relevance score in SELECT
+-- SELECT 句での関連性スコアの取得
 SELECT product_id, product_name,
-       SCORE(1) AS relevance  -- SCORE() must use same label as CONTAINS label
+       SCORE(1) AS relevance  -- SCORE() は CONTAINS のラベル(1)と一致させる必要がある
 FROM   products
 WHERE  CONTAINS(description, 'industrial widget', 1) > 0
 ORDER  BY relevance DESC;
 
--- CATSEARCH for CTXCAT indexes
+-- CTXCAT 索引に対する CATSEARCH
 SELECT product_id, product_name
 FROM   products
 WHERE  CATSEARCH(product_name, 'widget', 'category_id = 5 AND price < 100') > 0;
@@ -146,122 +146,122 @@ WHERE  CATSEARCH(product_name, 'widget', 'category_id = 5 AND price < 100') > 0;
 
 ---
 
-## Query Operators
+## クエリ演算子
 
-Oracle Text supports a rich query language within the CONTAINS operator string.
+Oracle Text は CONTAINS 演算子の文字列内で、豊富なクエリ言語をサポートしている。
 
-### Boolean Operators
+### ブール演算子
 
 ```sql
--- AND: both terms must appear
+-- AND: 両方の用語が含まれること
 WHERE CONTAINS(text_col, 'oracle AND database') > 0;
 
--- OR: either term
+-- OR: いずれかの用語が含まれること
 WHERE CONTAINS(text_col, 'oracle OR mysql') > 0;
 
--- NOT: exclude documents with term (NOT requires at least one positive term)
+-- NOT: 用語を除外 (NOT には少なくとも1つの肯定的な用語が必要)
 WHERE CONTAINS(text_col, 'database NOT oracle') > 0;
 
--- Shorthand: & = AND, | = OR, ~ = NOT
+-- 短縮形: & = AND, | = OR, ~ = NOT
 WHERE CONTAINS(text_col, 'oracle & database ~ mysql') > 0;
 
--- Precedence: NOT > AND > OR (use parentheses for clarity)
+-- 優先順位: NOT > AND > OR (明確にするために括弧を使用)
 WHERE CONTAINS(text_col, '(oracle | postgres) & (performance ~ slow)') > 0;
 ```
 
-### Phrase Search
+### フレーズ検索
 
 ```sql
--- Exact phrase (words must appear adjacent in this order)
+-- 正確なフレーズ (単語がこの順序で隣接していること)
 WHERE CONTAINS(description, '{high performance widget}') > 0;
 
--- Near: terms within N words of each other
+-- Near: 用語が互いに N 単語以内にあること
 WHERE CONTAINS(description, 'oracle NEAR database') > 0;
 WHERE CONTAINS(description, 'oracle NEAR((database,performance), 5)') > 0;
--- Within 5 words
+-- 5単語以内
 ```
 
-### Fuzzy Search
+### あいまい検索 (Fuzzy Search)
 
-Fuzzy search finds words that are similar (based on edit distance), useful for misspellings.
+あいまい検索は、スペルミスに対応できるよう、類似した単語を（編集距離に基づいて）検索する。
 
 ```sql
--- Fuzzy match for "widget" (finds "wigdet", "widgit", etc.)
+-- "widget" に対するあいまい一致 ("wigdet", "widgit" などを見つける)
 WHERE CONTAINS(description, 'fuzzy(widget)') > 0;
 
--- Fuzzy with score threshold and expansion limit
+-- スコアの閾値と拡張制限を指定したあいまい検索
 WHERE CONTAINS(description, 'fuzzy(widget, 60, 100, weight)') > 0;
--- 60 = minimum similarity score, 100 = max expansions
+-- 60 = 最小類似度スコア, 100 = 最大拡張数
 
--- Combined fuzzy and exact
+-- あいまい検索と正確な一致の組み合わせ
 WHERE CONTAINS(description, 'fuzzy(widgit) & premium') > 0;
 ```
 
-### Stemming Search
+### ステミング検索 (語幹検索)
 
-Stemming finds morphological variants of a word (e.g., searching "run" also finds "running", "ran", "runs").
+ステミング検索は、単語の語形変化を検索する（例: "run" を検索すると "running", "ran", "runs" も見つかる）。
 
 ```sql
--- Stem operator: finds all morphological forms
+-- stem 演算子: すべての語形変化を検索
 WHERE CONTAINS(description, 'stem(install)') > 0;
--- Finds: install, installed, installing, installation, installs
+-- install, installed, installing, installation, installs が対象となる
 
 WHERE CONTAINS(description, 'stem(connect)') > 0;
--- Finds: connect, connected, connecting, connection, connections
+-- connect, connected, connecting, connection, connections が対象となる
 
--- Explicit: match only exact word (no stemming)
+-- 明示的: 正確な単語のみに一致 (ステミングなし)
 WHERE CONTAINS(description, 'exact(install)') > 0;
 ```
 
-### Wildcard Search
+### ワイルドカード検索
 
 ```sql
--- Right truncation (prefix search)
+-- 右側方一致 (前方一致検索)
 WHERE CONTAINS(description, 'manag%') > 0;
--- Finds: manage, manager, management, managing
+-- manage, manager, management, managing が対象となる
 
--- Left truncation (suffix search)
+-- 左側方一致 (後方一致検索)
 WHERE CONTAINS(description, '%tion') > 0;
--- Finds: action, connection, installation...
+-- action, connection, installation... が対象となる
 
--- Both sides
+-- 中間一致
 WHERE CONTAINS(description, '%connect%') > 0;
--- Finds: reconnect, disconnect, interconnection...
+-- reconnect, disconnect, interconnection... が対象となる
 ```
 
-### Thematic Search
+### テーマ検索
 
 ```sql
--- ABOUT: conceptual/thematic search (requires knowledge base)
+-- ABOUT: 概念的/テーマ検索 (ナレッジ・ベースが必要)
 WHERE CONTAINS(description, 'about(database performance)') > 0;
--- Finds documents conceptually related to "database performance"
--- even if those exact words don't appear
+-- 正確な単語が含まれていなくても、"database performance" に
+-- 概念的に関連するドキュメントを検索する
 ```
 
 ---
 
-## Lexers and Wordlists: Language Configuration
+## レクサーとワードリスト: 言語設定
 
-### Creating a Custom Lexer
+### カスタム・レクサーの作成
 
 ```sql
--- Basic English lexer
+-- 基本的な英語レクサー
 BEGIN
     CTX_DDL.CREATE_PREFERENCE('my_english_lexer', 'BASIC_LEXER');
-    CTX_DDL.SET_ATTRIBUTE('my_english_lexer', 'PRINTJOINS', '_-');   -- keep _ and - in tokens
-    CTX_DDL.SET_ATTRIBUTE('my_english_lexer', 'MIXED_CASE', 'NO');   -- case-insensitive
-    CTX_DDL.SET_ATTRIBUTE('my_english_lexer', 'BASE_LETTER', 'YES'); -- strip accents
+    CTX_DDL.SET_ATTRIBUTE('my_english_lexer', 'PRINTJOINS', '_-');   -- _ と - をトークン内に保持
+    CTX_DDL.SET_ATTRIBUTE('my_english_lexer', 'MIXED_CASE', 'NO');   -- 大文字小文字を区別しない
+    CTX_DDL.SET_ATTRIBUTE('my_english_lexer', 'BASE_LETTER', 'YES'); -- アクセント記号を除去
 END;
 /
 
--- Multi-language lexer
+-- 多言語レクサー
 BEGIN
     CTX_DDL.CREATE_PREFERENCE('global_lexer', 'WORLD_LEXER');
 END;
 /
 ```
 
-### Custom Wordlist for Fuzzy/Stemming
+### あいまい/ステミング用のカスタム・ワードリスト
 
 ```sql
 BEGIN
@@ -274,7 +274,7 @@ BEGIN
 END;
 /
 
--- Apply in index creation
+-- 索引作成時に適用
 CREATE INDEX idx_articles ON articles(content)
     INDEXTYPE IS CTXSYS.CONTEXT
     PARAMETERS ('LEXER my_english_lexer WORDLIST my_wordlist');
@@ -282,12 +282,12 @@ CREATE INDEX idx_articles ON articles(content)
 
 ---
 
-## Multi-Column Indexes
+## マルチ列索引
 
-Oracle Text can index multiple columns as a single searchable unit using datastores.
+Oracle Text は、データストアを使用して複数の列を1つの検索単位として索引付けできる。
 
 ```sql
--- Concatenate multiple columns into one index
+-- 複数の列を1つの索引に連結
 BEGIN
     CTX_DDL.DROP_PREFERENCE('product_multistore');
     CTX_DDL.CREATE_PREFERENCE('product_multistore', 'MULTI_COLUMN_DATASTORE');
@@ -298,20 +298,20 @@ END;
 /
 
 CREATE INDEX idx_product_search
-    ON products (product_name)  -- anchor column (must exist on table)
+    ON products (product_name)  -- アンカー列 (表に存在する必要がある)
     INDEXTYPE IS CTXSYS.CONTEXT
     PARAMETERS ('DATASTORE product_multistore SYNC (ON COMMIT)');
 
--- Search finds matches in ANY of the indexed columns
+-- 検索はいずれかの索引付き列に一致するものを見つける
 SELECT product_id, product_name
 FROM   products
 WHERE  CONTAINS(product_name, 'industrial grade widget') > 0;
 ```
 
-### URL/File Datastore
+### URL/ファイル・データストア
 
 ```sql
--- Index content from files on the OS (FILE_DATASTORE)
+-- OS上のファイルの内容を索引付け (FILE_DATASTORE)
 BEGIN
     CTX_DDL.CREATE_PREFERENCE('file_store', 'FILE_DATASTORE');
     CTX_DDL.SET_ATTRIBUTE('file_store', 'PATH', '/data/documents');
@@ -320,7 +320,7 @@ END;
 
 CREATE TABLE document_index (
     doc_id    NUMBER PRIMARY KEY,
-    filename  VARCHAR2(500)  -- column contains file paths
+    filename  VARCHAR2(500)  -- この列にファイル・パスを格納
 );
 
 CREATE INDEX idx_documents
@@ -328,7 +328,7 @@ CREATE INDEX idx_documents
     INDEXTYPE IS CTXSYS.CONTEXT
     PARAMETERS ('DATASTORE file_store');
 
--- Index content from URLs (URL_DATASTORE)
+-- URLの内容を索引付け (URL_DATASTORE)
 BEGIN
     CTX_DDL.CREATE_PREFERENCE('url_store', 'URL_DATASTORE');
     CTX_DDL.SET_ATTRIBUTE('url_store', 'TIMEOUT', '30');
@@ -339,32 +339,32 @@ END;
 
 ---
 
-## HIGHLIGHT and SNIPPET Functions
+## HIGHLIGHT および SNIPPET 関数
 
-These functions generate context-aware result display, similar to Google's excerpt highlighting.
+これらの関数は、Google の検索結果のように、文脈に応じた結果表示（抜粋のハイライト）を生成する。
 
 ### CTX_DOC.HIGHLIGHT
 
 ```sql
--- Highlight matching terms in a stored document
+-- 格納されたドキュメント内の一致用語をハイライトする
 DECLARE
     v_markup CLOB;
 BEGIN
     CTX_DOC.MARKUP(
         index_name => 'IDX_ARTICLE_TEXT',
-        textkey    => '42',           -- primary key of the document
+        textkey    => '42',           -- ドキュメントの主キー
         text_query => 'database performance',
         restab     => v_markup,
-        starttag   => '<b>',          -- opening highlight tag
-        endtag     => '</b>'          -- closing highlight tag
+        starttag   => '<b>',          -- 開始タグ
+        endtag     => '</b>'          -- 終了タグ
     );
     DBMS_OUTPUT.PUT_LINE(DBMS_LOB.SUBSTR(v_markup, 4000, 1));
 END;
 ```
 
-### CTX_DOC.SNIPPET (Most Useful for Search UIs)
+### CTX_DOC.SNIPPET (検索UIに最適)
 
-`SNIPPET` extracts the most relevant sections of a document (the "hits in context") as short excerpts with highlighted terms.
+`SNIPPET` は、ドキュメントの最も関連性の高い部分（コンテキスト内の一致）を抽出し、ハイライトされた用語を含む短い抜粋として返す。
 
 ```sql
 DECLARE
@@ -372,23 +372,23 @@ DECLARE
 BEGIN
     CTX_DOC.SNIPPET(
         index_name => 'IDX_ARTICLE_TEXT',
-        textkey    => TO_CHAR(42),    -- must be VARCHAR2
+        textkey    => TO_CHAR(42),    -- VARCHAR2型である必要がある
         text_query => 'database performance',
         restab     => v_snippet,
         starttag   => '<em>',
         endtag     => '</em>',
-        separator  => '...',          -- between excerpts
-        numsnippets=> 3,              -- number of excerpt fragments
-        snippetlen => 200             -- characters per snippet
+        separator  => '...',          -- 抜粋間の区切り文字
+        numsnippets=> 3,              -- 抜粋フラグメントの数
+        snippetlen => 200             -- 抜粋ごとの文字数
     );
     DBMS_OUTPUT.PUT_LINE(v_snippet);
 END;
 ```
 
-### Using CTX_DOC in SQL Queries
+### SQL クエリでの CTX_DOC の使用
 
 ```sql
--- Generate snippets for search results (inline)
+-- 検索結果に対するスニペットのインライン生成
 SELECT a.article_id,
        a.title,
        SCORE(1) AS relevance,
@@ -406,54 +406,54 @@ FETCH FIRST 10 ROWS ONLY;
 
 ---
 
-## Index Maintenance: Sync and Optimize
+## 索引のメンテナンス: 同期と最適化
 
-### Sync: Index New/Updated Documents
+### 同期: 新規/更新ドキュメントの索引付け
 
 ```sql
--- Manual sync: index pending changes
+-- 手動同期: 保留中の変更を索引に反映
 EXEC CTX_DDL.SYNC_INDEX('IDX_ARTICLE_TEXT');
 
--- With memory tuning (larger = faster for big batches)
+-- メモリー・チューニング付き (大きいほど大量バッチで高速)
 EXEC CTX_DDL.SYNC_INDEX('IDX_ARTICLE_TEXT', '256M');
 
--- Check pending documents
+-- 保留中のドキュメント数を確認
 SELECT COUNT(*) FROM ctx_pending WHERE idx_name = 'IDX_ARTICLE_TEXT';
 
--- Schedule sync with DBMS_SCHEDULER
+-- DBMS_SCHEDULER を使用した同期のスケジュール設定
 BEGIN
     DBMS_SCHEDULER.CREATE_JOB(
         job_name        => 'SYNC_ARTICLE_INDEX',
         job_type        => 'PLSQL_BLOCK',
         job_action      => 'CTX_DDL.SYNC_INDEX(''IDX_ARTICLE_TEXT'', ''64M'');',
         start_date      => SYSTIMESTAMP,
-        repeat_interval => 'FREQ=MINUTELY; INTERVAL=15',  -- every 15 minutes
+        repeat_interval => 'FREQ=MINUTELY; INTERVAL=15',  -- 15分ごと
         enabled         => TRUE
     );
 END;
 ```
 
-### Optimize: Defragment the Index
+### 最適化: 索引のデフラグ
 
-Over time, as documents are updated and deleted, the CONTEXT index becomes fragmented. Optimization merges fragmented posting lists.
+ドキュメントの更新や削除が繰り返されると、CONTEXT 索引は断片化していく。最適化によって断片化したポスティング・リストがマージされる。
 
 ```sql
--- Fast optimization: quick cleanup pass
+-- 高速最適化: 簡易的なクリーンアップ
 EXEC CTX_DDL.OPTIMIZE_INDEX('IDX_ARTICLE_TEXT', 'FAST');
 
--- Full optimization: complete merge (can take hours on large indexes)
+-- 完全最適化: すべてのマージ (大規模な索引では数時間かかる場合がある)
 EXEC CTX_DDL.OPTIMIZE_INDEX('IDX_ARTICLE_TEXT', 'FULL');
 
--- Token-based optimization: spend at most N seconds
-EXEC CTX_DDL.OPTIMIZE_INDEX('IDX_ARTICLE_TEXT', 'TOKEN', maxtime => 1800);  -- 30 min
+-- トークン・ベースの最適化: 最大 N 秒間実行
+EXEC CTX_DDL.OPTIMIZE_INDEX('IDX_ARTICLE_TEXT', 'TOKEN', maxtime => 1800);  -- 30分
 
--- Schedule nightly optimization
+-- 夜間の最適化スケジュール設定
 BEGIN
     DBMS_SCHEDULER.CREATE_JOB(
         job_name        => 'OPTIMIZE_ARTICLE_INDEX',
         job_type        => 'PLSQL_BLOCK',
         job_action      => 'CTX_DDL.OPTIMIZE_INDEX(''IDX_ARTICLE_TEXT'', ''FAST'');',
-        start_date      => TRUNC(SYSTIMESTAMP) + 1 + 2/24,  -- 2 AM next day
+        start_date      => TRUNC(SYSTIMESTAMP) + 1 + 2/24,  -- 翌日の午前2時
         repeat_interval => 'FREQ=DAILY; BYHOUR=2; BYMINUTE=0',
         enabled         => TRUE
     );
@@ -462,42 +462,42 @@ END;
 
 ---
 
-## Monitoring Oracle Text Indexes
+## Oracle Text 索引の監視
 
 ```sql
--- Index status and statistics
+-- 索引のステータスと統計
 SELECT idx_name, idx_type, idx_status, idx_language,
        idx_option, idx_docid_count, idx_sync_interval
 FROM   ctx_indexes;
 
--- Index errors during sync (important for troubleshooting)
+-- 同期中の索引エラー (トラブルシューティングに重要)
 SELECT * FROM ctx_index_errors
 WHERE  err_index_name = 'IDX_ARTICLE_TEXT'
 ORDER  BY err_timestamp DESC;
 
--- Token statistics (useful for analyzing query performance)
+-- トークン統計 (クエリ・パフォーマンスの分析に便利)
 SELECT token_text, token_count, token_doc_count
-FROM   dr$idx_article_text$i  -- index table: dr$<index_name>$i
+FROM   dr$idx_article_text$i  -- 索引表: dr$<索引名>$i
 WHERE  token_text = 'database'
 ORDER  BY token_doc_count DESC;
 
--- Pending rows to be synced
+-- 同期待ちの保留行
 SELECT * FROM ctx_pending
 WHERE  idx_name = 'IDX_ARTICLE_TEXT';
 
--- User-defined preferences
+-- ユーザ定義のプリファレンス
 SELECT pre_name, pre_class, pre_object, pre_attribute, pre_value
 FROM   ctx_user_preferences;
 ```
 
 ---
 
-## Section Groups: Structured Text Search
+## セクション・グループ: 構造化テキスト検索
 
-Section groups allow you to search within specific parts of HTML or XML documents.
+セクション・グループを使用すると、HTML または XML ドキュメントの特定のセクションに限定して検索できる。
 
 ```sql
--- HTML section group
+-- HTML セクション・グループ
 BEGIN
     CTX_DDL.CREATE_SECTION_GROUP('html_sections', 'HTML_SECTION_GROUP');
     CTX_DDL.ADD_ZONE_SECTION('html_sections', 'title',  'title');  -- HTML <title>
@@ -510,13 +510,13 @@ CREATE INDEX idx_html_content ON web_pages(html_content)
     INDEXTYPE IS CTXSYS.CONTEXT
     PARAMETERS ('SECTION GROUP html_sections FORMAT HTML');
 
--- Search within specific HTML sections
+-- 特定の HTML セクション内を検索
 SELECT page_id, url
 FROM   web_pages
 WHERE  CONTAINS(html_content, 'oracle WITHIN title') > 0;
--- Only matches documents where "oracle" appears in a <title> tag
+-- "oracle" が <title> タグ内に含まれるドキュメントのみ一致する
 
--- XML section group
+-- XML セクション・グループ
 BEGIN
     CTX_DDL.CREATE_SECTION_GROUP('contract_sections', 'XML_SECTION_GROUP');
     CTX_DDL.ADD_ZONE_SECTION('contract_sections', 'terms',      'Terms');
@@ -525,7 +525,7 @@ BEGIN
 END;
 /
 
--- Find contracts mentioning "damages" specifically in the Liability section
+-- Liability セクション内で "damages" に言及している契約書を検索
 SELECT contract_id, contract_number
 FROM   contracts
 WHERE  CONTAINS(contract_xml_text, 'damages WITHIN liability') > 0;
@@ -533,52 +533,52 @@ WHERE  CONTAINS(contract_xml_text, 'damages WITHIN liability') > 0;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Choose `CTXCAT` for short text that updates frequently** (product names, titles, tags). It maintains itself automatically. Use `CONTEXT` for large documents.
-- **Schedule `SYNC_INDEX` based on acceptable staleness.** `SYNC ON COMMIT` has overhead; `SYNC EVERY n MINUTES` via the scheduler is usually better.
-- **Run `OPTIMIZE_INDEX` regularly** (weekly or nightly for active systems). Fragmented indexes return degraded relevance scores.
-- **Use `SCORE()` to rank results** and filter with `CONTAINS > threshold` rather than `> 0` to eliminate marginally relevant results.
-- **Index only columns that actually need full-text search.** Oracle Text indexes consume significant storage (often 20–40% of the original data size).
-- **Use section groups** for structured documents to enable section-scoped searches rather than whole-document searches.
-- **Test fuzzy and stem parameters** with your actual data before going to production. Overly aggressive fuzzy matching returns too many irrelevant results.
-- **Use `MULTI_COLUMN_DATASTORE`** instead of creating separate indexes on each column. One index on all text columns is faster to query than `CONTAINS(col1, q) > 0 OR CONTAINS(col2, q) > 0`.
+- **頻繁に更新される短いテキスト（製品名、タイトル、タグなど）には `CTXCAT` を選択する。** 自動的に更新が反映される。大規模ドキュメントには `CONTEXT` を使用する。
+- **許容できるデータの鮮度に基づいて `SYNC_INDEX` をスケジュールする。** `SYNC (ON COMMIT)` はオーバーヘッドがあるため、スケジューラを介した `SYNC (EVERY n MINUTES)` の方が通常は適している。
+- **定期的に `OPTIMIZE_INDEX` を実行する**（アクティブなシステムでは週次または夜間）。断片化した索引は関連性スコアの低下を招く。
+- **関連性スコアをランク付けに利用し、** `CONTAINS > 閾値` でフィルタリングすることで、関連性の低い結果を除外する。
+- **全文検索が本当に必要な列のみを索引付けする。** Oracle Text 索引は、元のデータの 20–40% 程度のストレージを消費することがある。
+- ドキュメント全体ではなく特定の部分を検索対象にする場合は、構造化ドキュメント用の**セクション・グループ**を使用する。
+- 本番環境に移行する前に、実際のデータを使用して**あいまい検索やステミングのパラメータをテストする。** 過剰にあいまいな一致は、無関係な結果を大量に返してしまう。
+- 列ごとに個別の索引を作成するのではなく、**`MULTI_COLUMN_DATASTORE`** を使用する。すべてのテキスト列を1つの索引にまとめる方が、`CONTAINS(col1, q) > 0 OR CONTAINS(col2, q) > 0` のように照会するよりも高速である。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-### Mistake 1: Querying Immediately After DML (Before Sync)
+### 間違い 1: DML 直後の照会 (同期前)
 
 ```sql
-INSERT INTO articles (article_id, content) VALUES (999, 'New article about Oracle performance');
+INSERT INTO articles (article_id, content) VALUES (999, 'Oracleパフォーマンスに関する新しい記事');
 COMMIT;
 
--- WRONG: this may return 0 rows if index has not been synced
-SELECT * FROM articles WHERE CONTAINS(content, 'Oracle performance') > 0;
+-- 誤り: 索引が同期されていないため、0行が返される可能性がある
+SELECT * FROM articles WHERE CONTAINS(content, 'Oracleパフォーマンス') > 0;
 
--- RIGHT: ensure sync if real-time search is needed
+-- 正解: リアルタイムの検索が必要な場合は、確実に同期させる
 EXEC CTX_DDL.SYNC_INDEX('IDX_ARTICLES');
-SELECT * FROM articles WHERE CONTAINS(content, 'Oracle performance') > 0;
+SELECT * FROM articles WHERE CONTAINS(content, 'Oracleパフォーマンス') > 0;
 ```
 
-### Mistake 2: Using LIKE Instead of CONTAINS
+### 間違い 2: CONTAINS の代わりに LIKE を使用する
 
 ```sql
--- WRONG for full-text: LIKE does a full table scan, ignores Text index
-WHERE description LIKE '%high performance widget%'
+-- 全文検索としては誤り: LIKE はフル・テーブル・スキャンを実行し、Text 索引を無視する
+WHERE description LIKE '%高速な製品%'
 
--- RIGHT: use CONTAINS for indexed full-text search
-WHERE CONTAINS(description, '{high performance widget}') > 0
+-- 正解: 索引付けされた全文検索には CONTAINS を使用する
+WHERE CONTAINS(description, '{高速な製品}') > 0
 ```
 
-### Mistake 3: Forgetting to Optimize After Mass Deletes/Updates
+### 間違い 3: 大規模な削除/更新の後に最適化を忘れる
 
-When you delete or update many documents and don't run `OPTIMIZE_INDEX`, the index accumulates stale "garbage" entries. This bloats the index and degrades query performance. After any bulk DML, run `CTX_DDL.OPTIMIZE_INDEX` with `FAST` or `FULL`.
+多数のドキュメントを削除または更新した後に `OPTIMIZE_INDEX` を実行しないと、索引に古い「ゴミ」エントリが蓄積される。これは索引を肥大化させ、クエリ・パフォーマンスを低下させる。大量の DML の後は、`CTX_DDL.OPTIMIZE_INDEX` を `FAST` または `FULL` で実行すること。
 
-### Mistake 4: Wrong Filter for Binary Document Types
+### 間違い 4: バイナリ・ドキュメント・タイプに対するフィルタ設定の誤り
 
-If you index a column that stores Word documents, PDFs, or HTML (as BLOBs), you must set the `FILTER` preference to `INSO_FILTER` or `AUTO_FILTER`. Without this, Oracle Text indexes raw binary content (garbage).
+Word文書、PDF、HTML（BLOBとして格納）などを索引付けする場合、`FILTER` プリファレンスを `INSO_FILTER` または `AUTO_FILTER` に設定する必要がある。これがないと、Oracle Text は生のバイナリ・コンテンツ（ゴミ）を索引付けしてしまう。
 
 ```sql
 BEGIN
@@ -591,14 +591,14 @@ CREATE INDEX idx_docs ON documents(content_blob)
     PARAMETERS ('FILTER auto_filter FORMAT COLUMN format_col');
 ```
 
-### Mistake 5: Not Using SCORE() for Ranking
+### 間違い 5: ランク付けに SCORE() を使用しない
 
 ```sql
--- Missing relevance ordering
+-- 関連性順のソートなし
 SELECT * FROM articles WHERE CONTAINS(content, 'database', 1) > 0;
--- Returns results in undefined order
+-- 順序が不定の結果が返される
 
--- Always use SCORE() to rank by relevance
+-- 常に SCORE() を使用して関連性の高い順にソートする
 SELECT article_id, title, SCORE(1) AS rel
 FROM   articles
 WHERE  CONTAINS(content, 'database', 1) > 0
@@ -607,15 +607,14 @@ ORDER  BY rel DESC;
 
 ---
 
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Text Reference 19c (CCREF)](https://docs.oracle.com/en/database/oracle/oracle-database/19/ccref/)
-- [Oracle Text Application Developer's Guide 19c (CCAPP)](https://docs.oracle.com/en/database/oracle/oracle-database/19/ccapp/)
-- [Oracle Database 19c SQL Language Reference — CONTAINS](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/)
+- [Oracle Text リファレンス 19c (CCREF)](https://docs.oracle.com/en/database/oracle/oracle-database/19/ccref/)
+- [Oracle Text アプリケーション・開発者ガイド 19c (CCAPP)](https://docs.oracle.com/en/database/oracle/oracle-database/19/ccapp/)
+- [Oracle Database 19c SQL言語リファレンス — CONTAINS](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/)

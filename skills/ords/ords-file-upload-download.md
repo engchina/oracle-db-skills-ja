@@ -1,17 +1,17 @@
-# ORDS File Upload and Download: BLOB Handling via REST
+# ORDS へのファイルのアップロードとロード: REST による BLOB 処理
 
-## Overview
+## 概要
 
-ORDS provides native support for file upload and download through HTTP. Files are stored in Oracle Database BLOB columns and served back via REST endpoints with correct MIME type headers. This pattern is used for document management systems, image repositories, report archives, and any application that needs to store and retrieve binary content alongside relational metadata.
+ORDS は、HTTP を介したファイルのアップロードとダウンロードをネイティブにサポートしている。ファイルは Oracle Database の BLOB 列に保存され、適切な MIME タイプ・ヘッダーとともに REST エンドポイントを介して提供される。このパターンは、ドキュメント管理システム、画像リポジトリ、レポート・アーカイブ、およびリレーショナル・メタデータとともにバイナリ・コンテンツを保存および取得する必要があるすべてのアプリケーションで使用されている。
 
-ORDS handles BLOB data transparently: uploaded file content is bound to PL/SQL handlers as a BLOB via the `:body` implicit parameter, and downloaded content is streamed directly from the database with the appropriate Content-Type header.
+ORDS は BLOB データを透過的に処理する。アップロードされたファイル・コンテンツは、暗黙的なパラメータである `:body` を介して BLOB として PL/SQL ハンドラーにバインドされ、ダウンロードされるコンテンツは、適切な `Content-Type` ヘッダーとともにデータベースから直接ストリーミングされる。
 
 ---
 
-## Database Setup: Tables for File Storage
+## データベースのセットアップ: ファイル保存用の表
 
 ```sql
--- General-purpose document storage table
+-- 汎用ドキュメント保存用の表
 CREATE TABLE hr.documents (
   document_id    NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   employee_id    NUMBER          REFERENCES hr.employees(employee_id),
@@ -25,8 +25,8 @@ CREATE TABLE hr.documents (
   CONSTRAINT uk_docs_emp_file UNIQUE (employee_id, filename)
 );
 
--- Use SECUREFILE LOB storage for performance
--- (specify at CREATE TABLE time for new tables)
+-- パフォーマンス向上のための SECUREFILE LOB ストレージの使用
+-- (新しい表の作成時に指定する)
 CREATE TABLE hr.document_store (
   doc_id         NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   filename       VARCHAR2(255) NOT NULL,
@@ -44,23 +44,23 @@ LOB (file_content) STORE AS SECUREFILE (
 
 ---
 
-## Uploading Files via REST
+## REST を介したファイルのアップロード
 
-### Understanding `:body` and `:content_type`
+### `:body` と `:content_type` の理解
 
-When an HTTP client sends a request with a binary body:
-- **`:body`** — The raw request body as a BLOB. This is the file content.
-- **`:body_text`** — The raw request body as a CLOB (for text payloads).
-- **`:content_type`** — The value of the `Content-Type` request header.
+HTTP クライアントがバイナリ・ボディを含むリクエストを送信した場合:
+- **`:body`** — 生のリクエスト・ボディ（BLOB 形式）。これがファイル・コンテンツになる。
+- **`:body_text`** — 生のリクエスト・ボディ（CLOB 形式、テキスト・ペイロード用）。
+- **`:content_type`** — `Content-Type` リクエスト・ヘッダーの値。
 
-These are ORDS implicit bind parameters available in any `plsql/block` handler.
+これらは、すべての `plsql/block` ハンドラーで使用可能な ORDS の暗黙的なバインド・パラメータである。
 
-### Simple Binary Upload (PUT/POST with raw body)
+### 単純なバイナリ・アップロード (生のボディを使用した PUT/POST)
 
-The simplest upload pattern: the HTTP body IS the file.
+最も単純なアップロード・パターン: HTTP ボディそのものがファイルである場合。
 
 ```sql
--- Define upload handler
+-- アップロード・ハンドラーの定義
 BEGIN
   ORDS.DEFINE_MODULE(
     p_module_name => 'hr.docs',
@@ -73,25 +73,25 @@ BEGIN
     p_pattern     => 'employees/:employee_id/documents/:filename'
   );
 
-  -- PUT: Upload/replace a document
+  -- PUT: ドキュメントのアップロード/置換
   ORDS.DEFINE_HANDLER(
     p_module_name => 'hr.docs',
     p_pattern     => 'employees/:employee_id/documents/:filename',
     p_method      => 'PUT',
     p_source_type => ORDS.source_type_plsql,
-    p_mimes_allowed => '',  -- Accept any content type
+    p_mimes_allowed => '',  -- すべてのコンテンツ・タイプを受け入れる
     p_source      => q'[
       DECLARE
         l_doc_id   hr.documents.document_id%TYPE;
         l_file_size NUMBER := DBMS_LOB.GETLENGTH(:body);
       BEGIN
-        -- Validate file size (10MB limit)
+        -- ファイル・サイズの検証 (10MB 制限)
         IF l_file_size > 10 * 1024 * 1024 THEN
           :status_code := 413;  -- Payload Too Large
           RETURN;
         END IF;
 
-        -- Upsert the document
+        -- ドキュメントのアップサート (挿入または更新)
         BEGIN
           INSERT INTO hr.documents (
             employee_id, filename, content_type,
@@ -130,31 +130,31 @@ END;
 /
 ```
 
-Example upload request using curl:
+curl を使用したアップロード・リクエストの例:
 
 ```shell
-# Upload a PDF document
+# PDF ドキュメントのアップロード
 curl -X PUT \
   https://myserver.example.com/ords/hr/docs/employees/101/documents/resume.pdf \
   -H "Content-Type: application/pdf" \
   -H "Authorization: Bearer <token>" \
   --data-binary @/path/to/resume.pdf
 
-# Upload an image
+# 画像のアップロード
 curl -X PUT \
   https://myserver.example.com/ords/hr/docs/employees/101/documents/photo.jpg \
   -H "Content-Type: image/jpeg" \
   --data-binary @/path/to/photo.jpg
 ```
 
-### Multipart Form Data Upload
+### マルチパート・フォーム・データによるアップロード (Multipart Form Data)
 
-For HTML form-based uploads (browsers sending `multipart/form-data`), the handler receives the entire multipart body in `:body`. ORDS does not natively parse multipart boundaries — use the APEX_WEB_SERVICE or a custom PL/SQL parser, or preferably use direct binary upload (above) from modern clients.
+HTML フォーム・ベースのアップロード（ブラウザが `multipart/form-data` を送信する場合）、ハンドラーはマルチパート・ボディの全データを `:body` で受信する。ORDS はネイティブではマルチパートの境界解析を行わないため、`APEX_WEB_SERVICE` やカスタムの PL/SQL パーサーを使用するか、最新のクライアントからは（上述の）直接的なバイナリ・アップロードを使用することが推奨される。
 
-For APEX-based file uploads, APEX handles multipart parsing automatically via its own framework.
+APEX ベースのファイル・アップロードの場合、APEX は独自のフレームワークを介してマルチパート解析を自動的に処理する。
 
 ```sql
--- Handler for multipart upload (requires APEX or custom parsing)
+-- マルチパート・アップロード用のハンドラー (APEX またはカスタム解析が必要)
 ORDS.DEFINE_HANDLER(
   p_module_name   => 'hr.docs',
   p_pattern       => 'upload/',
@@ -166,34 +166,34 @@ ORDS.DEFINE_HANDLER(
       l_body_text CLOB  := :body_text;
       l_body_blob BLOB  := :body;
       l_ctype     VARCHAR2(200) := :content_type;
-      -- Extract boundary from content type
+      -- コンテンツ・タイプから境界 (boundary) を抽出
       l_boundary  VARCHAR2(100);
     BEGIN
-      -- Content type looks like: multipart/form-data; boundary=----WebKitFormBoundary...
+      -- コンテンツ・タイプは次のような形式: multipart/form-data; boundary=----WebKitFormBoundary...
       l_boundary := SUBSTR(l_ctype, INSTR(l_ctype, 'boundary=') + 9);
 
-      -- For production use, use APEX_WEB_SERVICE.PARSE_MULTIPART or
-      -- a custom multipart parser package
-      -- This is a simplified illustration:
+      -- 本番環境では、APEX_WEB_SERVICE.PARSE_MULTIPART または
+      -- カスタムのマルチパート・パーサー・パッケージを使用すること
+      -- 以下は簡易的な例証:
       :status_code := 200;
     END;
   ]'
 );
 ```
 
-**Recommendation**: For browser-based file uploads, use APEX. For programmatic uploads from services, use the direct binary PUT/POST approach with the file as the raw body.
+**推奨**: ブラウザ・ベースのファイル・アップロードには APEX を使用すること。サービスからのプログラムによるアップロードには、ファイルを生のボディとして送信する直接的なバイナリ PUT/POST アプローチを使用すること。
 
 ---
 
-## Downloading Files (BLOBs) via REST
+## REST を介したファイル (BLOB) のダウンロード
 
-### Using `source_type_media`
+### `source_type_media` の使用
 
-The `media` source type is designed specifically for returning binary content. The SQL must return:
-1. A BLOB or CLOB column (the file content)
-2. Optionally: a `content_type` column (MIME type)
-3. Optionally: a `content_filename` column (for Content-Disposition)
-4. Optionally: an `etag` column (for HTTP caching)
+`media` ソース・タイプは、バイナリ・コンテンツを返すために特別に設計されている。SQL は以下を返す必要がある。
+1. BLOB または CLOB 列 (ファイル・コンテンツ)
+2. オプション: `content_type` 列 (MIME タイプ)
+3. オプション: `content_filename` 列 (Content-Disposition 用)
+4. オプション: `etag` 列 (HTTP キャッシュ用)
 
 ```sql
 BEGIN
@@ -202,7 +202,7 @@ BEGIN
     p_pattern     => 'employees/:employee_id/documents/:filename/content'
   );
 
-  -- GET: Download file content
+  -- GET: ファイル・コンテンツのダウンロード
   ORDS.DEFINE_HANDLER(
     p_module_name => 'hr.docs',
     p_pattern     => 'employees/:employee_id/documents/:filename/content',
@@ -223,26 +223,26 @@ END;
 /
 ```
 
-ORDS automatically:
-- Sets the `Content-Type` header from the `content_type` column
-- Adds `Content-Length` header
-- Streams the BLOB body to the client
-- Returns 404 if the query returns no rows
+ORDS は以下を自動的に行う。
+- `content_type` 列から `Content-Type` ヘッダーを設定
+- `Content-Length` ヘッダーを追加
+- BLOB ボディをクライアントにストリーミング
+- クエリが行を返さない場合、404 を返却
 
-Example download:
+ダウンロードの例:
 
 ```shell
-# Download a document
+# ドキュメントのダウンロード
 curl -O -J \
   https://myserver.example.com/ords/hr/docs/employees/101/documents/resume.pdf/content \
   -H "Authorization: Bearer <token>"
 ```
 
-The `-J` flag tells curl to use the server-provided filename from Content-Disposition.
+`-J` フラグは、サーバーから提供された Content-Disposition 内のファイル名を使用するように curl に指示する。
 
-### Using PL/SQL Handler for Download (More Control)
+### ダウンロード用の PL/SQL ハンドラーの使用 (より詳細な制御が必要な場合)
 
-For scenarios requiring custom headers, conditional download, or transformation:
+カスタム・ヘッダー、条件付きダウンロード、または変換が必要なシナリオの場合:
 
 ```sql
 ORDS.DEFINE_HANDLER(
@@ -275,14 +275,14 @@ ORDS.DEFINE_HANDLER(
 
       l_size := DBMS_LOB.GETLENGTH(l_blob);
 
-      -- Set response headers
+      -- レスポンス・ヘッダーの設定
       OWA_UTIL.MIME_HEADER(l_ctype, FALSE);
       HTP.P('Content-Length: ' || l_size);
       HTP.P('Content-Disposition: attachment; filename="' || l_filename || '"');
       HTP.P('Cache-Control: private, max-age=3600');
       OWA_UTIL.HTTP_HEADER_CLOSE;
 
-      -- Stream BLOB in chunks to handle large files
+      -- 大きなファイルを処理するために BLOB をチャンクに分けてストリーミング
       WHILE l_offset <= l_size LOOP
         l_amount := LEAST(l_chunk_size, l_size - l_offset + 1);
         DBMS_LOB.READ(l_blob, l_amount, l_offset, l_chunk);
@@ -297,7 +297,7 @@ ORDS.DEFINE_HANDLER(
 
 ---
 
-## Listing Documents (Metadata Without Content)
+## ドキュメントのリスト表示 (コンテンツを含まないメタデータ)
 
 ```sql
 ORDS.DEFINE_TEMPLATE(
@@ -319,7 +319,7 @@ ORDS.DEFINE_HANDLER(
            d.description,
            d.uploaded_by,
            d.upload_date,
-           -- Construct download link
+           -- ダウンロード・リンクの構築
            '/ords/hr/docs/employees/' || d.employee_id
              || '/documents/' || d.filename || '/content' AS download_url
     FROM   hr.documents d
@@ -331,9 +331,9 @@ ORDS.DEFINE_HANDLER(
 
 ---
 
-## MIME Type Handling
+## MIME タイプの処理
 
-Store MIME types in the database alongside the blob. Map file extensions to MIME types during upload:
+BLOB と一緒に MIME タイプをデータベースに保存する。アップロード時にファイル拡張子を MIME タイプにマッピングする:
 
 ```sql
 CREATE OR REPLACE FUNCTION hr.get_mime_type(p_filename IN VARCHAR2) RETURN VARCHAR2 AS
@@ -362,7 +362,7 @@ END;
 /
 ```
 
-In the upload handler, use the client-provided Content-Type but fall back to filename-based detection:
+アップロード・ハンドラーでは、クライアントから提供された Content-Type を使用するが、提供されない場合はファイル名ベースの検出にフォールバックする:
 
 ```sql
 l_mime := NVL(
@@ -373,40 +373,40 @@ l_mime := NVL(
 
 ---
 
-## Content-Disposition: Inline vs Attachment
+## Content-Disposition: インライン表示 vs 添付ファイル
 
-Control whether browsers display files inline or prompt for download:
+ブラウザがファイルをインラインで表示するか、ダウンロードを促すかを制御する:
 
 ```sql
--- For images and PDFs (display inline in browser)
+-- 画像や PDF の場合 (ブラウザ内でインライン表示)
 HTP.P('Content-Disposition: inline; filename="' || l_filename || '"');
 
--- For all other files (force download)
+-- その他のすべてのファイルの場合 (ダウンロードを強制)
 HTP.P('Content-Disposition: attachment; filename="' || l_filename || '"');
 
--- RFC 5987 encoding for non-ASCII filenames
+-- 非 ASCII 文字のファイル名用の RFC 5987 エンコーディング
 HTP.P('Content-Disposition: attachment; filename*=UTF-8'''' ||
       UTL_URL.ESCAPE(l_filename, TRUE, 'UTF-8'));
 ```
 
 ---
 
-## Streaming Large Files
+## 大容量ファイルのストリーミング
 
-For files larger than available memory, always stream in chunks. The chunk approach above using `DBMS_LOB.READ` and `WPG_DOCLOAD.DOWNLOAD_FILE` handles this correctly. For the `source_type_media` approach, ORDS streams automatically.
+メモリ容量を超える大容量ファイルの場合は、常にチャンク（分割）してストランキングを行う。上述の `DBMS_LOB.READ` と `WPG_DOCLOAD.DOWNLOAD_FILE` を使用したチャンク方式は、これを正しく処理する。`source_type_media` アプローチの場合、ORDS が自動的にストランキングを行う。
 
-ORDS configuration for large uploads (adjust JVM memory and request limits):
+大容量アップロードのための ORDS 構成（JVM メモリとリクエスト制限の調整）:
 
 ```shell
-# Adjust pagination and request limits via the ORDS CLI
+# ORDS CLI を使用してページネーションとリクエスト制限を調整
 ords --config /opt/oracle/ords/config config set misc.pagination.maxRows 1000
 ```
 
-In Jetty standalone, the default max request size is 200MB. For larger files, consider chunked upload (client splits file, uploads parts, server assembles).
+Jetty スタンドアロンでは、デフォルトの最大リクエスト・サイズは 200MB である。より大きなファイルの場合、分割アップロード（クライアントがファイルを分割してアップロードし、サーバー側で組み立てる）を検討すること。
 
 ---
 
-## Deleting Documents
+## ドキュメントの削除
 
 ```sql
 ORDS.DEFINE_HANDLER(
@@ -433,34 +433,33 @@ ORDS.DEFINE_HANDLER(
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Use `source_type_media` for downloads when possible**: It is the cleanest, most efficient approach. ORDS handles all streaming and header management automatically.
-- **Always validate file size before storing**: Check `DBMS_LOB.GETLENGTH(:body)` against a maximum allowed size. Return 413 (Payload Too Large) for oversized uploads.
-- **Store MIME type in the database**: Do not rely solely on file extension at download time. Store the `Content-Type` from the upload request and use it at download time.
-- **Use SECUREFILE LOB storage**: SECUREFILE provides compression, deduplication, and encryption for LOB columns. Significantly more efficient than BASICFILE for large-scale file storage.
-- **Set appropriate caching headers**: For static content (logos, PDFs) that rarely changes, add `Cache-Control: max-age=86400`. For dynamic documents, use `Cache-Control: private, no-cache`.
-- **Restrict allowed file types**: Validate `content_type` against an allowlist during upload. Reject dangerous types (`application/x-executable`, `text/html` for user-uploaded content).
+- **可能な限りダウンロードには `source_type_media` を使用する**: 最もクリーンで効率的なアプローチである。ORDS がすべてのストランキングとヘッダー管理を自動的に処理する。
+- **保存前に常にファイル・サイズを検証する**: `DBMS_LOB.GETLENGTH(:body)` を使用して、許容される最大サイズを超えていないか確認する。サイズ超過のアップロードに対しては 413 (Payload Too Large) を返すこと。
+- **MIME タイプをデータベースに保存する**: ダウンロード時にファイル拡張子のみに頼らないこと。アップロード・リクエスト時の `Content-Type` を保存し、ダウンロード時にそれを使用すること。
+- **SECUREFILE LOB ストレージを使用する**: SECUREFILE は、LOB 列に対して圧縮、重複排除、および暗号化を提供する。大規模なファイル保存において BASICFILE よりも大幅に効率的である。
+- **適切なキャッシュ・ヘッダーを設定する**: めったに変更されない静的コンテンツ（ロゴ、PDF など）には `Cache-Control: max-age=86400` を追加する。動的なドキュメントには `Cache-Control: private, no-cache` を使用する。
+- **許可されるファイル・タイプを制限する**: アップロード時に `content_type` を許可リストに対して検証する。危険なタイプ（`application/x-executable` や、ユーザー・アップロード・コンテンツとしての `text/html` など）は拒否すること。
 
-## Common Mistakes
+## よくある間違い
 
-- **Using `:body_text` for binary files**: Binary data (images, PDFs) must use `:body` (BLOB). Using `:body_text` (CLOB) for binary data corrupts the content due to character set conversion.
-- **Not setting `Content-Type` on download**: Without a Content-Type header, browsers guess the type and may display the wrong viewer or prompt the wrong application to open the file.
-- **Forgetting COMMIT in upload handlers**: PL/SQL handlers do not auto-commit. An INSERT/UPDATE of a BLOB without COMMIT leaves the row locked and the data not visible to other sessions.
-- **Loading entire BLOB into memory**: `SELECT file_content INTO l_blob FROM ...` loads the full BLOB pointer, but actual data is not fully read until accessed. Use `DBMS_LOB.READ` in a loop for large files to avoid OOM errors.
-- **Encoding filenames with special characters in headers**: Filenames with spaces, accents, or non-ASCII characters in Content-Disposition headers must be RFC 5987 encoded. Plain `filename="résumé.pdf"` will be garbled in some clients.
-- **Using BASICFILE LOB for new tables**: BASICFILE is legacy. Always specify `STORE AS SECUREFILE` for BLOB columns in new tables to benefit from better performance and storage options.
+- **バイナリ・ファイルに `:body_text` を使用する**: バイナリ・データ（画像、PDF など）には `:body` (BLOB) を使用する必要がある。バイナリ・データに `:body_text` (CLOB) を使用すると、文字セット変換によってデータが破損する。
+- **ダウンロード時に `Content-Type` を設定していない**: Content-Type ヘッダーがないと、ブラウザはタイプを推測するため、間違ったビューアーで表示されたり、ファイルを開くための間違ったアプリケーションが促されたりする可能性がある。
+- **アップロード・ハンドラーでのコミット忘れ**: PL/SQL ハンドラーは自動コミットされない。COMMIT を行わずに BLOB の INSERT/UPDATE を行うと、行がロックされたままになり、他のセッションからデータが参照できなくなる。
+- **BLOB 全体をメモリにロードする**: `SELECT file_content INTO l_blob FROM ...` は BLOB ポインタ全体をロードするが、実際のデータはアクセスされるまで完全には読み込まれない。OOM（メモリ不足）エラーを避けるため、大容量ファイルには `DBMS_LOB.READ` をループ内で使用してストランキングすること。
+- **ヘッダー内のファイル名に特殊文字を含める**: Content-Disposition ヘッダー内のファイル名にスペース、アクセント記号、または非 ASCII 文字が含まれる場合は、RFC 5987 エンコードが必要である。単純に `filename="résumé.pdf"` と記述すると、一部のクライアントで文字化けする。
+- **新しい表に BASICFILE LOB を使用する**: BASICFILE はレガシーである。新しい表の BLOB 列には、より優れたパフォーマンスとストレージ・オプションを利用できる `STORE AS SECUREFILE` を常に指定すること。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。混在環境では 19c 互換の代替手段を維持すること。
+- 19c と 26ai の両方をサポートする環境では、リリース・アップデートによってデフォルトや非推奨が異なる場合があるため、両方のバージョンで構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [ORDS Developer's Guide — Handling BLOBs and Binary Data](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/developing-oracle-rest-data-services-applications.html)
 - [Oracle Database SecureFiles and Large Objects Developer's Guide 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/adlob/index.html)

@@ -1,77 +1,77 @@
-# Locking and Concurrency in Oracle Database
+# Oracle Databaseにおけるロックと並行性
 
-## Overview
+## 概要
 
-Oracle's concurrency model is fundamentally different from many other databases. Its Multi-Version Concurrency Control (MVCC) implementation means that **readers never block writers and writers never block readers**. This eliminates a huge class of contention problems that plague other databases, but Oracle still uses locks for write-write conflicts and explicit locking scenarios.
+Oracleの並行性モデルは、他の多くのデータベースとは根本的に異なっている。マルチバージョン並行性制御（MVCC）の実装により、**「読取り側が書込み側をブロックせず、書込み側が読取り側をブロックしない」**ことを意味する。これにより、他のデータベースを悩ませる膨大な種類の競合問題が排除されるが、Oracleでも書込み同士の競合や明示的なロック・シナリオでは引き続きロックが使用される。
 
-Understanding Oracle's locking architecture is essential for writing applications that scale under concurrent load without deadlocks or excessive contention.
+Oracleのロック・アーキテクチャを理解することは、デッドロックや過度な競合を発生させずに、並行ロード下でスケールするアプリケーションを作成するために不可欠である。
 
 ---
 
-## Multi-Version Concurrency Control (MVCC)
+## マルチバージョン並行性制御 (MVCC)
 
-### How MVCC Works in Oracle
+### OracleにおけるMVCCの仕組み
 
-When a row is modified, Oracle does not overwrite the old data in place. Instead:
+行が変更される際、Oracleは元のデータを上書きしない。代わりに：
 
-1. The new row version is written to the data block
-2. The old row version is stored in the **undo tablespace** (rollback segments)
-3. Readers needing the old version reconstruct it from undo data on demand
+1. 新しい行バージョンがデータ・ブロックに書き込まれる
+2. 古い行バージョンは**undo表領域**（ロールバック・セグメント）に格納される
+3. 古いバージョンを必要とする読取り側は、必要に応じてundoデータからそれを再構成する
 
-This creates a "time-travel" capability: every read sees a **consistent snapshot** of the database at the query's start SCN (System Change Number), regardless of concurrent writers.
+これにより「タイムトラベル」機能が実現する。すべての読取りは、並行する書込み側の影響を受けることなく、クエリの開始時点のSCN（システム変更番号）における**一貫したスナップショット**を参照する。
 
 ```sql
--- Check current SCN
+-- 現在のSCNを確認
 SELECT current_scn FROM v$database;
 
--- Query data as it existed at a specific SCN (Flashback Query)
+-- 特定のSCN時点のデータを照会 (フラッシュバック・クエリ)
 SELECT * FROM orders AS OF SCN 12345678;
 
--- Query as of a timestamp
+-- 特定のタイムスタンプ時点のデータを照会
 SELECT * FROM orders AS OF TIMESTAMP (SYSTIMESTAMP - INTERVAL '5' MINUTE);
 ```
 
-### Read Consistency Guarantees
+### 読取り一貫性の保証
 
-| Scenario | Oracle Behavior |
+| シナリオ | Oracleの動作 |
 |---|---|
-| Reader vs. Writer (same rows) | No blocking; reader sees pre-change data via undo |
-| Writer vs. Reader (same rows) | No blocking; writer proceeds, reader uses undo |
-| Writer vs. Writer (same row) | Writer 2 blocks until Writer 1 commits or rolls back |
-| Long-running read (undo recycled) | `ORA-01555: snapshot too old` |
+| 読取り vs. 書込み (同一行) | ブロックなし。読取り側はundoを介して変更前のデータを参照 |
+| 書込み vs. 読取り (同一行) | ブロックなし。書込み側は処理を続行し、読取り側はundoを使用 |
+| 書込み vs. 書込み (同一行) | 書込み側2は、書込み側1がコミットまたはロールバックするまでブロックされる |
+| 長時間の読取り (undoが再利用済み) | `ORA-01555: snapshot too old` (スナップショットが古すぎます) |
 
-### ORA-01555: Snapshot Too Old
+### ORA-01555: スナップショットが古すぎます
 
-This error occurs when Oracle cannot reconstruct an old row version because the undo data has been overwritten (undo retention exceeded). Prevention strategies:
+このエラーは、undoデータが上書きされたために（undo保持期間を超過）、Oracleが古い行バージョンを再構成できない場合に発生する。防止策：
 
 ```sql
--- Check current undo retention setting
+-- 現在の undo_retention 設定を確認
 SHOW PARAMETER undo_retention;
 
--- Increase undo retention (seconds)
-ALTER SYSTEM SET UNDO_RETENTION = 3600;  -- 1 hour
+-- undo保持期間を延長 (秒)
+ALTER SYSTEM SET UNDO_RETENTION = 3600;  -- 1時間
 
--- Check undo advisor recommendation
+-- undoアドバイザの推奨値を確認
 SELECT d.undoblks, d.maxquerylen, d.tuned_undoretention
 FROM   v$undostat d
 WHERE  rownum <= 1;
 
--- Enable undo retention guarantee (prevents undo from being overwritten)
+-- undo保持の保証を有効化 (undoの上書きを防止)
 ALTER TABLESPACE undotbs1 RETENTION GUARANTEE;
 ```
 
 ---
 
-## Row-Level Locking
+## 行レベル・ロック
 
-Oracle acquires row-level locks automatically on any row that is `INSERT`ed, `UPDATE`d, or `DELETE`d. These locks are:
+Oracleは、`INSERT`、`UPDATE`、または `DELETE` されるすべての行に対して、自動的に行レベルのロックを取得する。これらのロックは：
 
-- **Exclusive (X mode)**: held by the modifying session
-- **Released only at COMMIT or ROLLBACK**
-- Stored in the data block itself (no lock table), making them essentially free regardless of how many rows are locked
+- **排他 (Xモード)**: 変更を行っているセッションによって保持される
+- **COMMIT または ROLLBACK 時にのみ解放される**
+- データ・ブロック自体に格納される（ロック・テーブルを持たない）ため、ロックする行数に関わらず実質的にリソース消費がない
 
 ```sql
--- View current row locks
+-- 現在の行ロックを表示
 SELECT o.object_name, l.session_id, l.locked_mode,
        s.username, s.status, s.sql_id
 FROM   v$locked_object l
@@ -80,14 +80,14 @@ JOIN   v$session s ON l.session_id = s.sid
 ORDER  BY o.object_name;
 ```
 
-### Lock Modes
+### ロック・モード
 
-| Mode Code | Name | Description |
+| モード・コード | 名称 | 説明 |
 |---|---|---|
 | 0 | None | |
-| 1 | Null (N) | Sub-shared; almost no restriction |
-| 2 | Row Share (SS) | SELECT FOR UPDATE, or DML in progress |
-| 3 | Row Exclusive (SX) | DML in progress on table |
+| 1 | Null (N) | サブ共有。ほとんど制限なし |
+| 2 | Row Share (SS) | SELECT FOR UPDATE、または実行中のDML |
+| 3 | Row Exclusive (SX) | 表に対して実行中のDML |
 | 4 | Share (S) | `LOCK TABLE ... IN SHARE MODE` |
 | 5 | Share Row Exclusive (SSX) | |
 | 6 | Exclusive (X) | `LOCK TABLE ... IN EXCLUSIVE MODE`, DDL |
@@ -96,25 +96,25 @@ ORDER  BY o.object_name;
 
 ## SELECT FOR UPDATE
 
-`SELECT FOR UPDATE` locks selected rows immediately, before any DML is performed. This is the primary mechanism for **pessimistic locking** — reserving rows for update before you have determined the new values.
+`SELECT FOR UPDATE` は、DMLが実行される前に、選択された行を即座にロックする。これは、更新後の値を決定する前に行を予約するための**悲観的ロック (Pessimistic Locking)** の主要な手段である。
 
-### Basic Syntax
+### 基本構文
 
 ```sql
--- Lock all selected rows; wait indefinitely for any already-locked rows
+-- 選択された全行をロックする。既にロックされている行があれば無期限に待機する
 SELECT account_id, balance
 FROM   accounts
 WHERE  account_id IN (1001, 2001)
 FOR UPDATE;
 
--- Lock and process
+-- ロックして処理する例
 DECLARE
     v_balance accounts.balance%TYPE;
 BEGIN
     SELECT balance INTO v_balance
     FROM   accounts
     WHERE  account_id = 1001
-    FOR UPDATE;  -- row is now locked exclusively
+    FOR UPDATE;  -- 行が排他的にロックされる
 
     IF v_balance >= 500 THEN
         UPDATE accounts SET balance = balance - 500 WHERE account_id = 1001;
@@ -127,16 +127,16 @@ BEGIN
 END;
 ```
 
-### NOWAIT — Fail Immediately If Locked
+### NOWAIT — ロックされていれば即座に失敗させる
 
 ```sql
--- Raise ORA-00054 immediately if any row is already locked
+-- 既にロックされている行があれば、即座に ORA-00054 を発生させる
 SELECT product_id, stock_qty
 FROM   inventory
 WHERE  product_id = 42
 FOR UPDATE NOWAIT;
 
--- Handle in application
+-- アプリケーションでの処理例
 DECLARE
     v_qty NUMBER;
 BEGIN
@@ -154,27 +154,27 @@ BEGIN
 END;
 ```
 
-### WAIT n — Wait Up to N Seconds
+### WAIT n — 最大 n 秒間待機する
 
 ```sql
--- Wait up to 5 seconds for the lock; then raise ORA-30006
+-- ロックを最大5秒間待機し、取得できなければ ORA-30006 を発生させる
 SELECT order_id, status
 FROM   orders
 WHERE  order_id = 9999
 FOR UPDATE WAIT 5;
 ```
 
-### SKIP LOCKED — Non-Blocking Queue Processing
+### SKIP LOCKED — 非ブロック型のキュー処理
 
-`SKIP LOCKED` is extremely useful for implementing work queues. It skips any rows that are already locked rather than waiting, allowing multiple workers to process the queue in parallel without contention.
+`SKIP LOCKED` は、ワーク・キューの実装に非常に有用である。待機する代わりに、既にロックされている行をスキップする。これにより、複数のワーカーが競合することなく並行してキューを処理できる。
 
 ```sql
--- Worker process: claim the next available pending job
+-- ワーカー・プロセス: 次に利用可能な担当ジョブを取得
 DECLARE
     v_job_id   NUMBER;
     v_payload  VARCHAR2(4000);
 BEGIN
-    -- Grab one unprocessed job, skipping any locked by other workers
+    -- 他のワーカーがロックしている行をスキップし、未処理のジョブを1つ取得
     SELECT job_id, payload INTO v_job_id, v_payload
     FROM   job_queue
     WHERE  status = 'PENDING'
@@ -182,148 +182,148 @@ BEGIN
     ORDER  BY created_at
     FOR UPDATE SKIP LOCKED;
 
-    -- Mark as in-progress
+    -- 処理中としてマーク
     UPDATE job_queue SET status = 'PROCESSING', started_at = SYSTIMESTAMP
     WHERE  job_id = v_job_id;
 
     COMMIT;
 
-    -- Process the job (outside the lock)
+    -- ジョブを処理 (ロックの外で実行)
     process_job(v_job_id, v_payload);
 
-    -- Mark complete
+    -- 完了としてマーク
     UPDATE job_queue SET status = 'DONE', completed_at = SYSTIMESTAMP
     WHERE  job_id = v_job_id;
     COMMIT;
 
 EXCEPTION
     WHEN NO_DATA_FOUND THEN
-        NULL;  -- No jobs available
+        NULL;  -- 利用可能なジョブなし
 END;
 ```
 
-Multiple instances of this worker can run concurrently without any inter-process coordination — Oracle handles the row-level locking automatically.
+このワーカーの複数のインスタンスは、プロセス間調整を必要とすることなく、Oracleの行レベル・ロックによって自動的に処理が振り分けられる。
 
 ---
 
-## Deadlock Detection and Avoidance
+## デッドロックの検出と回避
 
-A **deadlock** occurs when two or more sessions are each waiting for a lock held by another session in the cycle.
+**デッドロック**は、2つ以上のセッションが互いに他方の保持するロックを待機し、サイクルが発生した際に起こる。
 
-Oracle automatically detects deadlocks using a background cycle-detection algorithm. When detected:
-- One session receives `ORA-00060: deadlock detected while waiting for resource`
-- Oracle rolls back **only the statement** that received the error (not the entire transaction)
-- The rolled-back session must re-execute the statement or roll back the transaction
+Oracleはバックグラウンドのサイクル検出アルゴリズムを使用して、自動的にデッドロックを検出する。検出されると：
+- 1つのセッションが `ORA-00060: deadlock detected while waiting for resource` (リソース待機中にデッドロックが検出されました) を受信する
+- Oracleはエラーを受信した**単一の文のみ**をロールバックする（トランザクション全体ではない）
+- ロールバックされたセッションは、その文を再実行するか、トランザクション全体をロールバックする必要がある
 
 ```sql
--- Deadlock scenario
--- Session 1                           Session 2
-UPDATE t SET v=1 WHERE id=1;  -- OK
-                                UPDATE t SET v=2 WHERE id=2;  -- OK
-UPDATE t SET v=3 WHERE id=2;  -- WAITS
-                                UPDATE t SET v=4 WHERE id=1;  -- WAITS -> DEADLOCK
-                                -- Session 2 receives ORA-00060
+-- デッドロックのシナリオ
+-- セッション 1                           セッション 2
+UPDATE t SET v=1 WHERE id=1;  -- 成功
+                                UPDATE t SET v=2 WHERE id=2;  -- 成功
+UPDATE t SET v=3 WHERE id=2;  -- 待機
+                                UPDATE t SET v=4 WHERE id=1;  -- 待機 -> デッドロック
+                                -- セッション 2 が ORA-00060 を受信
 ```
 
-### Deadlock Alert Log
+### デッドロック・アラート・ログ
 
-Oracle records deadlock traces in the alert log and a trace file:
+Oracleはアラート・ログとトレース・ファイルにデッドロックのトレースを記録する：
 
 ```bash
-# Find deadlock traces
+# デッドロックのトレースを検索
 grep -l "deadlock" $ORACLE_BASE/diag/rdbms/*/trace/*.trc | tail -5
 ```
 
 ```sql
--- Check recent deadlocks in unified auditing / alert log
+-- 最近のデッドロックをトレース・ファイルから特定
 SELECT value FROM v$diag_info WHERE name = 'Default Trace File';
 ```
 
-### Deadlock Avoidance Strategies
+### デッドロック回避戦略
 
-**Strategy 1: Consistent Lock Ordering**
+**戦略 1: 一貫したロック順序**
 
-Always acquire locks in the same order across all code paths:
+すべてのコード・パスで常に同じ順序でロックを取得する：
 
 ```sql
--- WRONG: different order creates deadlock potential
--- Path A: locks order 1, then order 2
--- Path B: locks order 2, then order 1
+-- 誤り: 異なる順序はデッドロックの要因となる
+-- パス A: 注文1をロック、次に注文2をロック
+-- パス B: 注文2をロック、次に注文1をロック
 
--- RIGHT: always lock in ascending order
--- Both paths: lock lower ID first, then higher ID
+-- 正解: 常に昇順でロックする
+-- 両方のパス: IDが小さい方を先にロックし、次に大きい方をロック
 SELECT * FROM orders WHERE order_id IN (1, 2) ORDER BY order_id FOR UPDATE;
 ```
 
-**Strategy 2: Lock at the Start of a Transaction**
+**戦略 2: トランザクション開始時にロックを取得**
 
-Acquire all needed locks upfront rather than incrementally:
+増分的にではなく、必要なすべてのロックを事前に取得する：
 
 ```sql
--- Lock all rows the transaction will need before doing any computation
+-- 処理を開始する前に、トランザクションで必要になる全行をロック
 SELECT account_id, balance
 FROM   accounts
 WHERE  account_id IN (:from_acct, :to_acct)
-ORDER  BY account_id  -- consistent ordering
+ORDER  BY account_id  -- 一貫した順序
 FOR UPDATE;
 ```
 
-**Strategy 3: Use NOWAIT / Short WAIT**
+**戦略 3: NOWAIT / 短い WAIT の使用**
 
-Convert waiting deadlocks into immediately-handled exceptions:
+待機によるデッドロックを、即座に処理可能な例外に変換する：
 
 ```sql
 BEGIN
     SELECT * FROM resource_table WHERE resource_id = :id FOR UPDATE NOWAIT;
-    -- ... process ...
+    -- ... 処理 ...
     COMMIT;
 EXCEPTION
     WHEN resource_busy THEN
-        -- Retry after brief delay, or queue the work
+        -- 短い遅延の後にリトライするか、キューに入れる
         log_retry('Resource busy, retrying...');
         DBMS_SESSION.SLEEP(0.5);
-        -- retry logic
+        -- リトライ・ロジック
 END;
 ```
 
-**Strategy 4: Minimize Transaction Duration**
+**戦略 4: トランザクション期間の最小化**
 
-The longer a transaction holds locks, the more opportunity for deadlocks. Commit frequently for batch operations.
+ロックを保持する時間が長いほど、デッドロックの機会が増える。バッチ操作の場合は頻繁にコミットする。
 
 ---
 
-## Table Locks
+## 表ロック
 
-Oracle acquires **table-level locks (TM locks)** in addition to row locks. Table locks prevent conflicting DDL while DML is in progress. They do NOT prevent concurrent DML unless explicitly escalated.
+Oracleは、行ロックに加えて**表レベルのロック (TMロック)**を取得する。表ロックは、DML実行中に競合するDDLが発生するのを防ぐ。明示的にエスカレーションしない限り、並行するDMLを妨げることはない。
 
-### Explicit Table Locking
+### 明示的な表ロック
 
 ```sql
--- Lock entire table to prevent concurrent modifications
--- (blocks other DML; use sparingly)
+-- 並行する変更を防ぐために表全体をロック
+-- (他のDMLをブロックするため、控えめに使用すること)
 LOCK TABLE orders IN EXCLUSIVE MODE;
-LOCK TABLE orders IN EXCLUSIVE MODE NOWAIT;  -- fail if locked
+LOCK TABLE orders IN EXCLUSIVE MODE NOWAIT;  -- ロックされていれば失敗
 
--- Share mode: prevents DML but allows concurrent readers
+-- 共有モード: DMLは防ぐが、並行する読取りは許可する
 LOCK TABLE orders IN SHARE MODE;
 
--- Row exclusive: default mode acquired automatically during DML
+-- 行排他: DML中に自動的に取得されるデフォルト・モード
 LOCK TABLE orders IN ROW EXCLUSIVE MODE;
 ```
 
-### When Table Locks Are Needed
+### 表ロックが必要な場面
 
-Table locks in `EXCLUSIVE MODE` are rarely needed in application code. Primary use cases:
-- Bulk load operations where you want to prevent any concurrent DML
-- Schema changes when `ONLINE DDL` is not available
-- Explicit synchronization for ETL processes
+アプリケーション・コードで `EXCLUSIVE MODE` の表ロックが必要になることは稀である。主なユースケースは：
+- 並行するDMLを完全に禁止したい大量ロード操作
+- `ONLINE DDL` が利用できない場合のスキーマ変更
+- ETLプロセスの明示的な同期
 
 ```sql
--- ETL pattern: lock staging table exclusively for safe swap
+-- ETLパターン: 安全なスワップのためにステージング表を排他的にロック
 BEGIN
     LOCK TABLE staging_orders IN EXCLUSIVE MODE NOWAIT;
 
-    -- Merge staging into production
+    -- ステージングから本番へのマージ
     MERGE INTO production_orders p
     USING staging_orders s ON (p.order_id = s.order_id)
     WHEN MATCHED THEN UPDATE SET p.status = s.status
@@ -339,12 +339,12 @@ END;
 
 ---
 
-## Lock Monitoring Queries
+## ロックの監視クエリ
 
-### Active Locks and Blocked Sessions
+### アクティブなロックとブロックされたセッション
 
 ```sql
--- Find blocking sessions and what they are blocking
+-- ブロックしているセッションと、ブロックされている内容を特定
 SELECT
     blocker.sid         AS blocking_sid,
     blocker.serial#     AS blocking_serial,
@@ -368,10 +368,10 @@ ORDER BY
     wait_seconds DESC;
 ```
 
-### Lock Wait Tree (Hierarchical)
+### ロック待機ツリー (階層型)
 
 ```sql
--- Show the full lock wait chain using hierarchical query
+-- 階層クエリを使用して、ロック待機チェーンの全容を表示
 SELECT
     LPAD(' ', 2 * (LEVEL - 1)) || sid AS sid,
     username,
@@ -393,7 +393,7 @@ START WITH blocking_session IS NULL AND status = 'ACTIVE'
 ORDER SIBLINGS BY sid;
 ```
 
-### Identify SQL Being Executed by Blocked Session
+### ブロックされたセッションが実行しているSQLの特定
 
 ```sql
 SELECT s.sid, s.blocking_session, s.event,
@@ -403,10 +403,10 @@ JOIN   v$sql sq ON s.sql_id = sq.sql_id
 WHERE  s.blocking_session IS NOT NULL;
 ```
 
-### Lock History (AWR — requires Diagnostics Pack license)
+### ロック履歴 (AWR — Diagnostics Pack ライセンスが必要)
 
 ```sql
--- Top waiting events for locks over last hour
+-- 過去1時間のロックに関する待機イベントのトップ
 SELECT event, total_waits, time_waited_micro / 1e6 AS total_wait_secs
 FROM   v$system_event
 WHERE  wait_class = 'Concurrency'
@@ -415,55 +415,55 @@ ORDER  BY time_waited_micro DESC;
 
 ---
 
-## Optimistic vs. Pessimistic Locking
+## 楽観的ロック vs. 悲観的ロック
 
-### Pessimistic Locking (SELECT FOR UPDATE)
+### 悲観的ロック (SELECT FOR UPDATE)
 
-Lock the row immediately, before reading the value you'll base your update on. Use when:
-- Contention on the row is high
-- You cannot afford to retry on conflict
-- The "think time" between read and update is very short
+更新の根拠となる値を読み取る前に、即座に行をロックする。以下の場合に使用する：
+- 行に対する競合が非常に激しい
+- 衝突時のリトライが許容できない
+- 読取りから更新までの「考慮時間（Think time）」が非常に短い
 
-### Optimistic Locking
+### 楽観的ロック (Optimistic Locking)
 
-Read the row without locking. Only at update time, verify the row hasn't changed:
+ロックせずに行を読み取る。更新時にのみ、行が変更されていないことを検証する：
 
 ```sql
--- Read (no lock)
+-- 読取り (ロックなし)
 SELECT order_id, status, last_modified, ORA_ROWSCN AS read_scn
 FROM   orders
 WHERE  order_id = 1001;
--- Application processes the data, user thinks about it...
+-- アプリケーションがデータを処理し、ユーザーが考える...
 
--- Update with collision detection using ORA_ROWSCN or version column
+-- ORA_ROWSCN またはバージョン列を使用した衝突検出を伴う更新
 UPDATE orders
 SET    status = 'APPROVED', last_modified = SYSTIMESTAMP
 WHERE  order_id = 1001
-  AND  ORA_ROWSCN = :read_scn;  -- fails if row was changed since we read it
+  AND  ORA_ROWSCN = :read_scn;  -- 読取り以降に行が変更されていれば失敗する
 
 IF SQL%ROWCOUNT = 0 THEN
-    -- Row was modified by someone else; retry or raise conflict error
+    -- 他の誰かに変更された。リトライまたは衝突エラーを発生させる
     RAISE_APPLICATION_ERROR(-20003, 'Conflict: order was modified. Please reload and retry.');
 END IF;
 COMMIT;
 ```
 
-**Using a version column for optimistic locking:**
+**バージョン列を使用した楽観的ロック:**
 
 ```sql
--- Table design
+-- 表設計
 CREATE TABLE orders (
     order_id    NUMBER PRIMARY KEY,
     status      VARCHAR2(20),
-    version_no  NUMBER DEFAULT 1 NOT NULL  -- incremented on every update
+    version_no  NUMBER DEFAULT 1 NOT NULL  -- 更新のたびにインクリメント
 );
 
--- Update with version check
+-- バージョン・チェックを伴う更新
 UPDATE orders
 SET    status = :new_status,
        version_no = version_no + 1
 WHERE  order_id = :order_id
-  AND  version_no = :read_version;  -- must match what was read
+  AND  version_no = :read_version;  -- 読み取った値と一致する必要がある
 
 IF SQL%ROWCOUNT = 0 THEN
     RAISE_APPLICATION_ERROR(-20004, 'Stale data: please reload.');
@@ -472,34 +472,34 @@ END IF;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Prefer optimistic locking** for low-contention scenarios. Only escalate to `FOR UPDATE` when you genuinely need to guarantee no concurrent modification between read and update.
-- **Keep lock duration as short as possible.** Acquire locks immediately before the DML, not at the start of a user interaction.
-- **Never hold locks across network round-trips or user input.** A user who goes to lunch while your transaction holds a lock blocks everyone else.
-- **Use `SKIP LOCKED` for queue-based workloads** to enable horizontal scaling of workers without a separate queue infrastructure.
-- **Order lock acquisitions consistently** to prevent deadlocks.
-- **Monitor `v$lock` and `v$session`** in production for blocking chains. Set up alerting when `seconds_in_wait` exceeds a threshold.
-- **Avoid `LOCK TABLE IN EXCLUSIVE MODE`** in application code — it is almost always the wrong tool and creates a serialization bottleneck.
+- **競合が少ないシナリオでは楽観的ロックを優先する。** 読取りから更新の間に並行変更がないことを確実に保証する必要がある場合にのみ、`FOR UPDATE` へのエスカレーションを行う。
+- **ロック時間を可能な限り短く保つ。** ユーザーとのやり取りの開始時ではなく、DMLの直前にロックを取得する。
+- **ネットワーク・ラウンドトリップやユーザー入力を挟んでロックを保持しない。** トランザクションがロックを保持したままユーザーが席を外すと、他の全員がブロックされる。
+- **キュー型のワークロードには `SKIP LOCKED` を使用する。** 別のキュー基盤を必要とせず、ワーカーの水平スケーリングが可能になる。
+- **一貫した順序でロックを取得し**、デッドロックを防止する。
+- **本番環境で `v$lock` と `v$session` を監視し**、ブロッキング・チェーンを確認する。`seconds_in_wait` が閾値を超えた場合にアラートが出るよう設定する。
+- **アプリケーション・コードでの `LOCK TABLE IN EXCLUSIVE MODE` を避ける。** これはほとんどの場合、誤った手法であり、シリアル実行のボトルネックを生じさせる。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-### Mistake 1: Assuming Reads Are Blocked by Writes
+### 間違い 1: 書込みによって読取りがブロックされると誤解する
 
-Developers from SQL Server or MySQL backgrounds sometimes add unnecessary `NOLOCK` hints or read-uncommitted isolation. In Oracle, this is never needed — reads are never blocked by writers.
+SQL ServerやMySQLの経験がある開発者は、不要な `NOLOCK` ヒントや Read-uncommitted 分離レベルを追加しようとすることがある。Oracleではこれは一切不要である。読取り側が書込み側にブロックされることはない。
 
-### Mistake 2: Catching ORA-00060 and Ignoring It
+### 間違い 2: ORA-00060 をキャッチして無視する
 
-When an application catches a deadlock error, it must roll back the statement (Oracle already did the statement rollback, but the transaction is still open with prior changes) and then decide whether to retry or abort the whole transaction.
+アプリケーションがデッドロック・エラーをキャッチした場合、文をロールバックし（Oracleは文のロールバックを既に行っているが、トランザクションは以前の変更を保持してオープンのままである）、リトライするかトランザクション全体を中止するかを決定する必要がある。
 
 ```plpgsql
--- WRONG: continue as if nothing happened
+-- 誤り: 何もなかったかのように続行
 EXCEPTION WHEN OTHERS THEN
-    IF SQLCODE = -60 THEN NULL; END IF;  -- ignore deadlock!
+    IF SQLCODE = -60 THEN NULL; END IF;  -- デッドロックを無視！
 
--- RIGHT: rollback and handle
+-- 正解: ロールバックして対処
 EXCEPTION WHEN OTHERS THEN
     IF SQLCODE = -60 THEN
         ROLLBACK;
@@ -510,26 +510,25 @@ EXCEPTION WHEN OTHERS THEN
     END IF;
 ```
 
-### Mistake 3: Using SELECT FOR UPDATE in Read-Only Scenarios
+### 間違い 3: 読取り専用のシナリオで SELECT FOR UPDATE を使用する
 
-`SELECT FOR UPDATE` acquires exclusive locks. If the application only reads the data (no subsequent DML), those locks block other writers unnecessarily for the duration of the transaction.
+`SELECT FOR UPDATE` は排他ロックを取得する。アプリケーションがデータを確認するだけで、その後のDMLが発生しない場合、それらのロックはトランザクションが終了するまで無意味に他の書込み側をブロックし続ける。
 
-### Mistake 4: Escalating to Table Locks Prematurely
+### 間違い 4: 早まって表ロックにエスカレーションする
 
-Some developers use `LOCK TABLE IN EXCLUSIVE MODE` to "be safe" during batch updates. This serializes all processing, destroying any benefit from parallel execution. Use row-level locking and batch commits instead.
+バッチ更新中に「念のため」`LOCK TABLE IN EXCLUSIVE MODE` を使用する開発者がいる。これはすべての処理を直列化（シリアライズ）し、並列実行によるメリットを破壊してしまう。代わりに行レベル・ロックとバッチ・コミットを使用すること。
 
 ---
 
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Database 19c Concepts (CNCPT) — Data Concurrency and Consistency](https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/)
-- [Oracle Database 19c Application Developer's Guide (ADFNS)](https://docs.oracle.com/en/database/oracle/oracle-database/19/adfns/)
-- [V$LOCK — Oracle Database 19c Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-LOCK.html)
-- [V$SESSION — Oracle Database 19c Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-SESSION.html)
+- [Oracle Database 19c 概念 (CNCPT) — データの並行性と一貫性](https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/)
+- [Oracle Database 19c アプリケーション・開発者ガイド (ADFNS)](https://docs.oracle.com/en/database/oracle/oracle-database/19/adfns/)
+- [V$LOCK — Oracle Database 19c リファレンス](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-LOCK.html)
+- [V$SESSION — Oracle Database 19c リファレンス](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-SESSION.html)

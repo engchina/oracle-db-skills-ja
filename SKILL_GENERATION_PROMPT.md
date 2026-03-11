@@ -1,118 +1,107 @@
-# Skill File Generation Prompt
+# スキル・ファイル生成プロンプト
 
-Use this prompt when generating any new skills file. It enforces documentation
-verification before writing a single line of content.
+新しいスキル・ファイルを生成する際は、このプロンプトを使用してください。コンテンツを1行も書く前に、ドキュメントの検証を強制するものです。
 
 ---
 
-## The Prompt
+## プロンプト
 
 ```
-You are writing a reference skills file for: **[TOPIC]**
+あなたは以下のトピックに関するリファレンス・スキル・ファイルを執筆しています：**[TOPIC]**
 
-Output file: skills/[category]/[filename].md
+出力ファイル：skills/[category]/[filename].md
 
 ---
 
-### PHASE 1 — RESEARCH FIRST, WRITE NOTHING YET
+### フェーズ 1 — まず調査、執筆はまだしない
 
-Before writing any content, you MUST:
+コンテンツを記述する前に、必ず以下を行ってください：
 
-1. Fetch the official documentation for this topic. Preferred sources in order:
-   - docs.oracle.com (official Oracle product docs)
-   - Oracle GitHub repositories (oracle-samples, oracle)
-   - Oracle blog / thatjeffsmith.com for SQLcl-specific topics
+1. このトピックに関する公式ドキュメントを取得します。優先順位は以下の通りです：
+   - docs.oracle.com (公式Oracle製品ドキュメント)
+   - Oracle GitHub リポジトリ (oracle-samples, oracle)
+   - Oracle ブログ / thatjeffsmith.com (SQLcl固有のトピック)
    - Oracle LiveLabs
 
-2. For each major claim you intend to make, identify the exact doc page and
-   section that supports it.
+2. 主張しようとする主要な事項ごとに、それを裏付ける正確なドキュメントのページとセクションを特定してください。
 
-3. List every URL you successfully fetched and read.
+3. 取得および読み取りに成功したすべてのURLをリストアップしてください。
 
-4. If a doc page returns 404 or you cannot find authoritative documentation
-   for a specific claim, note it explicitly — do NOT invent or infer.
+4. ドキュメント・ページが404を返す場合、または特定の主張に対して信頼できるドキュメントが見つからない場合は、その旨を明記してください。捏造や推測は決して行わないでください。
 
 ---
 
-### PHASE 2 — VERIFICATION CHECKLIST
+### フェーズ 2 — 検証チェックリスト
 
-Before writing the file, answer each question:
+ファイルを執筆する前に、各質問に回答してください：
 
-- [ ] What is the minimum product version required for each feature covered?
-- [ ] Does the file include an explicit `## Oracle Version Notes (19c vs 26ai)` section?
-- [ ] What are the exact command/flag/parameter names as shown in the docs?
-- [ ] What environment variables are documented? (List only what you found, not what seems plausible)
-- [ ] What are the documented limitations or unsupported scenarios?
-- [ ] Is there anything I "know" about this topic that I could NOT find confirmed
-      in the fetched docs? → If yes, either omit it or mark it explicitly with
-      "> ⚠️ Unverified: not found in official docs — confirm before use."
-
----
-
-### PHASE 3 — WRITE THE FILE
-
-Only now write the skills file. Rules:
-
-- Include ONLY content you found in the docs you fetched in Phase 1.
-- Every command, flag, syntax example, and parameter name must match the docs exactly.
-- If a feature works differently across versions, say so explicitly with version numbers.
-- Add a section named `## Oracle Version Notes (19c vs 26ai)` before `## Sources` when version differences are relevant.
-- In that section, identify 19c baseline behavior and 26ai-capable features with compatibility notes.
-- Do not extrapolate. If the docs show flag X works one way, do not assume
-  related flag Y works similarly unless the docs say so.
-- If you are uncertain about anything, use the warning callout:
-  > ⚠️ Unverified: [state what is uncertain] — check official docs before use.
-- Do not invent environment variable names, command flags, API methods, table
-  names, or configuration keys. If you did not read it in the docs, it does not go in.
+- [ ] 対象となる各機能に必要な最小製品バージョンは何ですか？
+- [ ] ファイルに明示的な`## Oracle Version Notes (19c vs 26ai)`セクションが含まれていますか？
+- [ ] ドキュメントに示されている正確なコマンド/フラグ/パラメータ名は何ですか？
+- [ ] どのような環境変数がドキュメント化されていますか？（見つかったものだけをリストし、妥当に思えるだけのものは含めないでください）
+- [ ] ドキュメント化されている制限事項やサポートされていないシナリオは何ですか？
+- [ ] このトピックについて「知っている」ことの中で、取得したドキュメントで確認できなかったことはありますか？ → ある場合は、除外するか、次のように明記してください：
+      "> ⚠️ 未検証：公式ドキュメントに見当たらない事項。使用前に確認が必要。"
 
 ---
 
-### PHASE 4 — SELF-REVIEW BEFORE SUBMITTING
+### フェーズ 3 — ファイルの執筆
 
-After writing, re-read the file and for each code block or command example ask:
+ここからはじめてスキル・ファイルを執筆します。ルール：
 
-1. "Did I find this exact syntax in the official docs?" → If no, remove or flag it.
-2. "Did I invent any parameter names, env vars, or flags?" → If yes, remove them.
-3. "Are version requirements stated where relevant?" → If no, add them.
-4. "Did I include `## Oracle Version Notes (19c vs 26ai)` when version-specific features appear?" → If no, add it.
-5. "Is there anything here that sounds plausible but I cannot point to a doc source for?" → Remove or flag it.
+- フェーズ1で取得したドキュメントで見つかったコンテンツ「のみ」を含めてください。
+- すべてのコマンド、フラグ、構文例、およびパラメータ名は、ドキュメントと完全に一致している必要があります。
+- バージョンによって機能が異なる場合は、バージョン番号を明記して説明してください。
+- バージョンの違いが関連する場合は、`## Sources`の前に`## Oracle Version Notes (19c vs 26ai)`というセクションを追加してください。
+- そのセクションで、19cのベースライン動作と26ai対応機能を特定し、互換性ノートを記載してください。
+- 推測による拡張はしないでください。ドキュメントでフラグXがある方法で動作することが示されていても、ドキュメントに記載がない限り、関連するフラグYも同様に動作すると仮定しないでください。
+- 不確実な点がある場合は、警告コールアウトを使用してください：
+  > ⚠️ 未検証：[不確実な内容を記述] — 使用前に公式ドキュメントを確認してください。
+- 環境変数名、コマンド・フラグ、APIメソッド、表名、または構成キーを捏造しないでください。ドキュメントで読んでいないものは含めないでください。
 
-Report which doc URLs you used as sources at the bottom of the file under a
-`## Sources` section.
+---
+
+### フェーズ 4 — 送信前のセルフレビュー
+
+執筆後、ファイルを読み返し、各コード・ブロックやコマンド例について自問自答してください：
+
+1. 「この正確な構文を公式ドキュメントで見つけたか？」 → いいえの場合は、削除するかフラグを立ててください。
+2. 「パラメータ名、環境変数、またはフラグを捏造していないか？」 → はいの場合は、削除してください。
+3. 「関連する場所にバージョン要件が記載されているか？」 → いいえの場合は、追加してください。
+4. 「バージョン固有の機能が登場する場合、`## Oracle Version Notes (19c vs 26ai)`を含めたか？」 → いいえの場合は、追加してください。
+5. 「妥当に聞こえるが、ドキュメントのソースを指し示すことができない内容はないか？」 → 削除するかフラグを立ててください。
+
+ソースとして使用したドキュメントのURLを、ファイル末尾の`## Sources`セクションに報告してください。
 ```
 
 ---
 
-## Example Usage
+## 使用例
 
-Replace `[TOPIC]`, `[category]`, and `[filename]` with specifics:
+`[TOPIC]`、`[category]`、および`[filename]`を具体的な内容に置き換えます：
 
 ```
-You are writing a reference skills file for: **SQLcl MCP Server**
-Output file: skills/sqlcl/sqlcl-mcp-server.md
+あなたは以下のトピックに関するリファレンス・スキル・ファイルを執筆しています：**SQLcl MCP Server**
+出力ファイル：skills/sqlcl/sqlcl-mcp-server.md
 
-[paste the full prompt above]
+[上記のフル・プロンプトをここに貼り付け]
 ```
 
 ---
 
-## Red Flags — Signs a Generated File Needs Review
+## 警告サイン（レッドフラグ） — 生成されたファイルのレビューが必要な場合
 
-If a generated file contains any of the following, treat it as unverified and
-re-run with this prompt:
+生成されたファイルに以下のいずれかが含まれている場合は、未検証として扱い、このプロンプトで再実行してください：
 
-- Environment variable names not found in official docs
-- Command flags not shown in the product's CLI help or docs
-- Version numbers stated without a citation
-- Tool/API names that sound plausible but produce no search results
-- Configuration keys or JSON properties not shown in official examples
-- Any claim about default behaviour that isn't explicitly stated in the docs
+- 公式ドキュメントに見当たらない環境変数名
+- 製品のCLIヘルプやドキュメントに示されていないコマンド・フラグ
+- 引用のないバージョン番号
+- 妥当に聞こえるが検索結果に出てこないツール/API名
+- 公式の例に示されていない構成キーやJSONプロパティ
+- ドキュメントに明示されていないデフォルト動作に関する主張
 
 ---
 
-## Notes for Reviewers
+## レビュアーへの注意事項
 
-When reviewing a generated file, spot-check by picking 3-5 specific claims
-(commands, flags, env vars, version numbers) and verifying each one against
-the linked sources at the bottom of the file. If any claim has no source, flag
-it for removal or verification before merging.
+生成されたファイルをレビューする際は、3〜5個の具体的な主張（コマンド、フラグ、環境変数、バージョン番号）をランダムに選び、ファイル末尾のリンク先ソースと照らし合わせてスポット・チェックを行ってください。ソースのない主張がある場合は、マージ前に削除または検証を求めるフラグを立ててください。

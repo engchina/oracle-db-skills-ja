@@ -1,29 +1,29 @@
-# Migrating MySQL to Oracle
+# MySQL から Oracle への移行
 
-## Overview
+## 概要
 
-MySQL and Oracle share a common lineage through Oracle Corporation's ownership, but the two engines are architecturally and syntactically very different. MySQL's permissive type coercion, backtick identifiers, `AUTO_INCREMENT` columns, and simplified stored procedure syntax all require deliberate translation. This guide covers every significant divergence you will encounter during a MySQL-to-Oracle migration, including data type mapping, SQL dialect differences, stored procedure conversion, and data extraction strategies.
+MySQL と Oracle は、Oracle Corporation による所有という共通の系統を持っているが、その 2 つのエンジンはアーキテクチャおよび構文の両面で大きく異なる。MySQL の寛容な型強制、バッククォートによる識別子、`AUTO_INCREMENT` 列、および簡素化されたストアド・プロシージャ構文はすべて、慎重な変換を必要とする。本ガイドでは、データ型マッピング、SQL 方言の違い、ストアド・プロシージャの変換、およびデータ抽出戦略など、MySQL から Oracle への移行中に遭遇する主要な相違点をすべて網羅する。
 
 ---
 
-## Data Type Mapping
+## データ型マッピング
 
-### Integer and Auto-Increment Types
+### 整数とオートインクリメント型
 
-MySQL's `AUTO_INCREMENT` is a per-column property that automatically assigns incrementing integers. Oracle provides two mechanisms: identity columns (12c+) and sequences.
+MySQL の `AUTO_INCREMENT` は、インクリメントする整数を自動的に割り当てる列ごとのプロパティである。Oracle では、アイデンティティ（IDENTITY）列 (12c 以降) とシーケンスという 2 つのメカニズムが用意されている。
 
-| MySQL | Oracle | Notes |
+| MySQL | Oracle | 備考 |
 |---|---|---|
-| `TINYINT` | `NUMBER(3)` | Range −128 to 127 |
-| `SMALLINT` | `NUMBER(5)` | Range −32,768 to 32,767 |
-| `MEDIUMINT` | `NUMBER(7)` | MySQL-specific; no Oracle equivalent |
+| `TINYINT` | `NUMBER(3)` | 範囲：−128 ～ 127 |
+| `SMALLINT` | `NUMBER(5)` | 範囲：−32,768 ～ 32,767 |
+| `MEDIUMINT` | `NUMBER(7)` | MySQL 固有。Oracle に同等の型はない |
 | `INT` / `INTEGER` | `NUMBER(10)` | |
 | `BIGINT` | `NUMBER(19)` | |
-| `TINYINT(1)` | `NUMBER(1)` | MySQL convention for BOOLEAN |
-| `INT AUTO_INCREMENT` | `NUMBER GENERATED ALWAYS AS IDENTITY` | See detailed example below |
+| `TINYINT(1)` | `NUMBER(1)` | BOOLEAN に対する MySQL の慣習的な型 |
+| `INT AUTO_INCREMENT` | `NUMBER GENERATED ALWAYS AS IDENTITY` | 詳細は後述の例を参照 |
 | `BIGINT AUTO_INCREMENT` | `NUMBER(19) GENERATED ALWAYS AS IDENTITY` | |
 
-**AUTO_INCREMENT → Identity Column:**
+**AUTO_INCREMENT → アイデンティティ列：**
 
 ```sql
 -- MySQL
@@ -33,7 +33,7 @@ CREATE TABLE customers (
     created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP
 );
 
--- Oracle (12c+, identity column)
+-- Oracle (12c 以降、アイデンティティ列)
 CREATE TABLE customers (
     customer_id NUMBER       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     email       VARCHAR2(255) NOT NULL,
@@ -42,10 +42,10 @@ CREATE TABLE customers (
 );
 ```
 
-**AUTO_INCREMENT → Sequence + Trigger (pre-12c or for explicit control):**
+**AUTO_INCREMENT → シーケンス + トリガー (12c 未満または明示的な制御が必要な場合)：**
 
 ```sql
--- Oracle sequence
+-- Oracle シーケンス
 CREATE SEQUENCE customers_seq
     START WITH 1
     INCREMENT BY 1
@@ -59,24 +59,24 @@ CREATE TABLE customers (
 );
 ```
 
-### String Types
+### 文字列型
 
-| MySQL | Oracle | Notes |
+| MySQL | Oracle | 備考 |
 |---|---|---|
-| `CHAR(n)` | `CHAR(n)` | Direct equivalent |
-| `VARCHAR(n)` | `VARCHAR2(n)` | Max 65,535 bytes in MySQL; 4000 / 32767 in Oracle |
-| `TINYTEXT` | `VARCHAR2(255)` | Max 255 bytes |
-| `TEXT` | `VARCHAR2(4000)` or `CLOB` | Max 65,535 bytes in MySQL |
-| `MEDIUMTEXT` | `CLOB` | Max 16 MB |
-| `LONGTEXT` | `CLOB` | Max 4 GB |
-| `TINYBLOB` | `RAW(255)` | Max 255 bytes |
-| `BLOB` | `BLOB` | Binary large object |
-| `MEDIUMBLOB` | `BLOB` | Max 16 MB |
-| `LONGBLOB` | `BLOB` | Max 4 GB |
-| `ENUM('a','b','c')` | `VARCHAR2(n)` + CHECK constraint | See example below |
-| `SET('a','b','c')` | `VARCHAR2(n)` or junction table | Multi-value MySQL type; denormalize or normalize |
+| `CHAR(n)` | `CHAR(n)` | 直接的な同等物 |
+| `VARCHAR(n)` | `VARCHAR2(n)` | MySQL では最大 65,535 バイト。Oracle では 4000 / 32767 バイト |
+| `TINYTEXT` | `VARCHAR2(255)` | 最大 255 バイト |
+| `TEXT` | `VARCHAR2(4000)` または `CLOB` | MySQL では最大 65,535 バイト |
+| `MEDIUMTEXT` | `CLOB` | 最大 16 MB |
+| `LONGTEXT` | `CLOB` | 最大 4 GB |
+| `TINYBLOB` | `RAW(255)` | 最大 255 バイト |
+| `BLOB` | `BLOB` | バイナリ・ラージ・オブジェクト |
+| `MEDIUMBLOB` | `BLOB` | 最大 16 MB |
+| `LONGBLOB` | `BLOB` | 最大 4 GB |
+| `ENUM('a','b','c')` | `VARCHAR2(n)` + CHECK 制約 | 詳細は後述の例を参照 |
+| `SET('a','b','c')` | `VARCHAR2(n)` または交差テーブル | 複数選択可能な MySQL 型。非正規化するか正規化する |
 
-**ENUM → CHECK constraint:**
+**ENUM → CHECK 制約：**
 
 ```sql
 -- MySQL
@@ -94,26 +94,26 @@ CREATE TABLE orders (
 );
 ```
 
-### Date and Time Types
+### 日付と時間型
 
-| MySQL | Oracle | Notes |
+| MySQL | Oracle | 備考 |
 |---|---|---|
-| `DATE` | `DATE` | Oracle DATE also stores time (midnight if unset) |
-| `TIME` | No equivalent | Store as `VARCHAR2(8)` or `NUMBER` (seconds) |
-| `DATETIME` | `DATE` or `TIMESTAMP` | Use TIMESTAMP to preserve fractional seconds |
-| `TIMESTAMP` | `TIMESTAMP WITH TIME ZONE` | MySQL TIMESTAMP converts to UTC; Oracle stores TZ explicitly |
-| `YEAR` | `NUMBER(4)` | MySQL-specific 1-byte year type |
+| `DATE` | `DATE` | Oracle の DATE は時刻も保持する（未設定時は午前 0 時） |
+| `TIME` | 同等の型なし | `VARCHAR2(8)` または `NUMBER` (秒数) として格納 |
+| `DATETIME` | `DATE` または `TIMESTAMP` | 秒の小数部を保持するには TIMESTAMP を使用 |
+| `TIMESTAMP` | `TIMESTAMP WITH TIME ZONE` | MySQL の TIMESTAMP は UTC に変換される。Oracle はタイムゾーンを明示的に格納 |
+| `YEAR` | `NUMBER(4)` | 1 バイトの年を表す MySQL 固有の型 |
 
-**Key difference:** MySQL `TIMESTAMP` auto-converts to UTC on insert and converts back on select per session time zone. Oracle `TIMESTAMP WITH TIME ZONE` stores the offset literally. Review applications that rely on MySQL's implicit UTC conversion.
+**重要な違い：** MySQL の `TIMESTAMP` は、挿入時に UTC に自動変換され、セッションのタイムゾーンに従って選択時に再度変換される。Oracle の `TIMESTAMP WITH TIME ZONE` は、オフセットをそのまま格納する。MySQL の暗黙的な UTC 変換に依存しているアプリケーションについては再検討すること。
 
 ```sql
--- MySQL TIMESTAMP with auto-update
+-- 自動更新付きの MySQL TIMESTAMP
 CREATE TABLE records (
     id         INT AUTO_INCREMENT PRIMARY KEY,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Oracle equivalent using a trigger
+-- トリガーを使用した Oracle での同等実装
 CREATE TABLE records (
     id         NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP
@@ -128,45 +128,45 @@ END;
 /
 ```
 
-### Numeric Types
+### 数値型
 
-| MySQL | Oracle | Notes |
+| MySQL | Oracle | 備考 |
 |---|---|---|
-| `DECIMAL(p,s)` / `NUMERIC(p,s)` | `NUMBER(p,s)` | Direct equivalent |
-| `FLOAT` | `BINARY_FLOAT` | IEEE 754 32-bit |
-| `DOUBLE` / `DOUBLE PRECISION` | `BINARY_DOUBLE` | IEEE 754 64-bit |
-| `BIT(n)` | `RAW(CEIL(n/8))` | Bit field type |
+| `DECIMAL(p,s)` / `NUMERIC(p,s)` | `NUMBER(p,s)` | 直接的な同等物 |
+| `FLOAT` | `BINARY_FLOAT` | IEEE 754 32 ビット |
+| `DOUBLE` / `DOUBLE PRECISION` | `BINARY_DOUBLE` | IEEE 754 64 ビット |
+| `BIT(n)` | `RAW(CEIL(n/8))` | ビット・フィールド型 |
 
-### JSON and Spatial Types
+### JSON と空間型
 
-| MySQL | Oracle | Notes |
+| MySQL | Oracle | 備考 |
 |---|---|---|
-| `JSON` | `JSON` (21c+) or `CLOB IS JSON` | Oracle 12c: use CLOB with IS JSON constraint |
-| `GEOMETRY` | `SDO_GEOMETRY` | Oracle Spatial; requires separate licensing in some editions |
-| `POINT`, `LINESTRING`, etc. | `SDO_GEOMETRY` subtypes | |
+| `JSON` | `JSON` (21c 以降) または `CLOB IS JSON` | Oracle 12c：IS JSON 制約付きの CLOB を使用 |
+| `GEOMETRY` | `SDO_GEOMETRY` | Oracle Spatial。エディションによっては個別のライセンスが必要 |
+| `POINT`, `LINESTRING` など | `SDO_GEOMETRY` subtypes | |
 
 ---
 
-## SQL Dialect Differences
+## SQL 方言の違い
 
-### Backtick Identifiers → Double-Quoted Identifiers
+### バッククォートによる識別子 → ダブルクォーテーションによる識別子
 
-MySQL uses backticks to quote identifiers (especially when they clash with reserved words). Oracle uses double quotes. The safest approach is to rename objects to not require quoting at all.
+MySQL は識別子を囲むためにバッククォートを使用する（特に予約語と衝突する場合）。Oracle はダブルクォーテーションを使用する。最も安全なアプローチは、引用符を全く必要としないようにオブジェクト名を変更することである。
 
 ```sql
--- MySQL (backtick quoting)
+-- MySQL (バッククォートによる引用)
 SELECT `order`, `desc`, `key` FROM `order_details`;
 CREATE TABLE `user` (`group` INT, `select` VARCHAR(100));
 
--- Oracle (double-quote quoting — avoid if possible)
+-- Oracle (ダブルクォーテーションによる引用 — 可能な限り避けること)
 SELECT "order", "desc", "key" FROM "order_details";
 
--- Best practice: rename to avoid reserved words
+-- ベスト・プラクティス：予約語を避けるために名前を変更する
 CREATE TABLE user_accounts (user_group NUMBER, selection VARCHAR2(100));
 SELECT order_num, description, access_key FROM order_details;
 ```
 
-**Important:** Oracle double-quoted identifiers become case-sensitive. `"MyTable"` and `mytable` are different objects in Oracle. Prefer unquoted identifiers in Oracle (they fold to uppercase).
+**重要：** Oracle でダブルクォーテーションで囲まれた識別子は、大文字小文字が区別されるようになる。Oracle において `"MyTable"` と `mytable` は異なるオブジェクトである。Oracle では引用符なしの識別子（大文字に畳み込まれる）を推奨する。
 
 ### LIMIT → FETCH FIRST
 
@@ -175,40 +175,40 @@ SELECT order_num, description, access_key FROM order_details;
 SELECT * FROM products ORDER BY price ASC LIMIT 10;
 SELECT * FROM products ORDER BY price ASC LIMIT 10 OFFSET 30;
 
--- Oracle 12c+
+-- Oracle 12c 以降
 SELECT * FROM products ORDER BY price ASC FETCH FIRST 10 ROWS ONLY;
 SELECT * FROM products ORDER BY price ASC OFFSET 30 ROWS FETCH NEXT 10 ROWS ONLY;
 
--- Oracle 11g and earlier
+-- Oracle 11g 以前
 SELECT * FROM (SELECT * FROM products ORDER BY price ASC) WHERE ROWNUM <= 10;
 ```
 
-### GROUP BY Behavior
+### GROUP BY の動作
 
-MySQL (with `sql_mode` not including `ONLY_FULL_GROUP_BY`) allows selecting non-aggregated, non-grouped columns. Oracle enforces strict GROUP BY compliance.
+MySQL は (`ONLY_FULL_GROUP_BY` を含まない `sql_mode` の場合) 集計されていない、かつグループ化されていない列を選択することを許可する。Oracle は厳格な GROUP BY 準拠を強制する。
 
 ```sql
--- MySQL (permissive mode — this "works" but is undefined behavior)
+-- MySQL (寛容なモード — 動作はするが未定義の挙動)
 SELECT dept_id, last_name, COUNT(*) FROM employees GROUP BY dept_id;
 
--- Oracle — ERROR: ORA-00979: not a GROUP BY expression
--- Must include last_name in GROUP BY or use an aggregate:
+-- Oracle — エラー: ORA-00979: not a GROUP BY expression
+-- last_name を GROUP BY に含めるか、集計関数を使用する必要がある：
 SELECT dept_id, MAX(last_name) AS sample_name, COUNT(*) FROM employees GROUP BY dept_id;
 ```
 
 ### IF and IF NOT EXISTS
 
 ```sql
--- MySQL DDL with IF EXISTS / IF NOT EXISTS
+-- MySQL DDL (IF EXISTS / IF NOT EXISTS 付き)
 CREATE TABLE IF NOT EXISTS audit_log (id INT PRIMARY KEY, action VARCHAR(100));
 DROP TABLE IF EXISTS temp_staging;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS notes TEXT;
 
--- Oracle 23c+ (natively supported)
+-- Oracle 23c 以降 (ネイティブ・サポート)
 CREATE TABLE IF NOT EXISTS audit_log (id NUMBER PRIMARY KEY, action VARCHAR2(100));
 DROP TABLE IF EXISTS temp_staging;
 
--- Oracle pre-23c: use PL/SQL exception handling
+-- Oracle 23c 未満：PL/SQL の例外処理を使用
 BEGIN
     EXECUTE IMMEDIATE 'DROP TABLE temp_staging';
 EXCEPTION
@@ -218,33 +218,33 @@ END;
 /
 ```
 
-### String Functions
+### 文字列関数
 
-| MySQL Function | Oracle Equivalent |
+| MySQL 関数 | Oracle 同等物 |
 |---|---|
-| `CONCAT(a, b, c)` | `a \|\| b \|\| c` or `CONCAT(CONCAT(a,b),c)` |
-| `CONCAT_WS(',', a, b, c)` | `a \|\| ',' \|\| b \|\| ',' \|\| c` (manual) |
+| `CONCAT(a, b, c)` | `a \|\| b \|\| c` または `CONCAT(CONCAT(a,b),c)` |
+| `CONCAT_WS(',', a, b, c)` | `a \|\| ',' \|\| b \|\| ',' \|\| c` (手動結合) |
 | `GROUP_CONCAT(col SEPARATOR ',')` | `LISTAGG(col, ',') WITHIN GROUP (ORDER BY col)` |
 | `SUBSTRING(s, pos, len)` | `SUBSTR(s, pos, len)` |
 | `LOCATE(sub, s)` | `INSTR(s, sub)` |
-| `INSTR(s, sub)` | `INSTR(s, sub)` — same |
+| `INSTR(s, sub)` | `INSTR(s, sub)` — 同様 |
 | `LCASE(s)` / `LOWER(s)` | `LOWER(s)` |
 | `UCASE(s)` / `UPPER(s)` | `UPPER(s)` |
-| `TRIM(s)` | `TRIM(s)` — same |
-| `LTRIM(s)` | `LTRIM(s)` — same |
-| `RTRIM(s)` | `RTRIM(s)` — same |
-| `SPACE(n)` | `RPAD(' ', n)` or `LPAD(' ', n)` |
-| `REPEAT(s, n)` | Write a custom PL/SQL function |
-| `REVERSE(s)` | No built-in; use a PL/SQL function |
+| `TRIM(s)` | `TRIM(s)` — 同様 |
+| `LTRIM(s)` | `LTRIM(s)` — 同様 |
+| `RTRIM(s)` | `RTRIM(s)` — 同様 |
+| `SPACE(n)` | `RPAD(' ', n)` または `LPAD(' ', n)` |
+| `REPEAT(s, n)` | カスタム PL/SQL 関数を記述 |
+| `REVERSE(s)` | 組み込み関数なし。PL/SQL 関数を使用 |
 | `FORMAT(n, d)` | `TO_CHAR(n, 'FM999,999,999.00')` |
 | `LEFT(s, n)` | `SUBSTR(s, 1, n)` |
 | `RIGHT(s, n)` | `SUBSTR(s, -n)` |
-| `LENGTH(s)` | `LENGTH(s)` — same |
+| `LENGTH(s)` | `LENGTH(s)` — 同様 |
 | `CHAR_LENGTH(s)` | `LENGTH(s)` |
-| `ASCII(s)` | `ASCII(s)` — same |
+| `ASCII(s)` | `ASCII(s)` — 同様 |
 | `CHAR(n)` | `CHR(n)` |
 
-**GROUP_CONCAT example:**
+**GROUP_CONCAT の例：**
 
 ```sql
 -- MySQL
@@ -260,15 +260,15 @@ FROM emp
 GROUP BY dept_id;
 ```
 
-### Date Functions
+### 日付関数
 
-| MySQL Function | Oracle Equivalent |
+| MySQL 関数 | Oracle 同等物 |
 |---|---|
-| `NOW()` | `SYSDATE` (no fractional seconds) or `SYSTIMESTAMP` |
+| `NOW()` | `SYSDATE` (小数秒なし) または `SYSTIMESTAMP` |
 | `CURDATE()` | `TRUNC(SYSDATE)` |
 | `CURTIME()` | `TO_CHAR(SYSDATE, 'HH24:MI:SS')` |
 | `DATE(dt)` | `TRUNC(dt)` |
-| `DATE_FORMAT(d, fmt)` | `TO_CHAR(d, fmt)` — format masks differ |
+| `DATE_FORMAT(d, fmt)` | `TO_CHAR(d, fmt)` — フォーマット・マスクは異なる |
 | `DATE_ADD(d, INTERVAL n DAY)` | `d + n` |
 | `DATE_SUB(d, INTERVAL n DAY)` | `d - n` |
 | `DATE_ADD(d, INTERVAL n MONTH)` | `ADD_MONTHS(d, n)` |
@@ -279,29 +279,29 @@ GROUP BY dept_id;
 | `DAY(d)` | `EXTRACT(DAY FROM d)` |
 | `HOUR(d)` | `EXTRACT(HOUR FROM d)` |
 | `DAYOFWEEK(d)` | `TO_NUMBER(TO_CHAR(d, 'D'))` |
-| `LAST_DAY(d)` | `LAST_DAY(d)` — same |
-| `STR_TO_DATE(s, fmt)` | `TO_DATE(s, fmt)` — format masks differ |
+| `LAST_DAY(d)` | `LAST_DAY(d)` — 同様 |
+| `STR_TO_DATE(s, fmt)` | `TO_DATE(s, fmt)` — フォーマット・マスクは異なる |
 | `UNIX_TIMESTAMP(d)` | `(d - DATE '1970-01-01') * 86400` |
 | `FROM_UNIXTIME(n)` | `DATE '1970-01-01' + n/86400` |
 
-**Date format mask differences:**
+**日付フォーマット・マスクの違い：**
 
-| MySQL | Oracle | Meaning |
+| MySQL | Oracle | 意味 |
 |---|---|---|
-| `%Y` | `YYYY` | 4-digit year |
-| `%m` | `MM` | Month number |
-| `%d` | `DD` | Day of month |
-| `%H` | `HH24` | Hour (0-23) |
-| `%i` | `MI` | Minutes |
-| `%s` | `SS` | Seconds |
+| `%Y` | `YYYY` | 4 桁の年 |
+| `%m` | `MM` | 月番号 |
+| `%d` | `DD` | 日 |
+| `%H` | `HH24` | 時 (0-23) |
+| `%i` | `MI` | 分 |
+| `%s` | `SS` | 秒 |
 
 ---
 
-## Stored Procedure Syntax Differences
+## ストアド・プロシージャの構文の違い
 
-MySQL and Oracle stored procedure languages are fundamentally different. MySQL's procedural SQL is comparatively simple; Oracle's PL/SQL is richer with exception handling, record types, collections, and packages.
+MySQL と Oracle のストアド・プロシージャ言語は根本的に異なる。MySQL の手続き型 SQL は比較的単純であるが、Oracle の PL/SQL は例外処理、レコード型、コレクション、およびパッケージを備えたより高度なものである。
 
-### Basic Procedure Structure
+### 基本的なプロシージャ構造
 
 ```sql
 -- MySQL
@@ -337,7 +337,7 @@ END update_customer_status;
 /
 ```
 
-### Variables and Declarations
+### 変数と宣言
 
 ```sql
 -- MySQL
@@ -359,7 +359,7 @@ END;
 /
 ```
 
-### Control Flow
+### 制御フロー
 
 ```sql
 -- MySQL IF-ELSEIF-ELSE
@@ -374,7 +374,7 @@ END IF;
 -- Oracle PL/SQL
 IF v_score >= 90 THEN
     v_grade := 'A';
-ELSIF v_score >= 80 THEN        -- Note: ELSIF not ELSEIF
+ELSIF v_score >= 80 THEN        -- 注意：ELSEIF ではなく ELSIF
     v_grade := 'B';
 ELSE
     v_grade := 'C';
@@ -382,7 +382,7 @@ END IF;
 ```
 
 ```sql
--- MySQL WHILE loop
+-- MySQL WHILE ループ
 WHILE v_counter <= 10 DO
     SET v_sum = v_sum + v_counter;
     SET v_counter = v_counter + 1;
@@ -395,10 +395,10 @@ WHILE v_counter <= 10 LOOP
 END LOOP;
 ```
 
-### Cursor Handling
+### カーソル処理
 
 ```sql
--- MySQL cursor
+-- MySQL カーソル
 DECLARE cur CURSOR FOR SELECT id, name FROM products WHERE active = 1;
 DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
 OPEN cur;
@@ -409,7 +409,7 @@ read_loop: LOOP
 END LOOP;
 CLOSE cur;
 
--- Oracle PL/SQL cursor
+-- Oracle PL/SQL カーソル
 DECLARE
     CURSOR cur IS SELECT id, name FROM products WHERE active = 1;
     v_id   products.id%TYPE;
@@ -425,20 +425,20 @@ BEGIN
 END;
 /
 
--- Oracle: simpler FOR cursor loop (preferred)
+-- Oracle: よりシンプルな FOR カーソル・ループ (推奨)
 BEGIN
     FOR rec IN (SELECT id, name FROM products WHERE active = 1) LOOP
-        -- process rec.id, rec.name
+        -- rec.id, rec.name を使用して処理
         NULL;
     END LOOP;
 END;
 /
 ```
 
-### Exception Handling
+### 例外処理
 
 ```sql
--- MySQL exception handling
+-- MySQL の例外処理
 DECLARE EXIT HANDLER FOR SQLEXCEPTION
 BEGIN
     ROLLBACK;
@@ -453,7 +453,7 @@ EXCEPTION
         ROLLBACK;
         RAISE_APPLICATION_ERROR(-20001, 'Duplicate key violation');
     WHEN NO_DATA_FOUND THEN
-        -- handle missing row
+        -- 行が見つからない場合の処理
         NULL;
     WHEN OTHERS THEN
         ROLLBACK;
@@ -464,40 +464,40 @@ END;
 
 ---
 
-## mysqldump to Oracle Workflow
+## mysqldump から Oracle へのワークフロー
 
-### Step 1 — Export Data from MySQL
+### ステップ 1 — MySQL からデータをエクスポート
 
 ```bash
-# Export schema only
+# スキーマのみをエクスポート
 mysqldump -u root -p --no-data mydb > schema.sql
 
-# Export data as CSV per table (most portable for Oracle loading)
+# テーブルごとに CSV 形式でデータをエクスポート (Oracle へのロードに最適)
 mysql -u root -p mydb -e "SELECT * FROM customers INTO OUTFILE '/tmp/customers.csv'
     FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '\"'
     LINES TERMINATED BY '\n';"
 
-# Using mysqldump with INSERT statements (usable as reference but requires heavy translation)
+# INSERT ステートメントを含む mysqldump (参考資料としては有用だが大幅な変換が必要)
 mysqldump -u root -p --skip-extended-insert mydb customers > customers_inserts.sql
 ```
 
-### Step 2 — Translate Schema
+### ステップ 2 — スキーマの変換
 
-Key transformations to automate or perform:
-- Replace `\`` with nothing (or `"` where quoting is truly needed)
-- Replace `AUTO_INCREMENT` with `GENERATED ALWAYS AS IDENTITY`
-- Replace `INT` with `NUMBER(10)`, etc.
-- Replace `VARCHAR(n)` with `VARCHAR2(n)`
-- Replace `DATETIME` with `TIMESTAMP`
-- Remove `ENGINE=InnoDB`, `CHARSET=utf8mb4`, and similar MySQL options
-- Replace `TINYINT(1)` with `NUMBER(1)`
+自動化または実施すべき主な変換：
+- `\`` (バッククォート) を削除 (または引用が必要な場合は `"` に置換)
+- `AUTO_INCREMENT` を `GENERATED ALWAYS AS IDENTITY` に置換
+- `INT` を `NUMBER(10)` などに置換
+- `VARCHAR(n)` を `VARCHAR2(n)` に置換
+- `DATETIME` を `TIMESTAMP` に置換
+- `ENGINE=InnoDB`, `CHARSET=utf8mb4` などの MySQL 固有オプションを削除
+- `TINYINT(1)` を `NUMBER(1)` に置換
 
-The **SQL Developer Migration Workbench** automates much of this schema conversion (see `oracle-migration-tools.md`). Note: ora2pg migrates Oracle to PostgreSQL and is not applicable for MySQL-to-Oracle migrations.
+**SQL Developer Migration Workbench** を使用すると、これらのスキーマ変換の多くを自動化できる（`oracle-migration-tools.md` を参照）。注：ora2pg は Oracle から PostgreSQL への移行用であり、MySQL から Oracle への移行には適用できない。
 
-### Step 3 — Load Data with SQL*Loader
+### ステップ 3 — SQL*Loader を使用してデータをロード
 
 ```
--- SQL*Loader control file: customers.ctl
+-- SQL*Loader コントロール・ファイル: customers.ctl
 OPTIONS (SKIP=0, ROWS=5000, DIRECT=TRUE, ERRORS=100)
 LOAD DATA
 CHARACTERSET UTF8
@@ -520,12 +520,12 @@ TRAILING NULLCOLS
 sqlldr userid=myuser/mypass@mydb control=customers.ctl log=customers.log bad=customers.bad
 ```
 
-### Step 4 — Post-Load Sequences
+### ステップ 4 — ロード後のシーケンス
 
-After loading data, update identity column sequences to start above the maximum loaded value:
+データをロードした後、アイデンティティ列のシーケンスをロードされた最大値から開始するように更新する。
 
 ```sql
--- If using sequences (pre-12c):
+-- シーケンスを使用している場合 (12c 未満)：
 DECLARE
     v_max NUMBER;
 BEGIN
@@ -534,88 +534,87 @@ BEGIN
 END;
 /
 
--- If using identity columns (12c+, requires recreating or using ALTER TABLE):
+-- アイデンティティ列を使用している場合 (12c 以降、再作成または ALTER TABLE が必要)：
 ALTER TABLE customers MODIFY customer_id GENERATED ALWAYS AS IDENTITY (START WITH LIMIT VALUE);
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Run MySQL in strict SQL mode before migrating.** Set `sql_mode = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'` and fix all errors before starting the Oracle migration. This surfaces GROUP BY and type coercion issues.
+1. **移行前に MySQL を厳格な（strict）SQL モードで実行する。** `sql_mode = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'` に設定し、Oracle 移行を開始する前にすべてのエラーを修正すること。これにより、GROUP BY や型強制の問題が表面化する。
 
-2. **Normalize ENUM and SET columns.** Oracle's CHECK constraint equivalent works for ENUM, but SET (multi-valued) columns require a junction table or JSON column. Plan the schema change early.
+2. **ENUM および SET 列を正規化する。** Oracle では ENUM に相当するものとして CHECK 制約が機能するが、SET（複数値）列には交差テーブルまたは JSON 列が必要である。スキーマ変更を早期に計画すること。
 
-3. **Audit MySQL zero-dates.** MySQL allows `0000-00-00` as a date value. Oracle's DATE type has no such representation. Replace with NULL or a sentinel date value.
+3. **MySQL の「零日付（zero-dates）」をチェックする。** MySQL は `0000-00-00` を日付値として許可するが、Oracle の DATE 型にはそのような表現はない。NULL またはセンチネル日付値に置き換えること。
 
-4. **Review ON UPDATE CASCADE.** Oracle supports cascading deletes natively but not cascading updates on primary keys. Applications relying on `ON UPDATE CASCADE` require application-level changes.
+4. **ON UPDATE CASCADE を確認する。** Oracle はカスケード削除をネイティブにサポートしているが、主キーに対するカスケード更新はサポートしていない。`ON UPDATE CASCADE` に依存しているアプリケーションは、アプリケーション・レベルでの変更が必要になる。
 
-5. **Character sets matter.** MySQL's `utf8` is actually 3-byte UTF-8 (no emoji). MySQL's `utf8mb4` is true 4-byte UTF-8. Oracle's `AL32UTF8` is full UTF-8. Set Oracle to `AL32UTF8` to handle all Unicode characters.
+5. **文字セットに注意する。** MySQL の `utf8` は実際には 3 バイトの UTF-8（絵文字不可）であり、`utf8mb4` が真の 4 バイト UTF-8 である。Oracle の `AL32UTF8` は完全な UTF-8 である。すべての Unicode 文字を処理できるように、Oracle 側は `AL32UTF8` に設定すること。
 
-6. **Test GROUP_CONCAT / LISTAGG length limits.** `LISTAGG` in Oracle 12c raises an error if the concatenated output exceeds 4000 characters. Use `LISTAGG(...) ON OVERFLOW TRUNCATE` (12.2+) or the `WM_CONCAT` workaround with CLOB.
+6. **GROUP_CONCAT / LISTAGG の長さ制限をテストする。** Oracle 12c の `LISTAGG` は、連結された出力が 4000 文字を超えるとエラーを発生させる。`LISTAGG(...) ON OVERFLOW TRUNCATE` (12.2 以降) を使用するか、CLOB を使用したワークアラウンドを検討すること。
 
 ---
 
-## Common Migration Pitfalls
+## よくある移行の落とし穴
 
-**Pitfall 1 — MySQL case-insensitive string comparisons:**
-MySQL comparisons are case-insensitive by default for `utf8_general_ci` collations. Oracle comparisons are always case-sensitive.
+**落とし穴 1 — MySQL の大文字小文字を区別しない文字列比較：**
+MySQL の比較は、`utf8_general_ci` 照合順序の場合、デフォルトで大文字小文字が区別されない。Oracle の比較は常に大文字小文字が区別される。
 ```sql
--- MySQL: these return results even with mixed case
-SELECT * FROM users WHERE username = 'ALICE';  -- finds 'alice'
+-- MySQL: 大文字小文字が混在していても結果を返す
+SELECT * FROM users WHERE username = 'ALICE';  -- 'alice' を見つける
 
--- Oracle: returns nothing
-SELECT * FROM users WHERE username = 'ALICE';  -- only finds 'ALICE'
+-- Oracle: 何も返さない
+SELECT * FROM users WHERE username = 'ALICE';  -- 'ALICE' のみを見つける
 
--- Oracle fix: normalize case on insert, or use UPPER() comparisons
+-- Oracle での修正：挿入時にケースを正規化するか、UPPER() 関数を使用した比較を行う
 SELECT * FROM users WHERE UPPER(username) = 'ALICE';
 ```
 
-**Pitfall 2 — Division of integers returns integer in MySQL:**
+**落とし穴 2 — MySQL での整数除算が実数を返す場合：**
 ```sql
--- MySQL: integer division
-SELECT 5 / 2;  -- returns 2.5000 (MySQL actually returns decimal)
-SELECT 5 DIV 2; -- returns 2 (integer division)
+-- MySQL: 整数除算
+SELECT 5 / 2;  -- 2.5000 を返す (MySQL は実際には小数を返す)
+SELECT 5 DIV 2; -- 2 を返す (整数除算)
 
--- Oracle: always returns exact result
-SELECT 5 / 2 FROM DUAL;    -- returns 2.5
-SELECT TRUNC(5/2) FROM DUAL; -- returns 2
+-- Oracle: 常に正確な結果を返す
+SELECT 5 / 2 FROM DUAL;    -- 2.5 を返す
+SELECT TRUNC(5/2) FROM DUAL; -- 2 を返す
 ```
 
-**Pitfall 3 — NULL-safe equality:**
+**落とし穴 3 — NULL 安全な等価比較：**
 ```sql
--- MySQL: NULL-safe equality operator
-SELECT * FROM t WHERE a <=> b;  -- true when both NULL
+-- MySQL: NULL 安全な等価演算子
+SELECT * FROM t WHERE a <=> b;  -- 両方が NULL の場合に true
 
--- Oracle equivalent
+-- Oracle での同等実装
 SELECT * FROM t WHERE (a = b OR (a IS NULL AND b IS NULL));
--- Or: DECODE(a, b, 1, 0) = 1  (DECODE treats NULLs as equal)
+-- または： DECODE(a, b, 1, 0) = 1 (DECODE は NULL 同士を等しいとみなす)
 ```
 
-**Pitfall 4 — Implicit commits from DDL:**
-Both MySQL (in default settings) and Oracle commit on DDL, but MySQL also commits any open transaction before a DDL statement. Ensure application transaction management accounts for this.
+**落とし穴 4 — DDL による暗黙的なコミット：**
+MySQL (デフォルト設定) と Oracle は共に DDL 実行時にコミットするが、MySQL は DDL ステートメントの実行前に開いているトランザクションもコミットする。アプリケーションのトランザクション管理においてこれを考慮すること。
 
-**Pitfall 5 — MySQL IF() function:**
+**落とし穴 5 — MySQL の IF() 関数：**
 ```sql
 -- MySQL
 SELECT IF(status = 'active', 'Yes', 'No') FROM customers;
 
 -- Oracle
 SELECT CASE WHEN status = 'active' THEN 'Yes' ELSE 'No' END FROM customers;
--- Or using DECODE:
+-- または DECODE を使用：
 SELECT DECODE(status, 'active', 'Yes', 'No') FROM customers;
 ```
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ファイル内の基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c, 23c, または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 複数バージョンをサポートする環境では、リリース更新（RU）によってデフォルト値や非推奨機能が異なる場合があるため、19c と 26ai の両方で動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c SQL Language Reference — Data Types](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/Data-Types.html)
 - [Oracle Database 19c SQL Language Reference — CREATE TABLE (GENERATED AS IDENTITY)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-TABLE.html)

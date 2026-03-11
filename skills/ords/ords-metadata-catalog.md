@@ -1,24 +1,24 @@
-# ORDS Metadata Catalog and OpenAPI Documentation
+# ORDS メタデータ・カタログと OpenAPI ドキュメント
 
-## Overview
+## 概要
 
-ORDS automatically generates an OpenAPI 3.0 specification document for every REST module and AutoREST-enabled object. This machine-readable API description powers interactive documentation tools like Swagger UI and Oracle Database Actions, enables client SDK generation, and provides a self-describing API catalog for consumers. Understanding how to access, customize, and leverage this metadata is essential for building APIs that are both functional and well-documented.
+ORDS は、すべての REST モジュールおよび AutoREST 有効化されたオブジェクトに対して、OpenAPI 3.0 仕様ドキュメントを自動的に生成する。このマシン・リーダブルな API 記述は、Swagger UI や Oracle Database Actions などの対話型ドキュメント・ツールの基盤となり、クライアント SDK の生成を可能にし、利用者に対して自己記述的な API カタログを提供する。このメタデータのアクセス方法、カスタマイズ方法、および活用方法を理解することは、機能的で、かつ文書化の行き届いた API を構築するために不可欠である。
 
 ---
 
-## Auto-Generated OpenAPI Endpoints
+## 自動生成される OpenAPI エンドポイント
 
-ORDS exposes metadata at several URL paths:
+ORDS は、複数の URL パスでメタデータを公開している。
 
-### Schema-Level Metadata Catalog
+### スキーマ・レベルのメタデータ・カタログ
 
-Returns an OpenAPI 3.0 document covering all published modules in the schema:
+スキーマ内で公開されているすべてのモジュールをカバーする OpenAPI 3.0 ドキュメントを返す。
 
 ```
 GET /ords/{schema_alias}/metadata-catalog/
 ```
 
-Example:
+例:
 
 ```http
 GET /ords/hr/metadata-catalog/ HTTP/1.1
@@ -26,37 +26,37 @@ Host: myserver.example.com
 Accept: application/json
 ```
 
-Response: Full OpenAPI 3.0 JSON document covering all published REST modules and AutoREST objects in the HR schema.
+レスポンス: HR スキーマ内のすべての公開済み REST モジュールおよび AutoREST オブジェクトを網羅する、完全な OpenAPI 3.0 JSON ドキュメント。
 
-### Module-Level OpenAPI Document
+### モジュール・レベルの OpenAPI ドキュメント
 
-Returns the OpenAPI 3.0 document for a single module:
+単一のモジュールに対する OpenAPI 3.0 ドキュメントを返す。
 
 ```
 GET /ords/{schema_alias}/metadata-catalog/{module_name}/
 ```
 
-Example:
+例:
 
 ```http
 GET /ords/hr/metadata-catalog/hr.employees/ HTTP/1.1
 ```
 
-### AutoREST Object Metadata
+### AutoREST オブジェクトのメタデータ
 
-Returns the OpenAPI document for an individual AutoREST-enabled object:
+個別の AutoREST 有効化されたオブジェクトに対する OpenAPI ドキュメントを返す。
 
 ```
 GET /ords/{schema_alias}/metadata-catalog/{object_alias}/
 ```
 
-Example:
+例:
 
 ```http
 GET /ords/hr/metadata-catalog/employees/ HTTP/1.1
 ```
 
-### OpenAPI JSON Format (forced)
+### OpenAPI JSON 形式の強制用 URL
 
 ```
 GET /ords/{schema_alias}/metadata-catalog/?format=json
@@ -65,16 +65,16 @@ GET /ords/{schema_alias}/open-api-catalog/
 
 ---
 
-## Sample OpenAPI 3.0 Output
+## OpenAPI 3.0 出力例
 
-For a simple GET /employees handler, ORDS generates:
+単純な `GET /employees` ハンドラーの場合、ORDS は以下を生成する。
 
 ```json
 {
   "openapi": "3.0.0",
   "info": {
     "title": "HR REST API",
-    "description": "Employee management API",
+    "description": "従業員管理 API",
     "version": "1.0.0",
     "contact": {
       "name": "HR Platform Team"
@@ -88,8 +88,8 @@ For a simple GET /employees handler, ORDS generates:
   "paths": {
     "/employees/": {
       "get": {
-        "summary": "List employees",
-        "description": "Returns a paginated list of employees with optional filtering",
+        "summary": "従業員の一覧表示",
+        "description": "オプションのフィルタリングを伴う、ページ分けされた従業員リストを返す",
         "operationId": "getEmployees",
         "parameters": [
           {
@@ -105,13 +105,13 @@ For a simple GET /employees handler, ORDS generates:
           {
             "name": "q",
             "in": "query",
-            "description": "JSON filter query",
+            "description": "JSON フィルタ・クエリ",
             "schema": { "type": "string" }
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response",
+            "description": "成功レスポンス",
             "content": {
               "application/json": {
                 "schema": {
@@ -123,7 +123,7 @@ For a simple GET /employees handler, ORDS generates:
         }
       },
       "post": {
-        "summary": "Create new employee",
+        "summary": "新しい従業員の作成",
         "requestBody": {
           "required": true,
           "content": {
@@ -133,13 +133,13 @@ For a simple GET /employees handler, ORDS generates:
           }
         },
         "responses": {
-          "201": { "description": "Employee created" }
+          "201": { "description": "従業員作成完了" }
         }
       }
     },
     "/employees/{id}": {
       "get": {
-        "summary": "Get employee by ID",
+        "summary": "ID による従業員の取得",
         "parameters": [
           {
             "name": "id",
@@ -149,8 +149,8 @@ For a simple GET /employees handler, ORDS generates:
           }
         ],
         "responses": {
-          "200": { "description": "Employee found" },
-          "404": { "description": "Employee not found" }
+          "200": { "description": "従業員発見" },
+          "404": { "description": "従業員が見つかりません" }
         }
       }
     }
@@ -175,7 +175,7 @@ For a simple GET /employees handler, ORDS generates:
           "clientCredentials": {
             "tokenUrl": "https://myserver.example.com/ords/hr/oauth/token",
             "scopes": {
-              "hr.employees.read": "Read employee data"
+              "hr.employees.read": "従業員データの読み取り"
             }
           }
         }
@@ -187,11 +187,11 @@ For a simple GET /employees handler, ORDS generates:
 
 ---
 
-## Customizing API Metadata via Comments
+## コメントによる API メタデータのカスタマイズ
 
-ORDS uses the `p_comments` parameter in `DEFINE_MODULE`, `DEFINE_TEMPLATE`, and `DEFINE_HANDLER` to populate the OpenAPI `description` and `summary` fields.
+ORDS は、`DEFINE_MODULE`、`DEFINE_TEMPLATE`、および `DEFINE_HANDLER` の `p_comments` パラメータを使用して、OpenAPI の `description`（説明）および `summary`（概要）フィールドを入力する。
 
-### Module-Level Description
+### モジュール・レベルの説明
 
 ```sql
 BEGIN
@@ -199,26 +199,26 @@ BEGIN
     p_module_name => 'hr.employees',
     p_base_path   => '/v1/',
     p_status      => 'PUBLISHED',
-    p_comments    => 'HR Employee Management API v1. Provides CRUD operations for employee records. Authentication required for write operations.'
+    p_comments    => 'HR 従業員管理 API v1。従業員レコードの CRUD 操作を提供。書き込み操作には認証が必要。'
   );
 END;
 /
 ```
 
-### Template Comments (Maps to path description)
+### テンプレートのコメント (パスの説明にマップ)
 
 ```sql
 BEGIN
   ORDS.DEFINE_TEMPLATE(
     p_module_name => 'hr.employees',
     p_pattern     => 'employees/',
-    p_comments    => 'Employee collection resource. Supports filtering via q parameter, pagination via limit/offset, and ordering via orderby parameter.'
+    p_comments    => '従業員コレクション・リソース。q パラメータによるフィルタ、limit/offset によるページネーション、orderby パラメータによる順序付けをサポート。'
   );
 END;
 /
 ```
 
-### Handler Comments (Maps to operation summary/description)
+### ハンドラーのコメント (操作の概要/説明にマップ)
 
 ```sql
 BEGIN
@@ -227,7 +227,7 @@ BEGIN
     p_pattern     => 'employees/',
     p_method      => 'GET',
     p_source_type => ORDS.source_type_collection_feed,
-    p_comments    => 'Returns a paginated list of employees. Filter by department using ?dept_id=N. Supports ordering by any column.',
+    p_comments    => 'ページ分けされた従業員リストを返す。?dept_id=N を使用して部門でフィルタ可能。任意の列による順序付けをサポート。',
     p_source      => 'SELECT * FROM employees'
   );
 END;
@@ -236,26 +236,26 @@ END;
 
 ---
 
-## Documenting Parameters with ORDS.DEFINE_PARAMETER
+## ORDS.DEFINE_PARAMETER によるパラメータの文書化
 
-For custom-defined REST modules, ORDS allows explicit parameter documentation that enriches the OpenAPI output.
+カスタム定義された REST モジュールの場合、ORDS では明示的なパラメータの文書化が可能であり、これにより OpenAPI の出力が充実する。
 
 ```sql
 BEGIN
-  -- Document the dept_id query parameter
+  -- dept_id クエリ・パラメータの文書化
   ORDS.DEFINE_PARAMETER(
     p_module_name        => 'hr.employees',
     p_pattern            => 'employees/',
     p_method             => 'GET',
     p_name               => 'dept_id',
     p_bind_variable_name => 'dept_id',
-    p_source_type        => 'HEADER',   -- URI, HEADER, or RESPONSE
-    p_param_type         => 'INT',      -- Informs OpenAPI type
+    p_source_type        => 'HEADER',   -- URI, HEADER, または RESPONSE
+    p_param_type         => 'INT',      -- OpenAPI の型情報として使用
     p_access_method      => 'IN',
-    p_comments           => 'Filter employees by department ID'
+    p_comments           => '部門 ID による従業員のフィルタ'
   );
 
-  -- Document the id path parameter
+  -- id パス・パラメータの文書化
   ORDS.DEFINE_PARAMETER(
     p_module_name        => 'hr.employees',
     p_pattern            => 'employees/:id',
@@ -265,7 +265,7 @@ BEGIN
     p_source_type        => 'URI',
     p_param_type         => 'INT',
     p_access_method      => 'IN',
-    p_comments           => 'Unique employee identifier'
+    p_comments           => '一意の従業員識別子'
   );
 
   COMMIT;
@@ -275,19 +275,19 @@ END;
 
 ---
 
-## Using the OpenAPI Spec with Swagger UI
+## OpenAPI 仕様書の Swagger UI での利用
 
-### Option 1: Swagger UI via ORDS Standalone
+### オプション 1: ORDS スタンドアロン経由の Swagger UI
 
-ORDS standalone can serve Swagger UI static files from its `doc_root` directory:
+ORDS スタンドアロンは、その `doc_root` ディレクトリから Swagger UI の静的ファイルを提供できる。
 
 ```shell
-# Download Swagger UI distribution
+# Swagger UI ディストリビューションをダウンロード
 curl -L https://github.com/swagger-api/swagger-ui/archive/v5.x.x.tar.gz | tar xz
 cp -r swagger-ui-5.x.x/dist/* /opt/oracle/ords/config/ords/standalone/doc_root/swagger/
 ```
 
-Create a redirect page at the ORDS doc root:
+ORDS の doc root にリダイレクト・ページを作成する:
 
 ```html
 <!-- /opt/oracle/ords/config/ords/standalone/doc_root/api-docs/index.html -->
@@ -313,92 +313,92 @@ Create a redirect page at the ORDS doc root:
 </html>
 ```
 
-Access at: `https://myserver.example.com/api-docs/`
+アクセス URL: `https://myserver.example.com/api-docs/`
 
-### Option 2: Oracle Database Actions (Built-in)
+### オプション 2: Oracle Database Actions (標準機能)
 
-If Database Actions (formerly SQL Developer Web) is enabled, it includes a built-in REST Workshop with automatic API documentation at:
+Database Actions (旧 SQL Developer Web) が有効な場合、Rest Workshop が組み込まれており、以下の場所で自動 API ドキュメントを確認できる。
 
 ```
 https://myserver.example.com/ords/sql-developer
 ```
 
-Navigate to REST → Modules to view, test, and manage REST APIs with an interactive UI.
+「REST」→「モジュール」に移動すると、対話型 UI で REST API の表示、テスト、管理が可能である。
 
-### Option 3: Postman Import
+### オプション 3: Postman へのインポート
 
-Export the OpenAPI spec and import directly into Postman:
+OpenAPI 仕様書をエクスポートし、Postman に直接インポートする。
 
 ```shell
-# Download the OpenAPI spec
+# OpenAPI 仕様書のダウンロード
 curl -o hr-api.json \
   https://myserver.example.com/ords/hr/metadata-catalog/hr.employees/
 
-# Import via Postman CLI
+# Postman CLI を介したインポート
 postman import -f hr-api.json
 ```
 
-Or in Postman UI: File → Import → select the JSON file. Postman generates a collection with all endpoints, example requests, and documentation.
+または Postman UI の「File」→「Import」から JSON ファイルを選択する。Postman は、すべてのエンドポイント、サンプル・リクエスト、およびドキュメントを含むコレクションを生成する。
 
 ---
 
-## ORDS Metadata REST Endpoints
+## ORDS メタデータ REST エンドポイント
 
-Beyond OpenAPI, ORDS exposes its own metadata via REST:
+OpenAPI 以外にも、ORDS は独自のメタデータを REST 経由で公開している。
 
-### List All Modules
+### すべてのモジュールの一覧表示
 
 ```http
 GET /ords/_/db-api/stable/metadata-catalog/ HTTP/1.1
 Authorization: Bearer <admin-token>
 ```
 
-### Module Details
+### モジュールの詳細
 
 ```http
 GET /ords/hr/metadata-catalog/hr.employees/ HTTP/1.1
 ```
 
-### Check ORDS Status
+### ORDS のステータス確認
 
 ```http
 GET /ords/_/db-api/stable/database/ HTTP/1.1
 ```
 
-### Enabled Schemas
+### 有効化されたスキーマ
 
 ```sql
--- Via SQL (DBA access required)
+-- SQL 経由 (DBA 権限が必要)
 SELECT schema, url_mapping_pattern, auto_rest_auth
 FROM   dba_ords_enabled_schemas
 ORDER  BY schema;
 
--- Via REST API (if Database API is enabled)
+-- REST API 経由 (Database API が有効な場合)
 GET /ords/_/db-api/stable/database/pdbs/
 ```
 
 ---
 
-## Querying ORDS Metadata from SQL
+## SQL による ORDS メタデータのクエリ
 
-ORDS exposes its metadata through data dictionary views:
+ORDS は、データ・ディクショナリ・ビューを通じてメタデータを公開している。
 
 ```sql
--- List all REST-enabled schemas
+-- REST 有効化されているすべてのスキーマをリスト表示
 SELECT schema, url_mapping_pattern, auto_rest_auth
 FROM   dba_ords_enabled_schemas;
 
--- List all modules in the current schema
+-- 現在のスキーマ内のすべてのモジュールをリスト表示
 SELECT name, uri_prefix, status, items_per_page, comments
 FROM   user_ords_modules
 ORDER  BY name;
 
--- List all templates for a module
+-- モジュールのすべてのテンプレートをリスト表示
 SELECT module_id, uri_template, priority, etag_type
 FROM   user_ords_templates
 WHERE  module_id = (SELECT id FROM user_ords_modules WHERE name = 'hr.employees');
 
--- List all handlers with their source
+-- ソースとともにすべてのハンドラーをリスト表示
 SELECT t.uri_template, h.method, h.source_type, h.source
 FROM   user_ords_handlers h
 JOIN   user_ords_templates t ON t.id = h.template_id
@@ -406,7 +406,7 @@ JOIN   user_ords_modules   m ON m.id = t.module_id
 WHERE  m.name = 'hr.employees'
 ORDER  BY t.uri_template, h.method;
 
--- DBA views for cross-schema inspection
+-- スキーマをまたいだ検査用の DBA ビュー
 SELECT s.schema, m.name, t.uri_template, h.method
 FROM   dba_ords_enabled_schemas s
 JOIN   dba_ords_modules         m ON m.schema = s.schema
@@ -417,57 +417,57 @@ ORDER  BY s.schema, m.name;
 
 ---
 
-## Exporting and Importing REST Definitions
+## REST 定義のエクスポートとインポート
 
-### Export via SQL Script
+### SQL スクリプトによるエクスポート
 
 ```sql
--- Generate a re-runnable SQL script for all REST definitions in current schema
+-- 現在のスキーマ内のすべての REST 定義に対する、再実行可能な SQL スクリプトを生成
 SELECT DBMS_METADATA.GET_DDL('ORDS', m.name)
 FROM   user_ords_modules m;
 ```
 
-### Export via ORDS CLI
+### ORDS CLI によるエクスポート
 
 ```shell
-# Export REST definitions for a schema to a SQL file
+# 指定したスキーマの REST 定義を SQL ファイルにエクスポート
 ords --config /opt/oracle/ords/config rest export \
   --schema HR \
   --output /opt/backup/hr-rest-export.sql
 
-# Import REST definitions
+# REST 定義のインポート
 ords --config /opt/oracle/ords/config rest import \
   --schema HR \
   --input /opt/backup/hr-rest-export.sql
 ```
 
-This generates a script that calls all the necessary `ORDS.DEFINE_MODULE`, `ORDS.DEFINE_TEMPLATE`, and `ORDS.DEFINE_HANDLER` calls. Use this for:
-- Version-controlling REST API definitions
-- Migrating from DEV to TEST to PROD environments
-- Documenting REST API changes in source control
+これにより、必要な `ORDS.DEFINE_MODULE`、`ORDS.DEFINE_TEMPLATE`、および `ORDS.DEFINE_HANDLER` の呼び出しを含むスクリプトが生成される。これは以下の用途に使用される。
+- REST API 定義のバージョン管理
+- 開発(DEV)からテスト(TEST)、本番(PROD)環境への移行
+- ソース管理システムでの REST API 変更の文書化
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Always provide `p_comments` on all ORDS objects**: Even brief descriptions significantly improve the auto-generated OpenAPI spec quality. Document the expected inputs, outputs, and behavior.
-- **Use module versioning in names and paths**: `hr.employees.v1` and `/v1/` makes version changes explicit in both the metadata and the OpenAPI spec.
-- **Automate OpenAPI spec download in CI/CD**: Pull the live metadata from ORDS and diff against the committed spec. Alert when the live spec diverges from expectations.
-- **Test OpenAPI specs with validators**: Use tools like `openapi-generator validate` or `spectral lint` to catch spec issues before consumers hit them.
-- **Keep metadata-catalog endpoints protected for internal APIs**: Public-facing metadata URLs expose your full API structure. Use ORDS privileges to restrict access to `/metadata-catalog/` for sensitive APIs.
-- **Use `ORDS.DEFINE_PARAMETER` for all query and path params**: This makes the OpenAPI spec accurate for Postman/Swagger UI users who depend on documented parameters.
+- **すべての ORDS オブジェクトに `p_comments` を提供する**: 短い説明であっても、自動生成される OpenAPI 仕様書の品質が大幅に向上する。期待される入力、出力、および動作を文書化すること。
+- **名前とパスにモジュールのバージョン管理を含める**: `hr.employees.v1` や `/v1/` とすることで、メタデータと OpenAPI 仕様書の両方でバージョンの変更が明確になる。
+- **CI/CD での OpenAPI 仕様書のダウンロードを自動化する**: ORDS から稼働中のメタデータを取得し、コミット済みの仕様書と比較（diff）を行う。ライブの仕様書が期待値と異なる場合にアラートを出すようにする。
+- **OpenAPI 仕様書をバリデーターでテストする**: `openapi-generator validate` や `spectral lint` などのツールを使用して、利用者が使用する前に仕様書の問題を特定する。
+- **内部 API の metadata-catalog エンドポイントは保護しておく**: 公開されているメタデータ URL は、API 構造のすべてをさらけ出すことになる。機密性の高い API については、ORDS 権限を使用して `/metadata-catalog/` へのアクセスを制限すること。
+- **すべてのクエリ・パラメータとパス・パラメータに `ORDS.DEFINE_PARAMETER` を使用する**: これにより、文書化されたパラメータに依存する Postman や Swagger UI の利用者に対して、正確な OpenAPI 仕様を提供できる。
 
-## Common Mistakes
+## よくある間違い
 
-- **Assuming metadata-catalog shows unpublished modules**: Only modules with `p_status => 'PUBLISHED'` appear in the metadata catalog. Modules under development set to `NOT_PUBLISHED` are hidden (as intended).
-- **Not committing after ORDS.DEFINE_PARAMETER**: Like all ORDS metadata, parameter definitions are in DB tables and require an explicit COMMIT.
-- **Editing OpenAPI JSON directly**: The metadata-catalog endpoint is generated dynamically from ORDS_METADATA tables. Edits to the JSON output are discarded on next request. Edit the source definitions instead.
-- **Forgetting that metadata-catalog URLs are case-sensitive in module names**: `metadata-catalog/HR.Employees/` and `metadata-catalog/hr.employees/` may return different results. Module names are stored as defined (often lowercase). Be consistent.
-- **Using the metadata endpoint as a health check**: The metadata catalog requires DB access. Use `/ords/_/db-api/stable/database/` for health checks instead, as it has a simpler response and lower overhead.
+- **metadata-catalog が未公開のモジュールも表示すると仮定する**: メタデータ・カタログに表示されるのは、`p_status => 'PUBLISHED'` が設定されたモジュールのみである。開発中で `NOT_PUBLISHED` に設定されているモジュールは（意図通り）表示されない。
+- **`ORDS.DEFINE_PARAMETER` のあとにコミットを忘れる**: 他の ORDS メタデータと同様に、パラメータ定義はデータベースの表に保存されるため、明示的な COMMIT が必要である。
+- **OpenAPI JSON を直接編集する**: metadata-catalog エンドポイントは、ORDS_METADATA 表から動的に生成される。JSON 出力への直接の編集は、次のリクエスト時に破棄される。代わりに元の定義を編集すること。
+- **metadata-catalog の URL 内のモジュール名の大文字小文字を間違える**: `metadata-catalog/HR.Employees/` と `metadata-catalog/hr.employees/` では異なる結果が返される場合がある。モジュール名は定義された通り（多くの場合小文字）に保存される。一貫性を保つこと。
+- **メタデータ・エンドポイントをヘルス・チェックとして使用する**: メタデータ・カタログはデータベースへのアクセスを必要とする。ヘルス・チェックには、レスポンスが単純でオーバーヘッドが少ない `/ords/_/db-api/stable/database/` を代わりに使用すること。
 
 ---
 
-## Sources
+## ソース
 
 - [ORDS Developer's Guide — OpenAPI and Metadata Catalog](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/developing-oracle-rest-data-services-applications.html)
 - [Oracle REST Data Services PL/SQL API Reference — ORDS.DEFINE_PARAMETER](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orrst/index.html)

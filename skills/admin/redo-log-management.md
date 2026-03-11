@@ -1,146 +1,146 @@
-# Oracle Redo Log Management
+# Oracle redoログ管理
 
-## Overview
+## 概要
 
-The redo log is Oracle's write-ahead log. Every change made to the database — INSERT, UPDATE, DELETE, DDL, even internal operations — is first recorded as a redo entry in the online redo log buffer, then flushed to disk into the **online redo log files** by the Log Writer (LGWR) process. This ensures durability: if the database crashes, redo can replay all committed changes from the last checkpoint forward.
+redoログはOracleの先行書き込みログ（write-ahead log）である。データベースに対して行われるすべての変更（INSERT、UPDATE、DELETE、DDL、さらには内部操作まで）は、まずオンラインredoログ・バッファにredoエントリとして記録され、その後Log Writer (LGWR)プロセスによってディスク上の**オンラインredoログ・ファイル**にフラッシュされる。これにより耐久性が確保される。データベースがクラッシュした場合、redoログを使用して最後のチェックポイント以降のすべてのコミット済み変更を再生できる。
 
-Understanding and correctly sizing the redo log infrastructure is critical to database performance and availability. Poorly sized redo logs cause excessive log switches, checkpoint pressure, and can degrade throughput significantly.
+redoログ・インフラストラクチャを正しく理解し、適切なサイズに設定することは、データベースのパフォーマンスと可用性にとって極めて重要である。サイズ設定が不適切なredoログは、過度なログ・スイッチやチェックポイント・プレッシャーを引き起こし、スループットを著しく低下させる可能性がある。
 
 ---
 
-## Online Redo Log Groups and Members
+## オンラインredoログ・グループとメンバー
 
-### Groups
+### グループ
 
-Oracle's online redo log consists of **groups**, each of which contains one or more **members** (physical files). At any point in time, LGWR is writing to exactly one group — the **current** group. When a log switch occurs, LGWR moves to the next group.
+Oracleのオンラインredoログは**グループ**で構成され、各グループには1つ以上の**メンバー**（物理ファイル）が含まれる。常にLGWRは正確に1つのグループ、つまり**カレント（current）**・グループに書き込みを行っている。ログ・スイッチが発生すると、LGWRは次のグループに移動する。
 
-- A database requires a minimum of 2 groups to operate
-- Production databases should have at least 3 groups to give LGWR room to cycle while archiving catches up
-- Groups are identified by a group number (1, 2, 3, ...)
+- データベースが動作するには最低2つのグループが必要
+- 本番データベースでは、アーカイブ処理が追いつくまでの余裕を持たせるため、少なくとも3つのグループが必要
+- グループはグループ番号（1、2、3...）で識別される
 
-### Members (Multiplexing)
+### メンバー (多重化)
 
-Each group can contain multiple member files — physical copies of the same redo data on different disks. All members in a group contain identical redo data. If one member is lost (disk failure), the group remains functional using the surviving members.
+各グループには、複数のメンバー・ファイル（異なるディスク上の同じredoデータの物理コピー）を含めることができる。グループ内のすべてのメンバーには同一のredoデータが含まれる。1つのメンバーが失われても（ディスク故障など）、残りのメンバーを使用してグループは機能し続ける。
 
-- Minimum 1 member per group; 2–3 members recommended for production
-- Members should reside on different physical disks or storage controllers for redundancy
-- All members must be the same size within a group
+- 1グループあたり最低1メンバー。本番環境では2〜3メンバーを推奨。
+- 冗長性を確保するため、メンバーは異なる物理ディスクやストレージ・コントローラに配置すべきである
+- グループ内のすべてのメンバーは同じサイズでなければならない
 
 ```
-Online Redo Log Structure:
+オンラインredoログの構造:
 ┌─────────────────────────────────────────┐
-│ Group 1: /disk1/redo01a.log             │  ← CURRENT (LGWR writing here)
-│          /disk2/redo01b.log  (mirror)   │
+│ グループ 1: /disk1/redo01a.log            │  ← CURRENT (LGWRが書き込み中)
+│           /disk2/redo01b.log  (ミラー)   │
 ├─────────────────────────────────────────┤
-│ Group 2: /disk1/redo02a.log             │  ← ACTIVE (needed for crash recovery)
-│          /disk2/redo02b.log  (mirror)   │
+│ グループ 2: /disk1/redo02a.log            │  ← ACTIVE (インスタンス・リカバリに必要)
+│           /disk2/redo02b.log  (ミラー)   │
 ├─────────────────────────────────────────┤
-│ Group 3: /disk1/redo03a.log             │  ← INACTIVE (available for LGWR)
-│          /disk2/redo03b.log  (mirror)   │
+│ グループ 3: /disk1/redo03a.log            │  ← INACTIVE (LGWRが再利用可能)
+│           /disk2/redo03b.log  (ミラー)   │
 └─────────────────────────────────────────┘
 ```
 
-### Viewing Current Redo Log Configuration
+### 現在のredoログ構成の表示
 
 ```sql
--- View all groups and their status
+-- すべてのグループとそのステータスを表示
 SELECT group#, members, bytes/1048576 size_mb, status, archived
 FROM v$log
 ORDER BY group#;
 
--- View all members and their paths
+-- すべてのメンバーとそのパスを表示
 SELECT l.group#, l.sequence#, l.status,
        lf.member, lf.status member_status
 FROM v$log l
 JOIN v$logfile lf ON l.group# = lf.group#
 ORDER BY l.group#, lf.member;
 
--- Group status values:
--- CURRENT   = LGWR is currently writing to this group
--- ACTIVE    = needed for instance recovery (not yet checkpointed away from)
--- INACTIVE  = not needed for recovery; available for reuse
--- UNUSED    = never been written to
--- CLEARING  = being re-created (ALTER DATABASE CLEAR LOGFILE in progress)
+-- グループ・ステータスの値:
+-- CURRENT   = LGWRが現在このグループに書き込み中
+-- ACTIVE    = インスタンス・リカバリに必要（まだチェックポイントが完了していない）
+-- INACTIVE  = リカバリに不要。再利用可能
+-- UNUSED    = 一度も書き込まれていない
+-- CLEARING  = 再作成中（ALTER DATABASE CLEAR LOGFILEが進行中）
 ```
 
 ---
 
-## Adding, Dropping, and Resizing Redo Logs
+## redoログの追加、削除、およびサイズ変更
 
-### Adding New Groups and Members
+### 新しいグループとメンバーの追加
 
 ```sql
--- Add a new group with two members (multiplexed)
+-- 2つのメンバーを持つ新しいグループを追加 (多重化)
 ALTER DATABASE ADD LOGFILE GROUP 4
   ('/disk1/redo04a.log', '/disk2/redo04b.log') SIZE 500M;
 
--- Add a member to an existing group (multiplexing an existing group)
+-- 既存のグループにメンバーを追加 (既存グループの多重化)
 ALTER DATABASE ADD LOGFILE MEMBER
   '/disk2/redo01b.log' TO GROUP 1;
 
--- Add a member to all groups at once (loop in a script)
+-- すべてのグループに一度にメンバーを追加 (スクリプト内でのループ)
 ALTER DATABASE ADD LOGFILE MEMBER '/disk2/redo01b.log' TO GROUP 1;
 ALTER DATABASE ADD LOGFILE MEMBER '/disk2/redo02b.log' TO GROUP 2;
 ALTER DATABASE ADD LOGFILE MEMBER '/disk2/redo03b.log' TO GROUP 3;
 ```
 
-### Dropping Groups and Members
+### グループとメンバーの削除
 
-You can only drop a group that is INACTIVE (not CURRENT or ACTIVE). You cannot drop a group if it would leave fewer than 2 groups.
+INACTIVEな（CURRENTでもACTIVEでもない）グループのみを削除できる。削除後にグループ数が2未満になる場合は削除できない。
 
 ```sql
--- Drop a redo log group
+-- redoログ・グループを削除
 ALTER DATABASE DROP LOGFILE GROUP 4;
 
--- Drop a specific member (file is not deleted from OS automatically in older versions)
+-- 特定のメンバーを削除 (古いバージョンではOSファイルは自動的に削除されない)
 ALTER DATABASE DROP LOGFILE MEMBER '/disk2/redo01b.log';
 
--- After dropping, remove the OS file manually if needed
--- (host OS command, not SQL)
+-- 削除後、必要に応じて手動でOSファイルを削除する
+-- (SQLではなくホストOSのコマンド)
 ```
 
-### Resizing Redo Logs
+### redoログのサイズ変更
 
-Oracle does not support `ALTER DATABASE RESIZE LOGFILE`. To resize, add new groups at the correct size, let the old groups cycle to INACTIVE, then drop them.
+Oracleは`ALTER DATABASE RESIZE LOGFILE`をサポートしていない。サイズを変更するには、正しいサイズの新しいグループを追加し、古いグループをINACTIVEにしてから削除する。
 
 ```sql
--- Step 1: Add new groups at desired size
+-- ステップ 1: 希望のサイズで新しいグループを追加
 ALTER DATABASE ADD LOGFILE GROUP 4 ('/oradata/redo04a.log') SIZE 1G;
 ALTER DATABASE ADD LOGFILE GROUP 5 ('/oradata/redo05a.log') SIZE 1G;
 ALTER DATABASE ADD LOGFILE GROUP 6 ('/oradata/redo06a.log') SIZE 1G;
 
--- Step 2: Force log switches to cycle through old groups
-ALTER SYSTEM SWITCH LOGFILE;   -- repeat until old groups are INACTIVE
-ALTER SYSTEM CHECKPOINT;       -- advance checkpoint so ACTIVE becomes INACTIVE
+-- ステップ 2: ログ・スイッチを強制して古いグループを循環させる
+ALTER SYSTEM SWITCH LOGFILE;   -- 古いグループがINACTIVEになるまで繰り返す
+ALTER SYSTEM CHECKPOINT;       -- チェックポイントを進めてACTIVEをINACTIVEにする
 
--- Step 3: Drop the old undersized groups
+-- ステップ 3: サイズが不適切な古いグループを削除
 ALTER DATABASE DROP LOGFILE GROUP 1;
 ALTER DATABASE DROP LOGFILE GROUP 2;
 ALTER DATABASE DROP LOGFILE GROUP 3;
 
--- Step 4: Verify new configuration
+-- ステップ 4: 新しい構成を確認
 SELECT group#, bytes/1048576 size_mb, status FROM v$log ORDER BY group#;
 ```
 
 ---
 
-## Sizing Redo Logs (Avoiding Frequent Log Switches)
+## redoログのサイズ設定 (頻繁なログ・スイッチの回避)
 
-### Why Log Switch Frequency Matters
+### ログ・スイッチの頻度が重要な理由
 
-Every log switch triggers a **checkpoint** (a request for DBWR to write all dirty buffers to disk) and, in ARCHIVELOG mode, causes the ARCn process to archive the log before it can be reused. Frequent log switches:
+すべてのログ・スイッチは**チェックポイント**（DBWRがすべてのダーティ・バッファをディスクに書き込むよう要求すること）をトリガーし、ARCHIVELOGモードでは、再利用前にARCnプロセスがログをアーカイブする必要がある。頻繁なログ・スイッチは以下の影響を及ぼす：
 
-- Increase I/O pressure from checkpoint activity
-- Can stall LGWR if it cycles back to an unarchived group (log switch wait)
-- Generate excessive archived logs
-- Show up in the alert log and V$SESSION_WAIT as `log file switch` wait events
+- チェックポイント活動によるI/Oプレッシャーの増大
+- 未アーカイブのグループに戻った場合にLGWRが停止する可能性がある（ログ・スイッチ待機）
+- 過剰なアーカイブ・ログの生成
+- アラートログやV$SESSION_WAITに`log file switch`待機イベントとして表示される
 
-Oracle recommends log switches no more frequently than every 15–30 minutes under normal load.
+Oracleは、通常の負荷下でログ・スイッチが15〜30分に1回程度になるようにサイズ設定することを推奨している。
 
-### Measuring Current Log Switch Frequency
+### 現在のログ・スイッチ頻度の測定
 
 ```sql
--- Log switch frequency per hour (from alert log via V$LOG_HISTORY)
+-- 1時間あたりのログ・スイッチ頻度 (V$LOG_HISTORY経由)
 SELECT TO_CHAR(first_time, 'YYYY-MM-DD HH24') hour_bucket,
        COUNT(*) switches
 FROM v$log_history
@@ -149,13 +149,13 @@ GROUP BY TO_CHAR(first_time, 'YYYY-MM-DD HH24')
 ORDER BY 1 DESC
 FETCH FIRST 48 ROWS ONLY;
 
--- Average redo generated per switch (helps size new logs)
+-- 1スイッチあたりの平均生成redo量 (新しいログのサイズ設定に役立つ)
 SELECT ROUND(AVG(blocks * block_size) / 1048576, 1) avg_mb_per_log
 FROM v$archived_log
 WHERE first_time > SYSDATE - 7
   AND standby_dest = 'NO';
 
--- Current log group size vs actual usage
+-- 現在のログ・グループ・サイズ vs 実際の使用量
 SELECT l.group#, l.bytes/1048576 size_mb,
        l.status,
        lh.blocks * lh.block_size / 1048576 last_used_mb
@@ -164,15 +164,15 @@ LEFT JOIN v$archived_log lh ON l.sequence# = lh.sequence#
 ORDER BY l.group#;
 ```
 
-### Sizing Recommendation
+### サイズ設定の推奨事項
 
-A common rule of thumb: size redo logs so that a log switch occurs every 15–30 minutes during peak load.
+一般的な目安：ピーク時の負荷下で15〜30分に1回のログ・スイッチが発生するようにredoログのサイズを設定する。
 
-If current logs are 200MB and switches happen every 3 minutes during peak, the peak redo generation rate is approximately 200MB / 3min = 66 MB/min. Target log size for a 20-minute switch: 66 MB/min × 20 min = 1.3 GB.
+現在のログが200MBで、ピーク時に3分ごとにスイッチが発生している場合、ピーク時のredo生成率は約200MB / 3分 = 66 MB/分である。20分ごとのスイッチを目指す場合のターゲット・ログ・サイズは、66 MB/分 × 20分 = 1.3 GBとなる。
 
 ```sql
--- More precise sizing: check max redo blocks per 10-minute window from UNDOSTAT
--- (UNDOSTAT tracks undo blocks, use V$SYSSTAT for redo)
+-- より正確なサイズ設定: UNDOSTATから10分間あたりの最大undoブロック数を確認する
+-- (UNDOSTATはundoブロックを追跡する。redoにはV$SYSSTATを使用)
 SELECT statistic#, name, value
 FROM v$sysstat
 WHERE name IN ('redo size', 'redo entries', 'redo log space requests',
@@ -181,56 +181,57 @@ WHERE name IN ('redo size', 'redo entries', 'redo log space requests',
 
 ---
 
-## ARCHIVELOG Mode
+## ARCHIVELOGモード
 
-### What ARCHIVELOG Mode Does
+### ARCHIVELOGモードの役割
 
-In **ARCHIVELOG mode**, before Oracle reuses an online redo log group, the ARCn (archiver) process copies it to the **archived log destination**. This archived copy preserves all redo and makes it possible to:
-- Recover the database to any point in time (not just the last full backup)
-- Perform online (hot) backups with RMAN
-- Use Data Guard (standby databases)
-- Use Oracle Streams, LogMiner, or GoldenGate
+**ARCHIVELOGモード**では、Oracleがオンラインredoログ・グループを再利用する前に、ARCn（アーカイバ）プロセスがそれを**アーカイブ・ログ出力先**にコピーする。このアーカイブされたコピーにより、以下のことが可能になる：
 
-In **NOARCHIVELOG mode**, online redo logs are simply overwritten. Recovery is limited to the most recent full backup — all committed changes since that backup are unrecoverable on media failure. NOARCHIVELOG is acceptable only for development or test databases.
+- データベースを任意の時点にリカバリする（直近のフル・バックアップだけでなく）
+- RMANを使用してオンライン（ホット）バックアップを実行する
+- Data Guard（スタンバイ・データベース）を使用する
+- Oracle Streams、LogMiner、またはGoldenGateを使用する
 
-### Checking and Enabling ARCHIVELOG Mode
+**NOARCHIVELOGモード**では、オンラインredoログは単に上書きされる。リカバリは直近のフル・バックアップまでしかできず、それ以降のコミット済み変更はメディア障害発生時に復旧できない。NOARCHIVELOGは開発またはテスト用のデータベースにのみ許容される。
+
+### ARCHIVELOGモードの確認と有効化
 
 ```sql
--- Check current mode
+-- 現在のモードを確認
 SELECT log_mode, name FROM v$database;
 
--- View archiver status
+-- アーカイバのステータスを表示
 SELECT archiver FROM v$instance;
 
--- Enable ARCHIVELOG mode
+-- ARCHIVELOGモードの有効化
 SHUTDOWN IMMEDIATE;
 STARTUP MOUNT;
 ALTER DATABASE ARCHIVELOG;
 ALTER DATABASE OPEN;
 
--- Verify
+-- 確認
 SELECT log_mode FROM v$database;
--- Should return: ARCHIVELOG
+-- 結果が ARCHIVELOG であること
 ```
 
-### Configuring Archive Log Destinations
+### アーカイブ・ログ出力先の構成
 
 ```sql
--- Set the primary archive log destination
+-- 主要なアーカイブ・ログ出力先を設定
 ALTER SYSTEM SET LOG_ARCHIVE_DEST_1 =
   'LOCATION=/oradata/archive VALID_FOR=(ALL_LOGFILES,ALL_ROLES)'
   SCOPE=BOTH;
 
--- Enable the destination
+-- 出力先を有効化
 ALTER SYSTEM SET LOG_ARCHIVE_DEST_STATE_1 = ENABLE SCOPE=BOTH;
 
--- Use Fast Recovery Area (FRA) as archive destination
+-- 高速リカバリ領域 (FRA) をアーカイブ出力先に設定
 ALTER SYSTEM SET DB_RECOVERY_FILE_DEST = '/oradata/fra' SCOPE=BOTH;
 ALTER SYSTEM SET DB_RECOVERY_FILE_DEST_SIZE = 100G SCOPE=BOTH;
 ALTER SYSTEM SET LOG_ARCHIVE_DEST_1 =
   'LOCATION=USE_DB_RECOVERY_FILE_DEST' SCOPE=BOTH;
 
--- View current archive destinations
+-- 現在のアーカイブ出力先を表示
 SELECT dest_id, dest_name, status, target, archiver, schedule,
        destination, transmit_mode
 FROM v$archive_dest
@@ -238,36 +239,36 @@ WHERE status != 'INACTIVE'
 ORDER BY dest_id;
 ```
 
-### Manual Log Switch and Archive
+### 手動ログ・スイッチとアーカイブ
 
 ```sql
--- Force a log switch
+-- ログ・スイッチを強制
 ALTER SYSTEM SWITCH LOGFILE;
 
--- Archive all unarchived logs (for manual archiving or testing)
+-- 未アーカイブのすべてのログをアーカイブ (手動アーカイブまたはテスト用)
 ALTER SYSTEM ARCHIVE LOG ALL;
 
--- Archive current log
+-- カレント・ログをアーカイブ
 ALTER SYSTEM ARCHIVE LOG CURRENT;
 ```
 
 ---
 
-## Archived Log Management
+## アーカイブ・ログの管理
 
-Archived logs accumulate continuously. Without active management, they will eventually fill the archive destination or Fast Recovery Area, causing the database to hang.
+アーカイブ・ログは継続的に蓄積される。アクティブに管理しないと、最終的にアーカイブ出力先または高速リカバリ領域がいっぱいになり、データベースがハングする原因となる。
 
-### Monitoring Archived Log Space
+### アーカイブ・ログ領域の監視
 
 ```sql
--- Check FRA usage
+-- FRAの使用状況を確認
 SELECT name, space_limit/1073741824 limit_gb,
        space_used/1073741824 used_gb,
        space_reclaimable/1073741824 reclaimable_gb,
        ROUND(space_used / space_limit * 100, 1) pct_used
 FROM v$recovery_file_dest;
 
--- Count and size of archived logs on disk
+-- ディスク上のアーカイブ・ログの数とサイズ
 SELECT dest_id, COUNT(*) log_count,
        SUM(blocks * block_size) / 1073741824 total_gb
 FROM v$archived_log
@@ -275,94 +276,94 @@ WHERE standby_dest = 'NO'
   AND deleted = 'NO'
 GROUP BY dest_id;
 
--- Oldest archived log on disk
+-- ディスク上の最も古いアーカイブ・ログと最新のアーカイブ・ログ
 SELECT MIN(first_time) oldest_log, MAX(first_time) newest_log
 FROM v$archived_log
 WHERE standby_dest = 'NO'
   AND deleted = 'NO';
 ```
 
-### Deleting Archived Logs Safely
+### アーカイブ・ログの安全な削除
 
-Always delete archived logs through RMAN, not via OS commands:
+アーカイブ・ログはOSコマンドではなく、必ずRMAN経由で削除すること：
 
 ```sql
--- Via RMAN: delete archived logs already backed up at least once
+-- RMAN経由: 少なくとも1回はバックアップ済みのアーカイブ・ログを削除
 DELETE ARCHIVELOG ALL BACKED UP 1 TIMES TO DEVICE TYPE DISK;
 
--- Delete archived logs older than 7 days (whether backed up or not — use with caution)
+-- 7日より前のアーカイブ・ログを削除 (バックアップの有無に関わらず。注意して使用すること)
 DELETE ARCHIVELOG UNTIL TIME 'SYSDATE-7';
 
--- Delete all archived logs backed up at least 2 times (very safe)
+-- 少なくとも2回バックアップ済みのすべてのアーカイブ・ログを削除 (非常に安全)
 DELETE ARCHIVELOG ALL BACKED UP 2 TIMES TO DEVICE TYPE DISK;
 ```
 
-If you accidentally delete archived logs via OS commands (not RMAN):
+誤ってOSコマンドでアーカイブ・ログを削除してしまった場合（RMAN外）：
 ```sql
--- Crosscheck to find the missing files and mark them EXPIRED
+-- 存在しないファイルを見つけてEXPIREDとしてマークする
 CROSSCHECK ARCHIVELOG ALL;
 
--- Delete the expired records from the repository
+-- リポジトリから期限切れのレコードを削除する
 DELETE EXPIRED ARCHIVELOG ALL;
 ```
 
 ---
 
-## Multiplexing Redo Logs
+## redoログの多重化
 
-Multiplexing means maintaining multiple copies (members) of each redo log group on different disks. If one member is lost, LGWR continues writing to the remaining members without any database outage.
+多重化とは、各redoログ・グループの複数のコピー（メンバー）を異なるディスク上に維持することである。1つのメンバーが失われても、LGWRは残りのメンバーへの書き込みを継続し、データベースの停止を回避できる。
 
 ```sql
--- Add a second member to every existing group (multiplexing)
--- Assumes groups 1-3 exist
+-- 既存の各グループに2番目のメンバーを追加 (多重化)
+-- グループ 1-3 が存在すると想定
 ALTER DATABASE ADD LOGFILE MEMBER '/disk2/redo01b.log' TO GROUP 1;
 ALTER DATABASE ADD LOGFILE MEMBER '/disk2/redo02b.log' TO GROUP 2;
 ALTER DATABASE ADD LOGFILE MEMBER '/disk2/redo03b.log' TO GROUP 3;
 
--- Verify multiplexing
+-- 多重化の確認
 SELECT l.group#, lf.member, lf.type, lf.status
 FROM v$log l JOIN v$logfile lf ON l.group# = lf.group#
 ORDER BY l.group#, lf.member;
 ```
 
-### Recovering from a Missing Redo Log Member
+### 紛失したredoログ・メンバーの復旧
 
-If a member file is lost (e.g., disk failure) but other members of the group remain intact:
+ディスク故障などでメンバー・ファイルが失われたが、グループの他のメンバーが損なわれていない場合：
 
 ```sql
--- The group will show status CURRENT or ACTIVE but one member will show INVALID or STALE
--- Drop the missing member
+-- グループのステータスは CURRENT または ACTIVE だが、1つのメンバーが INVALID または STALE になる
+-- 紛失したメンバーを削除
 ALTER DATABASE DROP LOGFILE MEMBER '/disk2/redo01b.log';
 
--- Re-add a new member (Oracle will create the file)
+-- 新しいメンバーを再度追加 (Oracleがファイルを作成する)
 ALTER DATABASE ADD LOGFILE MEMBER '/disk3/redo01b.log' TO GROUP 1;
--- Note: new member starts INVALID and becomes current on the next log switch
+-- 注: 新しいメンバーは最初 INVALID で、次のログ・スイッチでカレントになる
 ```
 
-### Recovering from a Missing CURRENT Log Group (Media Failure)
+### 紛失したカレント・ログ・グループからの復旧 (メディア障害)
 
-This is a more serious scenario. If the CURRENT group is lost:
+非常に深刻なシナリオである。カレント・グループが消失した場合：
 
 ```sql
--- First, try to clear the log (creates a new empty log, losing unarchived redo)
--- WARNING: This WILL cause data loss — use only when the log truly cannot be recovered
+-- まず、ログのクリアを試みる (新しい空のログを作成し、未アーカイブのredoは失われる)
+-- 警告: データ損失が発生します。真に復旧不可能な場合にのみ使用してください。
 ALTER DATABASE CLEAR UNARCHIVED LOGFILE GROUP 1;
 
--- After clearing, the database may need recovery from backup
--- Check if all datafiles are consistent
+-- クリア後、バックアップからのリカバリが必要になる場合がある。
+-- すべてのデータファイルに整合性があるか確認
 SELECT file#, name, status FROM v$datafile WHERE status != 'ONLINE';
 ```
 
 ---
 
-## Log Switch Frequency Monitoring
+## ログ・スイッチ頻度の監視
 
-### Alert Log Monitoring
+### アラートログの監視
 
-Log switches appear in the alert log with timestamps. Frequent switches (every few minutes) indicate undersized redo logs.
+ログ・スイッチはアラートログにタイムスタンプと共に記録される。数分ごとの頻繁なスイッチは、redoログのサイズ不足を示している。
 
 ```sql
--- Log switch history by day (useful for capacity planning)
+-- 日ごとのログ・スイッチ履歴 (キャパシティ・プランニングに有用)
 SELECT TRUNC(first_time, 'DD') log_date,
        COUNT(*) daily_switches,
        ROUND(COUNT(*) / 24, 1) switches_per_hour_avg
@@ -371,7 +372,7 @@ WHERE first_time > SYSDATE - 30
 GROUP BY TRUNC(first_time, 'DD')
 ORDER BY 1 DESC;
 
--- Peak switches in a single hour
+-- 特定の時間帯におけるピーク時のスイッチ
 SELECT TO_CHAR(first_time, 'YYYY-MM-DD HH24') hour,
        COUNT(*) switches
 FROM v$log_history
@@ -381,22 +382,22 @@ ORDER BY 2 DESC
 FETCH FIRST 10 ROWS ONLY;
 ```
 
-### Log Switch Wait Events
+### ログ・スイッチ待機イベント
 
-If LGWR cannot switch to the next log group (because it is still ACTIVE — not checkpointed, or still being archived), sessions wait:
+LGWRが（チェックポイントが完了していない、またはアーカイブ中であるために）ACTIVEな次のログ・グループに切り替えられない場合、セッションは待機状態になる：
 
 ```sql
--- Check for log file switch waits
+-- ログ・スイッチ待機イベントの確認
 SELECT event, total_waits, time_waited, average_wait
 FROM v$system_event
 WHERE event LIKE 'log file switch%'
 ORDER BY time_waited DESC;
 
--- Event: "log file switch (checkpoint incomplete)" → need more groups or faster I/O
--- Event: "log file switch (archiving needed)"     → ARCn cannot keep up; check archiver lag
--- Event: "log file switch completion"             → occasional switch overhead (normal in small amounts)
+-- イベント: "log file switch (checkpoint incomplete)" → グループ数を増やすかI/Oを高速化する必要がある
+-- イベント: "log file switch (archiving needed)"    → ARCnが追いついていない。アーカイバのラグを確認
+-- イベント: "log file switch completion"            → 時折発生するスイッチのオーバーヘッド (少量なら正常)
 
--- Current session waits for context
+-- 現在のセッション待機状況
 SELECT s.sid, s.serial#, s.username, s.event, s.state, s.seconds_in_wait
 FROM v$session s
 WHERE s.event LIKE 'log file switch%'
@@ -405,65 +406,64 @@ WHERE s.event LIKE 'log file switch%'
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Always run in ARCHIVELOG mode** in production. NOARCHIVELOG mode means you cannot perform point-in-time recovery.
+- **本番環境では常にARCHIVELOGモードで実行する。** NOARCHIVELOGモードではポイント・イン・タイム・リカバリができない。
 
-- **Multiplex redo logs** on separate physical disks. The cost of an extra copy is minimal compared to the risk of losing the current redo log.
+- **別の物理ディスクにredoログを多重化する。** カレントredoログを失うリスクに比べれば、追加コピーのコストは微々たるものである。
 
-- **Size redo logs for 15–30 minute switches** under peak load. Too small causes frequent switches and performance degradation; too large delays media recovery slightly (must apply more redo per log).
+- **ピーク時のログ・スイッチを15〜30分に設定する。** 小さすぎるとスイッチが頻発しパフォーマンスが低下し、大きすぎるとメディア・リカバリ時に適用するredo量が増えて時間がかかる。
 
-- **Use a Fast Recovery Area (FRA)** for archived log storage. It simplifies management and RMAN can automatically clean up the FRA.
+- **高速リカバリ領域 (FRA) を使用する。** アーカイブ・ログ管理が簡素化され、RMANによる自動クリーンアップが可能になる。
 
-- **Monitor FRA space daily.** A full FRA causes the database to hang, waiting for space. Set an OEM alert on FRA percent used.
+- **FRA領域を毎日監視する。** FRAがいっぱいになると、空きができるまでデータベースがハングする。FRAの使用率にOEMアラートを設定すること。
 
-- **Never delete archived logs with OS commands.** Always use RMAN to delete archived logs so the repository stays accurate.
+- **OSコマンドでアーカイブ・ログを削除しない。** リポジトリが正確に保たれるよう、必ずRMANを使用して削除する。
 
-- **Add groups before you need them.** At least 3–5 groups gives the archiver time to keep up. Under very high redo generation (data loads, bulk DML), 6+ groups may be needed.
+- **必要になる前にグループを追加しておく。** 少なくとも3〜5グループあれば、アーカイバが追いつく余裕ができる。大量のデータ・ロードやバルクDMLが発生する場合は、6グループ以上が必要になることもある。
 
-- **Keep LGWR I/O fast.** Redo logs should be on low-latency storage (SSD, dedicated spindles, or ASM with high redundancy). LGWR latency directly impacts commit response time.
+- **LGWRのI/Oを高速に保つ。** redoログは低遅延のストレージ（SSD、専用ドライブ、または高冗長性のASM）に配置すべきである。LGWRの遅延はコミットの応答時間に直結する。
 
 ---
 
-## Common Mistakes and How to Avoid Them
+## よくある間違いと回避策
 
-**Using only 2 redo log groups**
-With only 2 groups, if LGWR fills group 1 and ARCn hasn't finished archiving it, LGWR stalls waiting for group 1 to be available. Always use at least 3 groups.
+**redoログ・グループが2つしかない**
+2つのグループしかないと、LGWRがグループ1を使い切り、ARCnがまだアーカイブを終えていない場合、LGWRはグループ1が解放されるまでハングする。必ず3つ以上のグループを使用すること。
 
-**Leaving redo logs unmirrored**
-If the single member of the CURRENT redo log group is lost (disk failure), you have an unrecoverable database unless you accept data loss and use `CLEAR UNARCHIVED LOGFILE`. Always multiplex.
+**redoログをミラー化していない**
+カレントredoログ・グループの唯一のメンバーが失われる（ディスク故障など）と、データ損失を受け入れて`CLEAR UNARCHIVED LOGFILE`を使用しない限り、復旧不可能なデータベースになる。必ず多重化すること。
 
-**Redo logs on the same physical disk as datafiles**
-Under heavy write loads, redo log I/O competes with datafile I/O. Put redo logs on dedicated disks separate from datafiles and archive logs.
+**redoログをデータファイルと同じ物理ディスクに配置する**
+書き込み負荷が高い場合、redoログのI/OがデータファイルのI/Oと競合する。redoログはデータファイルやアーカイブ・ログとは別の専用ディスクに配置すること。
 
-**Forgetting to monitor FRA space**
+**FRA領域の監視を怠る**
 ```sql
--- Add this to your daily monitoring script
+-- 日次の監視スクリプトに追加
 SELECT name, space_limit/1073741824 limit_gb,
        space_used/1073741824 used_gb,
        ROUND(space_used/space_limit*100,1) pct_full
 FROM v$recovery_file_dest;
 ```
-If FRA hits 100%, the database will hang on next log switch.
+FRAが100%になると、次のログ・スイッチ時にデータベースがハングする。
 
-**Switching to ARCHIVELOG mode without configuring an archive destination**
-If `LOG_ARCHIVE_DEST_1` is not set and there is no FRA, Oracle will archive to a default OS location which may not have adequate space or may not be backed up.
+**アーカイブ出力先を構成せずにARCHIVELOGモードに切り替える**
+`LOG_ARCHIVE_DEST_1`が設定されておらず、FRAもない場合、OracleはデフォルトのOSの場所にアーカイブするが、そこには適切な領域がなかったり、バックアップ対象外だったりすることがある。
 
-**Dropping a log group while it is ACTIVE**
-This fails with ORA-00350. Issue `ALTER SYSTEM CHECKPOINT` first to advance the checkpoint and transition the group to INACTIVE before dropping.
+**ACTIVE状態のログ・グループを削除しようとする**
+これは ORA-00350 で失敗する。まず `ALTER SYSTEM CHECKPOINT` を発行してチェックポイントを進め、グループを INACTIVE に切り替えてから削除すること。
 
 ---
 
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Database Administrator's Guide 19c — Managing the Redo Log](https://docs.oracle.com/en/database/oracle/oracle-database/19/admin/managing-the-redo-log.html)
-- [Oracle Database 19c Reference — V$LOG](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-LOG.html)
-- [Oracle Database 19c Reference — V$LOGFILE](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-LOGFILE.html)
-- [Oracle Database 19c Reference — V$LOG_HISTORY](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-LOG_HISTORY.html)
+- [Oracle Database 管理者ガイド 19c — redoログの管理](https://docs.oracle.com/en/database/oracle/oracle-database/19/admin/managing-the-redo-log.html)
+- [Oracle Database 19c リファレンス — V$LOG](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-LOG.html)
+- [Oracle Database 19c リファレンス — V$LOGFILE](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-LOGFILE.html)
+- [Oracle Database 19c リファレンス — V$LOG_HISTORY](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-LOG_HISTORY.html)

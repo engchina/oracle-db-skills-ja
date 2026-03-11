@@ -1,156 +1,156 @@
-# Oracle In-Memory Column Store
+# Oracleインメモリー列ストア
 
-## Overview
+## 概要
 
-The Oracle Database In-Memory (DBIM) option, introduced in Oracle 12c Release 1 (12.1.0.2), adds a columnar memory store alongside the traditional row-format buffer cache. It is not a replacement for the row store — Oracle maintains both formats simultaneously and uses whichever is more efficient for a given operation. OLTP DML continues to operate against the row store; analytic queries that scan large portions of a table read from the columnar In-Memory store.
+Oracle Database In-Memory (DBIM) オプションは、Oracle 12c Release 1 (12.1.0.2) で導入され、従来の行形式のバッファ・キャッシュに加えて、列形式のメモリー・ストアを追加する機能である。これは行ストアを置き換えるものではない。Oracleは両方の形式を同時に維持し、特定の操作に対してどちらがより効率的であるかに基づいて使い分ける。OLTPのDMLは引き続き行ストアに対して実行され、表の大部分をスキャンする分析クエリは列形式のインメモリー・ストアから読み取る。
 
-The primary benefit is analytic query acceleration: columnar storage, vectorized SIMD (Single Instruction Multiple Data) CPU instructions, and in-memory compression combine to accelerate full-scan analytic queries by 10x–100x compared to reading the same data from disk in row format.
+主なメリットは分析クエリの高速化である：列形式ストレージ、ベクトル化されたSIMD（Single Instruction Multiple Data）CPU命令、およびインメモリー圧縮の組み合わせにより、行形式でディスクから同じデータを読み取る場合と比較して、全表スキャンの分析クエリを10倍から100倍高速化できる。
 
-DBIM is an Oracle Database option — it requires a separate license unless you are using Oracle Exadata (where it is included) or Oracle Autonomous Database (where it is included and managed automatically).
+DBIMはOracle Databaseのオプションであり、Oracle Exadata（含まれている）やOracle Autonomous Database（含まれており自動管理される）を使用していない場合は、別途ライセンスが必要となる。
 
 ---
 
-## 1. Architecture Overview
+## 1. アーキテクチャの概要
 
-### Dual-Format Storage
+### デュアル形式ストレージ
 
-Oracle maintains two representations of data for In-Memory populated objects:
+Oracleは、インメモリーにポピュレートされたオブジェクトに対して2つのデータ表現を維持する：
 
-| Format | Location | Used For |
+| 形式 | 場所 | 用途 |
 |---|---|---|
-| Row format | Buffer cache / disk | DML (INSERT, UPDATE, DELETE), PK/index lookups, small result sets |
-| Columnar format | In-Memory Column Store (IMCS) | Full-scan analytic queries, aggregations, range predicates |
+| 行形式 | バッファ・キャッシュ / ディスク | DML (INSERT, UPDATE, DELETE)、PK/索引ルックアップ、小規模な結果セット |
+| 列形式 | インメモリー列ストア (IMCS) | 全表スキャン分析クエリ、集計、範囲述語 |
 
-The IMCS is a separate memory pool allocated from the SGA. It is configured with the `INMEMORY_SIZE` initialization parameter and exists independently of `DB_CACHE_SIZE`.
+IMCSは、SGAから割り当てられる独立したメモリー・プールである。`INMEMORY_SIZE` 初期化パラメータで構成され、`DB_CACHE_SIZE` とは独立して存在する。
 
-### In-Memory Compression Units (IMCUs)
+### インメモリー圧縮ユニット (IMCU)
 
-The IMCS stores data in **IMCUs (In-Memory Compression Units)**. Each IMCU:
+IMCSはデータを**IMCU (In-Memory Compression Units)** に格納する。各IMCUは：
 
-- Contains a contiguous range of rows from one column segment
-- Holds approximately 512,000 rows by default (adjustable)
-- Stores one column per IMCU partition (columnar layout)
-- Maintains a **min/max index** for each column within the IMCU (analogous to Exadata Storage Indexes)
-- Is compressed using one of the In-Memory compression formats
+- 1つの列セグメントからの連続した行範囲を含む
+- デフォルトで約512,000行を保持する（調整可能）
+- IMCUパーティションごとに1つの列を格納する（列形式レイアウト）
+- IMCU内の各列に対して**最小値/最大値索引**を維持する（Exadataのストレージ索引と同様の概念）
+- インメモリー圧縮形式のいずれかを使用して圧縮される
 
-### In-Memory Worker Processes
+### インメモリー・ワーカー・プロセス
 
-Populating objects into the IMCS is performed by background worker processes (`Wnnn`). These processes read segments from disk (or buffer cache) and populate the IMCS asynchronously. The number of worker processes is controlled by `INMEMORY_MAX_POPULATE_SERVERS`.
+オブジェクトをIMCSにポピュレート（読み込み）する処理は、バックグラウンドのワーカー・プロセス（`Wnnn`）によって実行される。これらのプロセスはディスク（またはバッファ・キャッシュ）からセグメントを読み取り、非同期でIMCSにポピュレートする。ワーカー・プロセスの数は `INMEMORY_MAX_POPULATE_SERVERS` によって制御される。
 
 ---
 
-## 2. Configuring the In-Memory Column Store
+## 2. インメモリー列ストアの構成
 
-### Enabling DBIM
+### DBIMの有効化
 
 ```sql
--- Set the IMCS size (minimum 100 MB; meaningful from 1 GB+)
--- Requires database restart if not already set
+-- IMCS サイズの設定 (最小 100 MB、実用的には 1 GB 以上)
+-- まだ設定されていない場合はデータベースの再起動が必要
 ALTER SYSTEM SET INMEMORY_SIZE = 16G SCOPE = SPFILE;
 
--- In 12.1, this requires a restart. In 12.2+, it can be increased dynamically
--- (but cannot be decreased without a restart)
-ALTER SYSTEM SET INMEMORY_SIZE = 24G;  -- increase only, no restart needed in 12.2+
+-- 12.1 では再起動が必要。12.2 以降では動的に増やすことが可能
+-- (ただし、再起動なしで減らすことはできない)
+ALTER SYSTEM SET INMEMORY_SIZE = 24G;  -- 増やすだけであれば 12.2 以降は再起動不要
 
--- Verify IMCS is active
+-- IMCS がアクティブであることを確認
 SELECT name, value
 FROM   v$parameter
 WHERE  name IN ('inmemory_size', 'inmemory_max_populate_servers',
                 'inmemory_query', 'inmemory_force')
 ORDER  BY name;
 
--- Check IMCS memory area
+-- IMCS メモリー領域の確認
 SELECT pool, alloc_bytes / 1024 / 1024 / 1024 AS alloc_gb,
        used_bytes  / 1024 / 1024 / 1024 AS used_gb,
        populate_status
 FROM   v$inmemory_area;
 ```
 
-### In-Memory Initialization Parameters
+### インメモリー初期化パラメータ
 
-| Parameter | Default | Description |
+| パラメータ | デフォルト | 説明 |
 |---|---|---|
-| `INMEMORY_SIZE` | 0 (disabled) | Size of the IMCS; set to enable In-Memory |
-| `INMEMORY_MAX_POPULATE_SERVERS` | CPU count / 2 | Max background populate workers |
-| `INMEMORY_QUERY` | ENABLE | ENABLE / DISABLE In-Memory query at instance level |
-| `INMEMORY_FORCE` | DEFAULT | Force all tables into IMCS (PMEM, OFF, DEFAULT) |
-| `INMEMORY_VIRTUAL_COLUMNS` | MANUAL | AUTO: also populate virtual columns; MANUAL: user-specified |
-| `INMEMORY_CLAUSE_DEFAULT` | empty | Default INMEMORY attributes for all new objects |
-| `INMEMORY_DEEP_VECTORIZATION` | TRUE | Enable advanced SIMD vectorization |
-| `HEAT_MAP` | OFF | Required for Automatic Data Optimization (ADO) with INMEMORY |
+| `INMEMORY_SIZE` | 0 (無効) | IMCS のサイズ。インメモリーを有効にするために設定 |
+| `INMEMORY_MAX_POPULATE_SERVERS` | CPU 数 / 2 | バックグラウンド・ポピュレート・ワーカーの最大数 |
+| `INMEMORY_QUERY` | ENABLE | インスタンス・レベルでのインメモリー・クエリの有効/無効 (ENABLE / DISABLE) |
+| `INMEMORY_FORCE` | DEFAULT | すべての表を強制的に IMCS に入れる (PMEM, OFF, DEFAULT) |
+| `INMEMORY_VIRTUAL_COLUMNS` | MANUAL | AUTO: 仮想列もポピュレートする。MANUAL: ユーザ指定 |
+| `INMEMORY_CLAUSE_DEFAULT` | (空) | すべての新規オブジェクトのデフォルト INMEMORY 属性 |
+| `INMEMORY_DEEP_VECTORIZATION` | TRUE | 高度な SIMD ベクトル化を有効にする |
+| `HEAT_MAP` | OFF | INMEMORY での自動データ最適化 (ADO) に必要 |
 
 ---
 
-## 3. Populating Objects into the IMCS
+## 3. オブジェクトのIMCSへのポピュレート
 
-### Table-Level INMEMORY Clause
+### 表レベルの INMEMORY 句
 
 ```sql
--- Enable INMEMORY on a table with default settings (MEMCOMPRESS FOR QUERY LOW)
+-- 表にデフォルト設定で INMEMORY を有効化 (MEMCOMPRESS FOR QUERY LOW)
 ALTER TABLE sales INMEMORY;
 
--- Enable with a specific compression level
+-- 特定の圧縮レベルを指定して有効化
 ALTER TABLE sales INMEMORY MEMCOMPRESS FOR QUERY HIGH;
 
--- Enable for analytic workloads (highest compression, acceptable query overhead)
+-- 分析ワークロード用に有効化 (高い圧縮率、許容可能なクエリ・オーバーヘッド)
 ALTER TABLE sales INMEMORY MEMCOMPRESS FOR CAPACITY HIGH;
 
--- Priority controls when the object is populated relative to other objects
--- CRITICAL > HIGH > MEDIUM > LOW > NONE (NONE = populate on first access only)
+-- 優先順位（Priority）は、他のオブジェクトと比較していつポピュレートされるかを制御する
+-- CRITICAL > HIGH > MEDIUM > LOW > NONE (NONE = 初回アクセス時のみポピュレート)
 ALTER TABLE sales INMEMORY
     MEMCOMPRESS FOR QUERY LOW
     PRIORITY HIGH;
 
--- Disable In-Memory for a specific table
+-- 特定の表のインメモリーを無効化
 ALTER TABLE sales NO INMEMORY;
 ```
 
-### In-Memory Compression Levels
+### インメモリー圧縮レベル
 
-| MEMCOMPRESS Level | Compression Method | Typical Ratio | CPU Cost |
+| MEMCOMPRESS レベル | 圧縮方法 | 一般的な圧縮率 | CPU コスト |
 |---|---|---|---|
-| `FOR DML` | No compression | 1x | None |
-| `FOR QUERY LOW` | LZ4 (fast decompress) | 2x–4x | Very low |
-| `FOR QUERY HIGH` | ZLIB (fast decompress) | 4x–8x | Low |
-| `FOR CAPACITY LOW` | ZLIB (higher compression) | 8x–15x | Medium |
-| `FOR CAPACITY HIGH` | BZIP2-equivalent | 15x–25x | Higher |
+| `FOR DML` | 圧縮なし | 1倍 | なし |
+| `FOR QUERY LOW` | LZ4 (高速解凍) | 2倍–4倍 | 極めて低い |
+| `FOR QUERY HIGH` | ZLIB (高速解凍) | 4倍–8倍 | 低 |
+| `FOR CAPACITY LOW` | ZLIB (より高い圧縮率) | 8倍–15倍 | 中 |
+| `FOR CAPACITY HIGH` | BZIP2 相当 | 15倍–25倍 | 高 |
 
-`FOR QUERY LOW` is the most common production choice: meaningful compression with near-zero decompression overhead during scans.
+`FOR QUERY LOW` が本番環境で最も一般的な選択肢である。意味のある圧縮を実現しつつ、スキャン中の解凍オーバーヘッドがほぼゼロである。
 
-### Selective Column Population
+### 列の選択的なポピュレート
 
-Not all columns need to be in the IMCS. Excluding frequently-updated columns or rarely-queried columns reduces IMCS footprint.
+すべての列を IMCS に入れる必要はない。頻繁に更新される列や、めったに照会されない列を除外することで、IMCS のフットプリントを削減できる。
 
 ```sql
--- Include only specific columns in the IMCS
+-- 特定の列のみを IMCS に含める
 ALTER TABLE sales
     INMEMORY MEMCOMPRESS FOR QUERY LOW
     (sale_date, region_id, product_id, amount, quantity)
     NO INMEMORY (customer_comments, audit_timestamp, last_updated_by);
 
--- Verify column-level INMEMORY settings
+-- 列レベルの INMEMORY 設定の確認
 SELECT table_name, column_name, inmemory_compression
 FROM   v$im_column_level
 WHERE  table_name = 'SALES'
 ORDER  BY column_name;
 ```
 
-### Partition-Level INMEMORY
+### パーティション・レベルの INMEMORY
 
-For very large partitioned tables, populate only the "hot" partitions into the IMCS.
+非常に大きなパーティション表の場合、アクセス頻度の高い（Hot な）パーティションのみを IMCS にポピュレートする。
 
 ```sql
--- Apply INMEMORY to the current and previous month's partitions only
+-- 今月と先月のパーティションのみに INMEMORY を適用
 ALTER TABLE sales MODIFY PARTITION sales_202502 INMEMORY PRIORITY HIGH;
 ALTER TABLE sales MODIFY PARTITION sales_202503 INMEMORY PRIORITY CRITICAL;
 
--- Exclude older partitions from IMCS to conserve memory
+-- メモリー節約のため、古いパーティションを IMCS から除外
 ALTER TABLE sales MODIFY PARTITION sales_2024q1 NO INMEMORY;
 ALTER TABLE sales MODIFY PARTITION sales_2024q2 NO INMEMORY;
 ALTER TABLE sales MODIFY PARTITION sales_2024q3 NO INMEMORY;
 ALTER TABLE sales MODIFY PARTITION sales_2024q4 NO INMEMORY;
 
--- Check partition-level In-Memory status
+-- パーティション・レベルのインメモリー・ステータスの確認
 SELECT table_name, partition_name, inmemory,
        inmemory_priority, inmemory_compression
 FROM   dba_tab_partitions
@@ -159,33 +159,33 @@ ORDER  BY partition_position DESC
 FETCH  FIRST 10 ROWS ONLY;
 ```
 
-### Forcing Immediate Population
+### 即時ポピュレートの強制
 
-By default, objects with `PRIORITY NONE` are populated only on first access. Objects with other priorities are populated by background workers after DB startup. To populate immediately:
+デフォルトでは、`PRIORITY NONE` のオブジェクトは初回アクセス時にのみポピュレートされる。他の優先順位を持つオブジェクトは、DB起動後にバックグラウンド・ワーカーによってポピュレートされる。即座にポピュレートするには：
 
 ```sql
--- Force immediate population of a table (blocks until complete)
+-- 表の即時ポピュレートを強制 (完了までブロックされる)
 EXEC DBMS_INMEMORY.POPULATE(schema_name => 'SCOTT', table_name => 'SALES');
 
--- Force immediate population of a specific partition
+-- 特定のパーティションの即時ポピュレートを強制
 EXEC DBMS_INMEMORY.POPULATE(
     schema_name    => 'SCOTT',
     table_name     => 'SALES',
     subobject_name => 'SALES_202503'
 );
 
--- Repopulate (useful after bulk DML that caused stale segments)
+-- 再ポピュレート (大量 DML の後にセグメントが古くなった場合に有用)
 EXEC DBMS_INMEMORY.REPOPULATE(schema_name => 'SCOTT', table_name => 'SALES', force => FALSE);
 ```
 
 ---
 
-## 4. Monitoring V$IM_SEGMENTS
+## 4. V$IM_SEGMENTS による監視
 
-`V$IM_SEGMENTS` is the primary monitoring view for the In-Memory Column Store.
+`V$IM_SEGMENTS` は、インメモリー列ストアを監視するための主要なビューである。
 
 ```sql
--- View all currently populated segments
+-- 現在ポピュレートされているすべてのセグメントの表示
 SELECT owner,
        segment_name,
        partition_name,
@@ -198,24 +198,24 @@ SELECT owner,
 FROM   v$im_segments
 ORDER  BY inmemory_size DESC;
 
--- Check population status
--- STARTED: populate worker has begun
--- COMPLETED: fully populated
--- FAILED: an error occurred during population
--- OUT OF MEMORY: IMCS is full
+-- ポピュレーション・ステータスの確認
+-- STARTED: ワーカーが処理を開始
+-- COMPLETED: 完全にポピュレート済み
+-- FAILED: 処理中にエラーが発生
+-- OUT OF MEMORY: IMCS が一杯
 SELECT owner, segment_name, partition_name, populate_status
 FROM   v$im_segments
 WHERE  populate_status != 'COMPLETED'
 ORDER  BY owner, segment_name;
 
--- IMCS usage summary
+-- IMCS 使用状況のサマリー
 SELECT COUNT(*)                              AS populated_segments,
        SUM(bytes)         / 1024 / 1024 / 1024 AS total_disk_gb,
        SUM(inmemory_size) / 1024 / 1024 / 1024 AS total_imcs_gb,
        SUM(bytes_not_populated) / 1024 / 1024   AS not_populated_mb
 FROM   v$im_segments;
 
--- Objects marked INMEMORY but not yet in the store
+-- INMEMORY 設定されているが、まだストアに未ロードのオブジェクト
 SELECT owner, segment_name, partition_name, priority
 FROM   v$im_segments_detail
 WHERE  populate_status = 'NOT POPULATED'
@@ -223,19 +223,19 @@ WHERE  populate_status = 'NOT POPULATED'
 ORDER  BY priority DESC, owner, segment_name;
 ```
 
-### IMCS Eviction and Repopulation
+### IMCS の追い出し (Eviction) と再ポピュレート
 
-The IMCS uses an LRU-like eviction policy when it fills up. Lower-priority objects are evicted to make room for higher-priority ones.
+IMCSは、領域が一杯になるとLRU（Least Recently Used）に近い追い出しポリシーを使用する。優先順位の高いオブジェクトのために領域を空けるべく、優先順位の低いオブジェクトが追い出される。
 
 ```sql
--- Monitor IMCS pressure
+-- IMCS 負荷の監視
 SELECT pool,
        alloc_bytes / 1024 / 1024 / 1024 AS alloc_gb,
        used_bytes  / 1024 / 1024 / 1024 AS used_gb,
        ROUND(used_bytes / NULLIF(alloc_bytes, 0) * 100, 1) AS pct_used
 FROM   v$inmemory_area;
 
--- Check for evictions
+-- 追い出しの確認
 SELECT name, value
 FROM   v$sysstat
 WHERE  name IN (
@@ -251,16 +251,16 @@ ORDER  BY name;
 
 ---
 
-## 5. Analytic Query Acceleration
+## 5. 分析クエリの高速化
 
-The In-Memory Column Store dramatically accelerates queries with these patterns:
+インメモリー列ストアは、以下のようなパターンのクエリを劇的に高速化する：
 
-### Full-Scan Aggregations
+### 全表スキャンを伴う集計
 
 ```sql
--- This query directly benefits from IMCS columnar scanning
--- Oracle reads only the needed columns (region_id, sale_date, amount)
--- in vectorized SIMD instructions across contiguous memory
+-- このクエリは IMCS の列形式スキャンの恩恵を直接受ける
+-- Oracle は必要な列 (region_id, sale_date, amount) のみを読み取り、
+-- 連続したメモリー上で SIMD 命令を使用して処理する
 SELECT region_id,
        TRUNC(sale_date, 'MONTH') AS sale_month,
        COUNT(*)                  AS num_sales,
@@ -272,52 +272,48 @@ WHERE  sale_date >= DATE '2025-01-01'
 GROUP  BY region_id, TRUNC(sale_date, 'MONTH')
 ORDER  BY sale_month, region_id;
 
--- Verify the query used IMCS via execution plan
+-- 実行計画で IMCS が使用されたことを確認
 EXPLAIN PLAN FOR
 SELECT region_id, SUM(amount) FROM sales GROUP BY region_id;
 
 SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
--- Look for: TABLE ACCESS INMEMORY FULL
--- Also look for: VECTOR GROUP BY (In-Memory Aggregation)
+-- キーワード: TABLE ACCESS INMEMORY FULL
+-- また: VECTOR GROUP BY (インメモリー集計) を探す
 ```
 
-### Verifying In-Memory Access in Execution Plans
+### 実行計画におけるインメモリー・アクセスの検証
 
 ```sql
--- Session-level: confirm IMCS was used
+-- セッション・レベル: IMCS が使用されたことの確認
 ALTER SESSION SET STATISTICS_LEVEL = ALL;
 
 SELECT region_id, SUM(amount) FROM sales GROUP BY region_id;
 
 SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(FORMAT => 'ALLSTATS LAST'));
--- Key indicators in plan:
--- Operation "TABLE ACCESS INMEMORY FULL" = IMCS scan
--- Operation "VECTOR GROUP BY"            = In-Memory aggregation
--- "In-Memory Scan" note at bottom
-
--- Force or disable IMCS at session level for testing
-ALTER SESSION SET INMEMORY_QUERY = ENABLE;   -- use IMCS (default)
-ALTER SESSION SET INMEMORY_QUERY = DISABLE;  -- bypass IMCS (test baseline)
+-- 実行計画の主要インジケータ:
+-- Operation "TABLE ACCESS INMEMORY FULL" = IMCS スキャン
+-- Operation "VECTOR GROUP BY"            = インメモリー集計
+-- 下部の Note 欄に "In-Memory Scan" 
 ```
 
-### IMCS Join Acceleration
+### IMCS による結合の高速化
 
-The In-Memory Column Store also accelerates hash joins by enabling Bloom filter creation and application inside the IMCS. This is the **In-Memory Join Group** feature (12.2+).
+インメモリー列ストアは、IMCS 内部でブルーム・フィルタを作成および適用することで、ハッシュ結合も高速化する。これは12.2で導入された**インメモリー結合グループ**機能である。
 
 ```sql
--- Join groups pre-compute hash values for join columns, enabling
--- join predicate evaluation inside the IMCS without materializing rows
+-- 結合グループは結合列のハッシュ値を事前に計算することで、
+-- 行を実体化させることなく IMCS 内部での結合条件の評価を可能にする
 
--- Create a join group on a frequently-joined column pair
+-- 頻繁に結合される列ペアに結合グループを作成
 CREATE INMEMORY JOIN GROUP jg_sales_products
     (sales(product_id), products(product_id));
 
--- Verify join groups
+-- 結合グループの確認
 SELECT join_group_name, table_name, column_name
 FROM   dba_joingroups
 ORDER  BY join_group_name, table_name;
 
--- Queries joining on product_id now benefit from IMCS-level join processing
+-- product_id で結合するクエリは、IMCS レベルでの結合処理の恩恵を受ける
 SELECT p.product_name,
        SUM(s.amount) AS total_revenue
 FROM   sales s
@@ -329,32 +325,32 @@ ORDER  BY total_revenue DESC;
 
 ---
 
-## 6. In-Memory Aggregation (Vector Group By)
+## 6. インメモリー集計 (Vector Group By)
 
-In-Memory Aggregation (IMA) is a 12c+ feature that transforms GROUP BY operations to execute as SIMD vector operations across IMCU data. Instead of processing rows one at a time, Oracle accumulates aggregates across the entire IMCU using vectorized CPU instructions.
+インメモリー集計 (IMA: In-Memory Aggregation) は、GROUP BY 操作を IMCU データに対する SIMD ベクトル操作として実行する 12c 以降の機能である。Oracle は行を1つずつ処理する代わりに、ベクトル化された CPU 命令を使用して IMCU 全体の集計を溜め込む。
 
-### How Vector Group By Works
+### ベクトル・グループ・バイの仕組み
 
-1. IMCS scan produces a stream of column vectors from IMCUs
-2. For each IMCU, Oracle applies the GROUP BY in a vectorized pass, producing partial aggregates per IMCU
-3. Final aggregation merges the partial results from all IMCUs
+1. IMCS スキャンが IMCU から一連の列ベクトルを生成する
+2. Oracle は IMCU ごとにベクトル化されたパスで GROUP BY を適用し、IMCU ごとの部分集計を生成する
+3. 最終集計で、すべての IMCU からの部分的な結果をマージする
 
-This is orders of magnitude faster than traditional hash aggregation on row data because:
-- No row reconstruction (only needed columns are read)
-- SIMD: one CPU instruction processes 8+ values simultaneously
-- Cache-friendly: sequential memory access pattern
+これは行データに対する従来のハッシュ集計よりも桁違いに高速である。理由は以下の通り：
+- 行の再構成が不要（必要な列のみが読み取られる）
+- SIMD: 1つの CPU 命令で 8 つ以上の値を同時に処理する
+- キャッシュ・フレンドリー: 連続したメモリー・アクセス・パターン
 
 ```sql
--- Verify Vector Group By is being used
+-- ベクトル・グループ・バイが使用されているかの確認
 SELECT operation, options, object_name, cardinality, bytes, cost
 FROM   plan_table
 WHERE  operation IN ('VECTOR GROUP BY', 'HASH GROUP BY', 'TABLE ACCESS')
 ORDER  BY id;
 
--- Enable/disable In-Memory Aggregation
-ALTER SESSION SET "_inmemory_vector_aggregation" = TRUE;  -- default
+-- インメモリー集計の有効化/無効化
+ALTER SESSION SET "_inmemory_vector_aggregation" = TRUE;  -- デフォルト
 
--- Force Vector Group By hint
+-- VECTOR_TRANSFORM ヒントによる強制
 SELECT /*+ VECTOR_TRANSFORM */
        sale_year, region_id, SUM(amount)
 FROM   (SELECT EXTRACT(YEAR FROM sale_date) AS sale_year,
@@ -365,18 +361,18 @@ GROUP  BY sale_year, region_id;
 
 ---
 
-## 7. IMCS Sizing and Capacity Planning
+## 7. IMCS のサイジングと容量計画
 
-### Estimating IMCS Requirements
+### IMCS の必要量の見積もり
 
 ```sql
--- Estimate IMCS size for a table before enabling INMEMORY
--- This executes a simulation to project the in-memory size
+-- INMEMORY を有効化する前に表の IMCS サイズを見積もる
+-- シミュレーションを実行して投影サイズを取得する
 SELECT
     table_name,
     SUM(bytes) / 1024 / 1024 AS on_disk_mb,
-    -- Rule of thumb: IMCS size = disk_size * compression_ratio
-    -- FOR QUERY LOW: ~0.3-0.5x disk size (compression + column orientation)
+    -- 経験則: IMCS サイズ = ディスクサイズ * 圧縮率
+    -- FOR QUERY LOW: ディスクサイズの約 0.3-0.5 倍 (圧縮 + 列指向)
     ROUND(SUM(bytes) / 1024 / 1024 * 0.4, 0) AS estimated_imcs_mb_low,
     ROUND(SUM(bytes) / 1024 / 1024 * 0.2, 0) AS estimated_imcs_mb_high
 FROM   dba_segments
@@ -384,49 +380,47 @@ WHERE  owner = 'SCOTT'
   AND  segment_name IN ('SALES', 'ORDERS', 'PRODUCTS')
 GROUP  BY table_name;
 
--- After actual population, measure actual IMCS footprint
--- (DBMS_INMEMORY_ADMIN does not have IMCS_BEGIN/IMCS_END procedures;
---  use POPULATE_WAIT or enable INMEMORY on objects and monitor V$IM_SEGMENTS)
+-- 実際にポピュレートされた後の IMCS サイズの測定
 SELECT SUM(inmemory_size) / 1024 / 1024 / 1024 AS total_imcs_gb
 FROM   v$im_segments;
 
--- Check how much IMCS has been consumed vs. allocated
+-- IMCS の割り当て量に対する使用量を確認
 SELECT pool,
        alloc_bytes / 1024 / 1024 / 1024 AS alloc_gb,
        used_bytes  / 1024 / 1024 / 1024 AS used_gb
 FROM   v$inmemory_area;
 ```
 
-### IMCS Sizing Guidelines
+### IMCS サイジングのガイドライン
 
-| Scenario | Sizing Recommendation |
+| シナリオ | サイジングの推奨事項 |
 |---|---|
-| All analytic tables in IMCS | Sum of (table_disk_size * compression_factor) + 20% overhead |
-| Hot partitions only | Size for current + previous period partitions only |
-| Mixed OLTP + analytics | 25–50% of active analytic data set; use priority to manage eviction |
-| Autonomous Database (ATP) | Oracle manages IMCS automatically; no user action needed |
+| すべての分析表を IMCS に | (表のディスクサイズ * 圧縮係数) の合計 + 20% のオーバーヘッド |
+| Hot パーティションのみ | 今月 + 前月分などのパーティション合計サイズ |
+| OLTP と分析の混在 | アクティブな分析データセットの 25–50%。優先順位で追い出しを管理 |
+| Autonomous Database (ATP) | インメモリーは自動管理される。ユーザ操作は不要 |
 
-### Automatic In-Memory (AIM) in 19c+
+### 19c 以降の自動インメモリー (AIM)
 
-Oracle 19c introduced Automatic In-Memory (AIM), which uses the Database Heat Map to automatically populate and evict objects from the IMCS based on actual access patterns.
+Oracle 19c で導入された自動インメモリー (AIM) は、データベースのヒート・マップ（Heat Map）を使用して、実際のアクセス・パターンに基づいて IMCS からのオブジェクトのポピュレートと追い出しを自動的に行う。
 
 ```sql
--- Enable Heat Map (prerequisite for AIM)
+-- ヒート・マップの有効化 (AIM の前提条件)
 ALTER SYSTEM SET HEAT_MAP = ON SCOPE = BOTH;
 
--- Enable Automatic In-Memory management
+-- 自動インメモリー管理の有効化
 ALTER SYSTEM SET INMEMORY_AUTOMATIC_LEVEL = MEDIUM SCOPE = BOTH;
--- Levels: OFF (manual), LOW (only explicit INMEMORY objects managed),
---         MEDIUM (AIM populates/evicts based on heat),
---         HIGH (AIM can populate ANY object, even without INMEMORY clause)
+-- レベル: OFF (手動), LOW (明示的な INMEMORY オブジェクトのみ管理),
+--         MEDIUM (熱量に基づいてポピュレート/追い出しを行う),
+--         HIGH (INMEMORY 設定がないオブジェクトも自動的に対象とする)
 
--- Check AIM activity
+-- AIM 動作の確認
 SELECT object_name, action_taken, timestamp, reason
 FROM   v$im_adg_log
 ORDER  BY timestamp DESC
 FETCH  FIRST 50 ROWS ONLY;
 
--- Check Heat Map data
+-- ヒート・マップ・データの確認
 SELECT object_name, owner, track_time,
        full_scan, lookup_scan, n_full_scans
 FROM   v$heat_map_segment
@@ -436,71 +430,71 @@ FETCH  FIRST 20 ROWS ONLY;
 
 ---
 
-## 8. Best Practices
+## 8. ベスト・プラクティス
 
-- **Start with the most frequently scanned, most column-selective tables.** The IMCS yields the greatest benefit for wide tables (many columns) where queries access only a subset of columns. A narrow table (5 columns) with full-row access gains little.
-- **Use `PRIORITY CRITICAL` for tables critical to SLA.** During database startup, populate workers fill IMCS in priority order. CRITICAL objects are populated first, ensuring they are ready before user load arrives.
-- **Combine with partitioning for large tables.** Partition by time and keep only the "hot" partitions (current month, last 3 months) in the IMCS. This keeps IMCS footprint predictable and avoids eviction pressure.
-- **Do not enable INMEMORY on tables with heavy UPDATE activity.** The IMCS is eventually consistent with the row store via IMCU journaling. Very high DML rates cause the IMCU journal to fill up, triggering repopulation and consuming populate workers. Use IMCS for tables with low-to-moderate DML.
-- **Use join groups proactively.** If the same two tables are joined in >50% of analytic queries, a join group pre-computes hash values, enabling IMCS-level join processing without extracting and transferring rows to DB server buffers.
-- **Monitor `bytes_not_populated` in `V$IM_SEGMENTS`.** A non-zero value means the IMCS ran out of room and could not fully populate a segment. This means queries against unpopulated extents fall back to disk reads. Either increase `INMEMORY_SIZE` or reduce the set of in-memory objects.
+- **スキャン頻度が最も高く、列の選択性が最も高い表から開始する。** IMCS は、クエリが多くの列のうちの一部のみにアクセスするような「横に長い（列数が多い）」表で最大の効果を発揮する。5列しかないような「細い」表ですべての列にアクセスする場合は、メリットが少ない。
+- **SLAにとって重要な表には `PRIORITY CRITICAL` を使用する。** データベース起動時、ポピュレート・ワーカーは優先順位の高い順に IMCS を埋める。CRITICAL オブジェクトが最初にポピュレートされ、ユーザの負荷がかかる前に準備が整うようになる。
+- **大規模な表ではパーティショニングと組み合わせる。** 時間ベースでパーティション化し、Hot なパーティション（今月、過去3ヶ月分など）のみを IMCS に保持する。これにより IMCS のフットプリントを予測可能にし、追い出しのプレッシャーを避けることができる。
+- **UPDATE アクティビティが激しい表には INMEMORY を有効にしない。** IMCS は IMCU ジャーナルを介して行ストアとの整合性を最終的に保つ。DML 発生率が非常に高いと、IMCU ジャーナルが一杯になり、再ポピュレートが頻発してワーカーのリソースを消費する。DML が低～中程度の表に使用すること。
+- **結合グループを積極的に活用する。** 分析クエリの 50% 以上で同じ2つの表が結合される場合、結合グループによってハッシュ値を事前計算することで、DBサーバーへの行転送を伴わない IMCS レベルでの結合処理が可能になる。
+- **`V$IM_SEGMENTS` の `bytes_not_populated` を監視する。** この値が 0 でない場合、IMCS の容量が不足してセグメントを完全にポピュレートできなかったことを意味する。ポピュレートされていないエクステントに対するクエリはディスク読み取りにフォールバックする。`INMEMORY_SIZE` を増やすか、インメモリー対象のオブジェクトを減らす必要がある。
 
 ---
 
-## 9. Common Mistakes and How to Avoid Them
+## 9. よくある間違いとその回避方法
 
-### Mistake 1: Not Increasing INMEMORY_SIZE After Adding Objects
+### 間違い 1: オブジェクト追加後に INMEMORY_SIZE を増やさない
 
-Adding `INMEMORY` to many tables without increasing `INMEMORY_SIZE` causes the IMCS to fill up. New objects fail to populate (or existing ones get evicted), and the query workload falls back to disk reads with no warning beyond a `populate_status = 'OUT OF MEMORY'` flag.
+`INMEMORY_SIZE` を増やさずに多くの表に `INMEMORY` を設定すると、IMCS が一杯になる。新しいオブジェクトはポピュレートに失敗し（または既存のものが追い出され）、クエリは通知なしにディスク読み取りにフォールバックする（`populate_status = 'OUT OF MEMORY'` フラグのみが原因を示す）。
 
 ```sql
--- Check for OUT OF MEMORY populations
+-- OUT OF MEMORY による未ポピュレートの確認
 SELECT owner, segment_name, partition_name, populate_status
 FROM   v$im_segments
 WHERE  populate_status = 'OUT OF MEMORY';
 
--- Dynamically increase INMEMORY_SIZE if needed (12.2+, increase only)
+-- 必要に応じて INMEMORY_SIZE を動的に増やす (12.2 以降、増やす方向のみ)
 ALTER SYSTEM SET INMEMORY_SIZE = 32G;
 ```
 
-### Mistake 2: Enabling INMEMORY Without Enabling Parallel Query
+### 間違い 2: パラレル・クエリを有効にせずに INMEMORY を使用する
 
-For very large tables, the IMCS scan still benefits from parallel query (`PARALLEL` hint or `PARALLEL` clause on the table). Without parallel query, a serial IMCS scan on a 100 GB table is still a single-threaded operation. Pair IMCS with appropriate DOP.
+非常に大きな表の場合、IMCS スキャンもパラレル・クエリ（`PARALLEL` ヒントや表の `PARALLEL` 句）の恩恵を受ける。パラレル・クエリがない場合、100GB の表に対するシリアルな IMCS スキャンは依然としてシングルスレッドの操作となる。IMCS と適切な並列度 (DOP) を組み合わせて使用すること。
 
 ```sql
--- Set table-level degree of parallelism for In-Memory scans
+-- インメモリー・スキャンのための表レベル並列度の設定
 ALTER TABLE sales PARALLEL 8;
 
--- Or use hint at query level
+-- またはクエリ・レベルのヒントを使用
 SELECT /*+ PARALLEL(s, 8) */
        region_id, SUM(amount)
 FROM   sales s
 GROUP  BY region_id;
 ```
 
-### Mistake 3: Assuming IMCS is Updated Synchronously
+### 間違い 3: IMCS が同期的に更新されると思い込む
 
-The IMCS is not updated in real time for every DML operation. Instead, Oracle uses IMCU journaling — DML changes are recorded in a small journal area within the IMCU, and periodic trickle repopulation merges the journal into the IMCU. Queries see the current (committed) data via journal merging, but there is a small window of extra CPU cost for highly concurrent DML tables.
+IMCS はすべての DML 操作に対してリアルタイムに更新されるわけではない。Oracle は IMCU ジャーナリングを使用しており、DML による変更は IMCU 内の小さなジャーナル領域に記録され、定期的な「トリクル（少量ずつ）・再ポピュレート」によってジャーナルが IMCU にマージされる。クエリはジャーナルのマージを通じて最新（コミット済み）のデータを見るが、DML の同時実行性が極めて高い表では、わずかな CPU コストが追加で発生する。
 
-Do not use `SELECT ... AS OF TIMESTAMP` against IMCS objects if you expect exact change tracking — use the row store query path instead.
+厳密な変更追跡が必要な場合は、IMCS オブジェクトに対して `SELECT ... AS OF TIMESTAMP` を使用せず、行ストアのクエリ・パスを使用するようにすること。
 
-### Mistake 4: Using CAPACITY Compression for Frequently Queried Tables
+### 間違い 4: 頻繁に照会される表に CAPACITY 圧縮を使用する
 
-`MEMCOMPRESS FOR CAPACITY HIGH` achieves the highest compression ratio but uses a slower decompression algorithm. For tables scanned hundreds of times per hour, the decompression CPU cost becomes significant. Use `FOR QUERY LOW` or `FOR QUERY HIGH` for hot analytical tables.
+`MEMCOMPRESS FOR CAPACITY HIGH` は最大の圧縮率を実現するが、解凍アルゴリズムが遅い。1時間に数百回もスキャンされる表では、解凍にかかる CPU コストが無視できなくなる。Hot な分析用の表には `FOR QUERY LOW` または `FOR QUERY HIGH` を使用すること。
 
-### Mistake 5: Forgetting to REPOPULATE After Bulk Data Loads
+### 間違い 5: 大量データ・ロード後の再ポピュレートを忘れる
 
-After a large `INSERT /*+ APPEND */` or partition exchange operation, the IMCS copy of that segment is stale. Oracle will trickle-repopulate it in the background, but until repopulation completes, queries against the new data read from disk. For time-sensitive workloads, trigger explicit repopulation immediately after load.
+大規模な `INSERT /*+ APPEND */` やパーティション交換操作の直後、そのセグメントの IMCS コピーは古くなっている。Oracle はバックグラウンドで再ポピュレートを行うが、それが完了するまでの間、新しいデータに対するクエリはディスクから読み取られる。時間の制約が厳しいワークロードでは、ロード直後に明示的な再ポピュレートをトリガーすること。
 
 ```sql
--- After nightly bulk load completes, repopulate explicitly
+-- 夜間バッチ完了後、明示的に再ポピュレートする
 EXEC DBMS_INMEMORY.REPOPULATE(
     schema_name    => 'DW_OWNER',
     table_name     => 'FACT_SALES',
     subobject_name => 'SALES_202503'
 );
 
--- Monitor completion
+-- 完了の監視
 SELECT segment_name, partition_name, populate_status, bytes_not_populated
 FROM   v$im_segments
 WHERE  segment_name = 'FACT_SALES'
@@ -510,15 +504,15 @@ WHERE  segment_name = 'FACT_SALES'
 ---
 
 
-## Oracle Version Notes (19c vs 26ai)
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-## Sources
+## ソース
 
-- [Oracle Database In-Memory Guide 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/inmem/) — IMCS architecture, MEMCOMPRESS levels, population, monitoring
-- [DBMS_INMEMORY (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_INMEMORY.html) — POPULATE and REPOPULATE procedures (parameter is `subobject_name`, not `partition_name`)
-- [DBMS_INMEMORY_ADMIN (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_INMEMORY_ADMIN.html) — AIM parameters, FastStart, IME_CAPTURE_EXPRESSIONS
-- [Oracle Database Reference 19c — V$IM_SEGMENTS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-IM_SEGMENTS.html) — In-Memory segment monitoring view
+- [Oracle Database In-Memory Guide 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/inmem/) — IMCS アーキテクチャ、MEMCOMPRESS レベル、ポピュレーション、監視
+- [DBMS_INMEMORY (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_INMEMORY.html) — POPULATE および REPOPULATE プロシージャ (パラメータは `subobject_name` であり `partition_name` ではない)
+- [DBMS_INMEMORY_ADMIN (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_INMEMORY_ADMIN.html) — AIM パラメータ、FastStart, IME_CAPTURE_EXPRESSIONS
+- [Oracle Database Reference 19c — V$IM_SEGMENTS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/V-IM_SEGMENTS.html) — インメモリー・セグメント監視ビュー

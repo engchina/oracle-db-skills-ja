@@ -1,440 +1,150 @@
-# Oracle Materialized Views
+# Oracle マテリアライズド・ビュー
 
-## Overview
+## 概要
 
-A **materialized view (MV)** is a database object that stores the result of a query physically on disk and optionally refreshes that result as the underlying base tables change. Unlike a regular view — which re-executes its query every time it is referenced — a materialized view is a snapshot of query results that can be read with no recomputation cost.
+**マテリアライズド・ビュー (MV)** は、クエリの結果をディスク上に物理的に保存し、必要に応じて基となる表（マスター表）の変更を反映（リフレッシュ）するデータベース・オブジェクトである。通常のビューは参照されるたびにクエリを再実行するが、マテリアライズド・ビューは定義済みの結果セットであるため、再計算のコストなしに高速に読み取ることができる。
 
-Materialized views serve two broad purposes in Oracle:
+Oracle におけるマテリアライズド・ビューの主な目的は以下の 2 つである：
 
-1. **Query rewrite** — The optimizer transparently rewrites a user query to read from a fast, pre-aggregated MV instead of expensive base tables, without any application code change.
-2. **Data replication** — Pushing a summarized or filtered copy of data to a different schema, database, or reporting tier for independent consumption.
+1. **クエリ・リライト (Query Rewrite)** — オブジェクト・レベルでの透過的な最適化。ユーザーのクエリを、高コストなマスター表ではなく、事前集計済みの MV を読み取るようにオプティマイザが自動的に書き換える。アプリケーション・コードを変更する必要はない。
+2. **データ・レプリケーション (Data Replication)** — データの要約やフィルタリングされたコピーを別のスキーマやデータベースに配布し、独立して利用可能にする。
 
-Materialized views were introduced in Oracle 8i as a replacement for the older snapshot mechanism and have been continuously enhanced through 23ai.
+マテリアライズド・ビューは Oracle 8i で導入され、従来の「スナップショット」機能を置き換えた。23ai に至るまで継続的に強化されている。
 
 ---
 
-## Core Concepts
+## コア・コンセプト
 
-### Refresh Modes
+### リフレッシュ・モード
 
-| Mode | Description | Use Case |
+| モード | 説明 | ユースケース |
 |---|---|---|
-| `COMPLETE` | Truncates and re-populates the MV by re-executing the full query | Any query; least restrictions; slowest for large data sets |
-| `FAST` | Applies only changes since the last refresh using MV logs | Large base tables with small incremental change |
-| `FORCE` | Uses FAST if possible, falls back to COMPLETE | General default; good when FAST eligibility is uncertain |
-| `NEVER` | MV is never refreshed automatically; must be refreshed manually | Static snapshots, data migration, staging |
+| `COMPLETE` | MV データを一度全削除し、クエリを再実行して全件を再投入する | あらゆるクエリで利用可能。大規模データでは低速 |
+| `FAST` | 前回のリフレッシュ以降の変更のみを MV ログから反映する | 大規模な表に対して増分変更が少ない場合。高速 |
+| `FORCE` | 可能であれば FAST を行い、不可であれば COMPLETE を行う | デフォルト推奨。FAST が可能か不明な場合に有効 |
+| `NEVER` | 自動リフレッシュを行わない。手動でのみ更新可能 | 静的なスナップショット、データ移行用 |
 
-### Refresh Timing
+### リフレッシュ・タイミング
 
-| Timing | Description |
+| タイミング | 説明 |
 |---|---|
-| `ON COMMIT` | MV is refreshed automatically when a DML transaction on the base table(s) commits |
-| `ON DEMAND` | MV is refreshed only when explicitly triggered via `DBMS_MVIEW.REFRESH` |
-| `ON STATEMENT` | 12c+: Refresh triggers immediately after each DML statement, before commit |
-| `START WITH ... NEXT ...` | Legacy syntax for scheduled refresh; prefer `DBMS_SCHEDULER` jobs in modern setups |
+| `ON COMMIT` | マスター表に対する DML トランザクションがコミットされたとき、自動的にリフレッシュする |
+| `ON DEMAND` | `DBMS_MVIEW.REFRESH` を明示的に呼び出したときのみリフレッシュする |
+| `ON STATEMENT` | 12.1 以降：コミット前であっても、各 DML 文の直後にリフレッシュする |
 
-### Materialized View Logs
+### マテリアライズド・ビュー・ログ (MV ログ)
 
-A **materialized view log (MV log)** is a change-capture table maintained on the base table. Every INSERT, UPDATE, and DELETE on the base table is recorded in the log. A FAST refresh reads the log instead of re-scanning the entire base table, then clears consumed entries.
+**マテリアライズド・ビュー・ログ (MV ログ)** は、マスター表に作成される変更追跡用の表である。マスター表への INSERT, UPDATE, DELETE がすべて記録される。**高速リフレッシュ (FAST refresh)** は、マスター表を再スキャンする代わりに、このログのみを読み取ることで実行される。
 
 ---
 
-## Creating Materialized View Logs
+## マテリアライズド・ビュー・ログの作成
 
-Before creating a FAST-refreshable MV, create a log on every base table referenced:
+高速リフレッシュを可能にするには、事前に関連するすべてのマスター表に MV ログを作成しておく必要がある。
 
 ```sql
--- Basic MV log: captures all DML changes, including new values
+-- 基本的な MV ログの作成
 CREATE MATERIALIZED VIEW LOG ON sales
-WITH ROWID, SEQUENCE
-    (sale_date, product_id, region_id, amount, qty)
-INCLUDING NEW VALUES;
-
--- MV log on dimension table
-CREATE MATERIALIZED VIEW LOG ON products
-WITH ROWID, SEQUENCE (product_id, category_id, unit_price)
-INCLUDING NEW VALUES;
-
-CREATE MATERIALIZED VIEW LOG ON regions
-WITH ROWID, SEQUENCE (region_id, region_name, country_code)
+WITH ROWID, SEQUENCE (sale_date, product_id, region_id, amount)
 INCLUDING NEW VALUES;
 ```
 
-**Key `WITH` options:**
-
-| Option | Required for |
-|---|---|
-| `ROWID` | FAST refresh of non-aggregate (join) MVs |
-| `PRIMARY KEY` | FAST refresh when MV uses primary key joins |
-| `SEQUENCE` | FAST refresh of aggregate MVs (ORDER updates correctly) |
-| `INCLUDING NEW VALUES` | FAST refresh of aggregate MVs with `SUM`, `COUNT`, etc. |
-
 ---
 
-## Creating Materialized Views
+## マテリアライズド・ビューの作成
 
-### COMPLETE Refresh — Simple Aggregate
+### COMPLETE リフレッシュ — 単純集計 MV
 
 ```sql
 CREATE MATERIALIZED VIEW mv_monthly_sales_summary
-BUILD IMMEDIATE           -- populate immediately on creation; BUILD DEFERRED populates later
+BUILD IMMEDIATE           -- 作成時にすぐデータを投入
 REFRESH COMPLETE
 ON DEMAND
 AS
-SELECT  TRUNC(s.sale_date, 'MM')  AS sale_month,
-        p.category_id,
-        r.region_name,
-        COUNT(*)                   AS num_sales,
-        SUM(s.amount)              AS total_revenue,
-        SUM(s.qty)                 AS total_qty
-FROM    sales    s
-JOIN    products p ON p.product_id = s.product_id
-JOIN    regions  r ON r.region_id  = s.region_id
-GROUP   BY TRUNC(s.sale_date, 'MM'), p.category_id, r.region_name;
-```
-
-### FAST Refresh — Aggregate MV
-
-FAST refresh on aggregate MVs requires the following in the MV query:
-- `COUNT(*)` must be present
-- For `SUM(col)`, `COUNT(col)` must also be present
-- All dimensions must have MV logs with `SEQUENCE` and `INCLUDING NEW VALUES`
-
-```sql
-CREATE MATERIALIZED VIEW mv_sales_by_product_region
-BUILD IMMEDIATE
-REFRESH FAST ON DEMAND
-ENABLE QUERY REWRITE
-AS
-SELECT  s.product_id,
-        s.region_id,
-        COUNT(*)              AS cnt,         -- required for FAST refresh
-        SUM(s.amount)         AS sum_amount,
-        COUNT(s.amount)       AS cnt_amount,  -- required for SUM fast refresh
-        SUM(s.qty)            AS sum_qty,
-        COUNT(s.qty)          AS cnt_qty
-FROM    sales s
-GROUP   BY s.product_id, s.region_id;
-```
-
-### FAST Refresh — Join MV
-
-```sql
-CREATE MATERIALIZED VIEW mv_sales_detail
-BUILD IMMEDIATE
-REFRESH FAST ON DEMAND
-ENABLE QUERY REWRITE
-AS
-SELECT  s.rowid        AS sales_rowid,
-        p.rowid        AS products_rowid,
-        s.sale_id,
-        s.sale_date,
-        s.amount,
-        p.product_name,
-        p.category_id
-FROM    sales    s
-JOIN    products p ON p.product_id = s.product_id;
-```
-
-Join MVs for FAST refresh require both ROWIDs to be selected (Oracle uses them to identify changed rows in the log).
-
-### ON COMMIT Refresh
-
-```sql
-CREATE MATERIALIZED VIEW mv_account_balances
-BUILD IMMEDIATE
-REFRESH FAST ON COMMIT   -- refreshed automatically when any base table transaction commits
-ENABLE QUERY REWRITE
-AS
-SELECT  account_id,
-        COUNT(*)         AS num_transactions,
-        SUM(amount)      AS current_balance
-FROM    transactions
-GROUP   BY account_id;
-```
-
-**Caution:** `ON COMMIT` refresh runs synchronously within the committing transaction. Complex or slow refreshes will visibly slow down the application's commit latency.
-
-### FORCE Refresh (Recommended Default)
-
-```sql
-CREATE MATERIALIZED VIEW mv_regional_totals
-BUILD IMMEDIATE
-REFRESH FORCE ON DEMAND
-ENABLE QUERY REWRITE
-AS
-SELECT  r.region_name,
-        TRUNC(s.sale_date, 'YYYY') AS sale_year,
-        SUM(s.amount)              AS annual_revenue
-FROM    sales   s
-JOIN    regions r ON r.region_id = s.region_id
-GROUP   BY r.region_name, TRUNC(s.sale_date, 'YYYY');
-```
-
----
-
-## Query Rewrite
-
-Query rewrite is Oracle's ability to **transparently substitute** a user query referencing base tables with an equivalent query against a materialized view. This requires no application code change — the optimizer handles it.
-
-### Enabling Query Rewrite
-
-```sql
--- At the database level (requires DBA privileges)
-ALTER SYSTEM SET query_rewrite_enabled = TRUE;
-
--- At the session level
-ALTER SESSION SET query_rewrite_enabled = TRUE;
-
--- On the MV itself
-ALTER MATERIALIZED VIEW mv_sales_by_product_region ENABLE QUERY REWRITE;
-
--- Check if MV is eligible for query rewrite
-SELECT mview_name, rewrite_enabled, staleness, refresh_mode
-FROM   user_mviews;
-```
-
-### Verifying Query Rewrite Is Being Used
-
-```sql
--- Run EXPLAIN PLAN to see if the MV is substituted
-EXPLAIN PLAN FOR
-    SELECT s.product_id, s.region_id, SUM(s.amount)
-    FROM   sales s
-    GROUP  BY s.product_id, s.region_id;
-
-SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
--- Look for: MAT_VIEW REWRITE ACCESS FULL (MV_SALES_BY_PRODUCT_REGION)
-```
-
-### Query Rewrite Integrity Modes
-
-```sql
--- Set globally or per session
-ALTER SESSION SET query_rewrite_integrity = ENFORCED;
--- ENFORCED: only rewrites if MV is known to be fresh (most conservative)
--- TRUSTED:  trusts RELY constraints and dimension relationships
--- STALE_TOLERATED: allows rewrite even on stale MVs (least conservative; use with care)
-```
-
-For query rewrite to work reliably:
-- The MV must have `ENABLE QUERY REWRITE`
-- The MV must be "fresh" (or `STALE_TOLERATED` mode is in effect)
-- The optimizer must find the MV query equivalent to or a superset of the user query
-- `QUERY_REWRITE_ENABLED = TRUE`
-
----
-
-## Manual Refresh
-
-```sql
--- Refresh a single MV
-BEGIN
-    DBMS_MVIEW.REFRESH(
-        list            => 'APPSCHEMA.MV_MONTHLY_SALES_SUMMARY',
-        method          => 'C',   -- C=COMPLETE, F=FAST, ?=FORCE, A=always COMPLETE
-        atomic_refresh  => FALSE  -- TRUE keeps MV accessible during refresh (at cost of undo)
-    );
-END;
-/
-
--- Refresh multiple MVs in dependency order
-BEGIN
-    DBMS_MVIEW.REFRESH(
-        list   => 'MV_SALES_DETAIL,MV_SALES_BY_PRODUCT_REGION,MV_MONTHLY_SALES_SUMMARY',
-        method => 'F'
-    );
-END;
-/
-
--- Refresh all MVs in a schema
-BEGIN
-    FOR mv IN (SELECT mview_name FROM user_mviews) LOOP
-        BEGIN
-            DBMS_MVIEW.REFRESH(mv.mview_name, method => '?');
-        EXCEPTION
-            WHEN OTHERS THEN
-                DBMS_OUTPUT.PUT_LINE('Failed: ' || mv.mview_name || ' — ' || SQLERRM);
-        END;
-    END LOOP;
-END;
-/
-```
-
-### DBMS_MVIEW.REFRESH_DEPENDENT
-
-Refreshes all MVs that depend on a given base table:
-
-```sql
-BEGIN
-    DBMS_MVIEW.REFRESH_DEPENDENT(
-        list       => 'SALES',         -- base table name
-        method     => 'F',
-        rollback_seg => NULL
-    );
-END;
-/
-```
-
----
-
-## Scheduling Refresh with DBMS_SCHEDULER
-
-```sql
-BEGIN
-    DBMS_SCHEDULER.CREATE_JOB(
-        job_name        => 'REFRESH_SALES_MVS_JOB',
-        job_type        => 'PLSQL_BLOCK',
-        job_action      => '
-            BEGIN
-                DBMS_MVIEW.REFRESH(
-                    list           => ''MV_SALES_BY_PRODUCT_REGION,MV_MONTHLY_SALES_SUMMARY'',
-                    method         => ''F'',
-                    atomic_refresh => FALSE
-                );
-            END;',
-        repeat_interval => 'FREQ=HOURLY;BYMINUTE=0;BYSECOND=0',
-        enabled         => TRUE,
-        comments        => 'Hourly FAST refresh of sales materialized views'
-    );
-END;
-/
-```
-
----
-
-## Monitoring Staleness and Freshness
-
-```sql
--- MV freshness and refresh status
-SELECT mview_name,
-       last_refresh_date,
-       last_refresh_type,
-       staleness,          -- FRESH, STALE, UNKNOWN, NEEDS_COMPILE
-       refresh_mode,
-       refresh_method,
-       rewrite_enabled
-FROM   user_mviews
-ORDER  BY mview_name;
-
--- MV log size and age (how much unprocessed change exists)
-SELECT log_owner,
-       master             AS base_table,
-       log_table,
-       log_trigger,
-       rowids,
-       sequence,
-       includes_new_values
-FROM   user_mview_logs;
-
--- Row count in MV log (unprocessed entries)
-SELECT COUNT(*) AS pending_changes FROM mlog$_sales;
-
--- MV refresh history
-SELECT mview_name,
-       start_time,
-        end_time,
-       elapsed_time,
-       refresh_method,
-       complete_stats_update
-FROM   dba_mvref_stats
-WHERE  mview_name = 'MV_MONTHLY_SALES_SUMMARY'
-ORDER  BY start_time DESC
-FETCH FIRST 20 ROWS ONLY;
-
--- Check if MVs are blocking query rewrite due to staleness
-SELECT name, freshness
-FROM   v$object_usage;
-```
-
----
-
-## Partitioned Materialized Views
-
-MVs can themselves be partitioned, which is important when the MV is large:
-
-```sql
-CREATE MATERIALIZED VIEW mv_partitioned_sales
-PARTITION BY RANGE (sale_month) (
-    PARTITION p_2023 VALUES LESS THAN (DATE '2024-01-01'),
-    PARTITION p_2024 VALUES LESS THAN (DATE '2025-01-01'),
-    PARTITION p_2025 VALUES LESS THAN (DATE '2026-01-01'),
-    PARTITION p_future VALUES LESS THAN (MAXVALUE)
-)
-BUILD IMMEDIATE
-REFRESH COMPLETE ON DEMAND
-AS
 SELECT  TRUNC(sale_date, 'MM') AS sale_month,
         region_id,
-        product_id,
-        SUM(amount)             AS revenue
+        COUNT(*)               AS num_sales,
+        SUM(amount)            AS total_revenue
 FROM    sales
-GROUP   BY TRUNC(sale_date, 'MM'), region_id, product_id;
+GROUP   BY TRUNC(sale_date, 'MM'), region_id;
 ```
 
-When partitioning an MV, a **COMPLETE** refresh can use partition truncation internally (refresh partition-by-partition), which reduces undo generation compared to truncating and repopulating the entire MV.
+### FAST リフレッシュ — 集計 MV
 
----
-
-## Best Practices
-
-- **Create MV logs before creating the MV.** Oracle checks log existence at MV creation time when `REFRESH FAST` is specified.
-- **Use `BUILD DEFERRED` in production deployments** when the initial population would be disruptive. Schedule a manual refresh during a maintenance window immediately after DDL.
-- **Keep `ON COMMIT` refreshes for small, simple MVs only.** The refresh runs inside the user's commit path. For aggregates over millions of rows, use `ON DEMAND` with a short-interval scheduler job instead.
-- **Explicitly include `COUNT(*)` and `COUNT(col)` in aggregate MVs** intended for FAST refresh. Oracle's optimizer needs these counts to compute incremental changes correctly.
-- **Monitor MV log growth.** If a FAST refresh fails or is delayed, MV logs accumulate indefinitely. A table with a large unprocessed log will exhibit write-amplification overhead for all DML. Alert when log row count exceeds a threshold.
-- **Use `atomic_refresh => FALSE`** for large COMPLETE refreshes to avoid massive undo generation. With `atomic_refresh => TRUE` (the default), Oracle keeps the old data accessible during refresh by using undo. For very large MVs, this can fill the undo tablespace.
-- **Enable `QUERY REWRITE` only on MVs you intend the optimizer to use.** Enabling it on dozens of MVs forces the optimizer to consider all of them during every query parse, which can increase parse time.
-- **Use `EXPLAIN PLAN` to verify rewrites are happening.** Do not assume — confirm with execution plans that your reporting queries are actually hitting MVs.
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Mistake 1: FAST refresh silently falls back to COMPLETE with no warning**
-If a FAST refresh is attempted but is not possible (e.g., the MV log is missing an option), Oracle either raises an error or falls back to COMPLETE depending on the `method` parameter. Use `FORCE` (`?`) for the method parameter to get silent fallback, but then **monitor `last_refresh_type`** in `USER_MVIEWS` to confirm the expected method is being used.
+集計 MV で高速リフレッシュを行うには、クエリ内に `COUNT(*)` と、集計対象の `COUNT(col)` が含まれている必要がある。
 
 ```sql
--- Audit what refresh type was actually used
-SELECT mview_name, last_refresh_type, last_refresh_date
-FROM   user_mviews
-WHERE  last_refresh_type != 'FAST';   -- unexpected COMPLETE refreshes
-```
-
-**Mistake 2: Forgetting `SEQUENCE` and `INCLUDING NEW VALUES` on MV logs for aggregate MVs**
-Without `SEQUENCE`, Oracle cannot correctly order UPDATE operations that flip a value from old to new in an aggregate. Without `INCLUDING NEW VALUES`, Oracle cannot compute the delta for SUM/COUNT. Both are required for aggregate FAST refresh.
-
-**Mistake 3: Stale MVs degrading query rewrite silently**
-If `query_rewrite_integrity = ENFORCED` (the default), a stale MV is excluded from query rewrite without any error. Queries silently hit base tables and become slow. Set up monitoring alerts on the `staleness` column in `USER_MVIEWS`.
-
-**Mistake 4: Cascading ON COMMIT refresh on large tables**
-`ON COMMIT` refresh is synchronous and runs in the committing user's session. On a high-DML table with a complex aggregate MV, every INSERT/UPDATE/DELETE will be noticeably slower. Switch to `ON DEMAND` with a frequent scheduled refresh if latency is acceptable.
-
-**Mistake 5: Not accounting for MV in backup and export strategies**
-MV logs are regular tables and are included in Data Pump exports. When restoring or importing, MV logs may contain stale entries pointing to ROWIDs that no longer exist. After a restore, force a `COMPLETE` refresh of all MVs to reset their logs.
-
-**Mistake 6: Altering the base table without adjusting the MV log**
-Adding a column to a base table does not automatically add it to the MV log. If a subsequent MV needs that column for FAST refresh, you must drop and recreate the MV log (which clears pending changes) or use `ALTER MATERIALIZED VIEW LOG ADD (new_column)`.
-
-```sql
--- Check which columns are covered by an existing MV log
-SELECT column_name, refs_src_rowid, snapshots
-FROM   user_mview_log_filter_cols
-WHERE  master = 'SALES';
+CREATE MATERIALIZED VIEW mv_sales_by_product
+REFRESH FAST ON DEMAND
+ENABLE QUERY REWRITE      -- クエリ・リライトを有効化
+AS
+SELECT  product_id,
+        COUNT(*)        AS cnt,         -- 必須
+        SUM(amount)     AS sum_amount,
+        COUNT(amount)   AS cnt_amount   -- SUM の FAST リフレッシュに必須
+FROM    sales
+GROUP   BY product_id;
 ```
 
 ---
 
+## クエリ・リライト (Query Rewrite)
 
-## Oracle Version Notes (19c vs 26ai)
+クエリ・リライトは、ユーザーがマスター表を参照するクエリを投げた際、オプティマイザが自動的に MV を使うように書き換える機能である。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+```sql
+-- セッション・レベルでの有効化
+ALTER SESSION SET query_rewrite_enabled = TRUE;
 
-## Sources
+-- 整合性モードの設定
+ALTER SESSION SET query_rewrite_integrity = ENFORCED;
+-- ENFORCED: MV が最新 (FRESH) であることが確実な場合のみリライト
+-- TRUSTED:  リレーションシップ（外部キーなど）を信頼してリライト
+-- STALE_TOLERATED: データが古くても (STALE) リライトを許可
+```
 
-- [Oracle Database Data Warehousing Guide: Basic Materialized Views 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/dwhsg/basic-materialized-views.html)
-- [DBMS_MVIEW — Oracle Database PL/SQL Packages and Types Reference 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_MVIEW.html)
-- [Oracle Database SQL Language Reference: CREATE MATERIALIZED VIEW 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-MATERIALIZED-VIEW.html)
-- [Oracle Database SQL Language Reference: CREATE MATERIALIZED VIEW LOG 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-MATERIALIZED-VIEW-LOG.html)
+---
+
+## 手動リフレッシュ (DBMS_MVIEW)
+
+```sql
+-- 1つの MV をリフレッシュ
+EXEC DBMS_MVIEW.REFRESH('MV_MONTHLY_SALES_SUMMARY', method => 'C');
+
+-- 複数の MV を依存関係順にリフレッシュ
+EXEC DBMS_MVIEW.REFRESH('MV_SALES_LOG, MV_SALES_SUMMARY', method => 'F');
+
+-- 特定のマスター表に依存するすべての MV をリフレッシュ
+EXEC DBMS_MVIEW.REFRESH_DEPENDENT('SALES');
+```
+
+---
+
+## ベスト・プラクティス
+
+- **MV ログを忘れずに作成する:** `REFRESH FAST` を指定する場合、マスター表側に適切なオプション付きの MV ログが存在しなければエラーになる。
+- **`ON COMMIT` リフレッシュは軽量な処理に限定する:** ユーザーのコミット処理の一部として実行されるため、集計が重いとアプリケーションの応答性に直接悪影響を与える。重い集計は `ON DEMAND` でジョブ実行することを推奨する。
+- **`atomic_refresh => FALSE` の活用:** 大規模な `COMPLETE` リフレッシュを行う際、 undo 領域の不足を避けるためにこれを FALSE に設定することを検討する（内部的に TRUNCATE が使用されるようになる）。
+- **ステータスの監視:** `USER_MVIEWS` の `STALENESS` 列を確認し、MV のデータが古くなっていないか、リフレッシュが失敗していないかを定期的に監視する。
+
+---
+
+## よくある間違い
+
+**間違い: 高速リフレッシュを指定したのに、実際には完全リフレッシュが走っている。**
+`DBMS_MVIEW.REFRESH` で `method => '?'` (FORCE) を指定していると、FAST が失敗してもエラーが出ずに COMPLETE が実行される。`USER_MVIEWS` の `LAST_REFRESH_TYPE` を確認する習慣を付けること。
+
+**間違い: クエリ・リライトが効かない。**
+MV が `STALE`（マスター表の更新後にリフレッシュされていない）状態だと、デフォルトの整合性モードではリライト対象から外れる。リフレッシュの間隔と、許容されるデータの古さを適切に設計する必要がある。
+
+---
+
+## Oracle バージョンに関する注意 (19c vs 26ai)
+
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c/23c 世代以降の機能は、Oracle Database 26ai 対応機能として扱う。
+
+## ソース
+
+- [Oracle Database Data Warehousing Guide: Basic Materialized Views](https://docs.oracle.com/en/database/oracle/oracle-database/19/dwhsg/basic-materialized-views.html)
+- [DBMS_MVIEW — Oracle Database PL/SQL Packages and Types Reference](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_MVIEW.html)

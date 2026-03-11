@@ -1,79 +1,79 @@
-# PL/SQL Security
+# PL/SQL セキュリティ (Security)
 
-## Overview
+## 概要
 
-PL/SQL security encompasses how stored code exercises database privileges, how it resists SQL injection, and how it avoids unintended privilege escalation. Oracle provides a sophisticated rights model and a set of validation utilities (`DBMS_ASSERT`) that, when used correctly, make PL/SQL code resilient against common attack vectors.
+PL/SQL セキュリティには、格納されたコードがデータベース権限をどのように行使するか、SQL インジェクションに対してどのように防御するか、および意図しない権限昇格をどのように回避するかという点が含まれます。Oracle は洗練された権限モデルとバリデーション・ユーティリティ（`DBMS_ASSERT`）を提供しており、これらを正しく使用することで、PL/SQL コードは一般的な攻撃ベクトルに対して耐性を持ちます。
 
 ---
 
-## AUTHID: Definer Rights vs Invoker Rights
+## AUTHID: 定義者権限 vs 実行者権限
 
-Every PL/SQL unit runs under either **definer rights** (default) or **invoker rights** (`AUTHID CURRENT_USER`). This determines which schema's privileges are used when the code executes.
+すべての PL/SQL ユニットは、**定義者権限**（デフォルト）または**実行者権限**（`AUTHID CURRENT_USER`）のいずれかで動作します。これにより、コードの実行時にどのスキーマの権限が使用されるかが決まります。
 
-### Definer Rights (Default: AUTHID DEFINER)
+### 定義者権限 (デフォルト: AUTHID DEFINER)
 
-The code runs with the privileges of the schema that owns it, regardless of who calls it.
+誰がそのコードを呼び出すかに関わらず、そのコードを所有するスキーマの権限で実行されます。
 
 ```sql
--- Owned by schema APP_OWNER
+-- 所有者スキーマ: APP_OWNER
 CREATE OR REPLACE PROCEDURE definer_example
-  AUTHID DEFINER  -- this is the default; can be omitted
+  AUTHID DEFINER  -- デフォルト。省略可能
 AS
 BEGIN
-  -- Executes as APP_OWNER
-  -- APP_OWNER must have SELECT on sensitive_data
-  -- The caller (PUBLIC, another user) does NOT need this privilege
+  -- APP_OWNER として実行される
+  -- APP_OWNER は sensitive_data に対する SELECT 権限が必要
+  -- 呼び出し側 (PUBLIC ユーザーなど) は、この権限を持っている必要はない
   INSERT INTO sensitive_data (col1) VALUES ('test');
 END definer_example;
 /
 ```
 
-**When to use definer rights**:
-- The procedure accesses a specific schema's tables and should abstract privilege details from callers
-- You want to grant execute on the procedure instead of granting direct table access
-- Implementing a controlled API layer where callers cannot directly access underlying tables
+**定義者権限を使用すべきケース**:
+- プロシージャが特定のスキーマの表にアクセスし、呼び出し側から権限の詳細を隠蔽（抽象化）したい場合
+- 表への直接アクセスを許可せずに、プロシージャの実行（EXECUTE）権限のみを付与したい場合
+- 呼び出し側が基礎となる表に直接アクセスできないように制限された API レイヤーを実装する場合
 
-**Security implication**: The calling user can perform actions they do not have direct privileges for. This is by design for controlled APIs, but becomes a risk if the procedure has SQL injection vulnerabilities — an attacker can exploit the elevated privilege context.
+**セキュリティ上の影響**: 呼び出しユーザーは、自分自身が直接持っていない権限を行使できます。これは管理された API を提供するための設計通りの動作ですが、プロシージャに SQL インジェクションの脆弱性がある場合、攻撃者がその権限昇格を利用できるリスクとなります。
 
-### Invoker Rights (AUTHID CURRENT_USER)
+### 実行者権限 (AUTHID CURRENT_USER)
 
-The code runs with the privileges of the calling user. Object references are resolved in the caller's schema.
+呼び出しユーザーの権限で実行されます。オブジェクトの解決は、呼び出し側のスキーマで行われます。
 
 ```sql
--- Generic utility that operates in the caller's context
+-- 呼び出し側のコンテキストで動作する汎用ユーティリティ
 CREATE OR REPLACE PROCEDURE invoker_example
   AUTHID CURRENT_USER
 AS
 BEGIN
-  -- Executes as the CALLING user
-  -- Table 'my_log' is resolved in the caller's schema, not APP_OWNER's schema
+  -- 呼び出しユーザーとして実行される
+  -- 'my_log' 表は、APP_OWNER ではなく呼び出し側のスキーマから解決される
   INSERT INTO my_log (log_time, message) VALUES (SYSDATE, 'Called');
-  -- ^ Each caller must have INSERT on their own my_log table
+  -- ^ 各呼び出し側は、自身のスキーマに my_log 表を持ち、INSERT 権限を持っている必要がある
 END invoker_example;
 /
 ```
 
-**When to use invoker rights**:
-- Utility procedures that should operate on the caller's own objects
-- Generic logging, auditing, or batch framework code
-- Multi-tenant systems where each tenant has identical schema structure
-- Avoiding unintended privilege escalation
+**実行者権限を使用すべきケース**:
+- 呼び出し側のオブジェクトに対して操作を行う必要がある汎用プロシージャ
+- 汎用的なロギング、監査、またはバッチ・フレームワーク・コード
+- すべてのテナントが同一のスキーマ構造を持つマルチテナント・システム
+- 意図しない権限昇格を回避したい場合
 
-### Side-by-Side Comparison
+### 比較表
 
-| Aspect | Definer Rights | Invoker Rights |
+| 特性 | 定義者権限 (Definer Rights) | 実行者権限 (Invoker Rights) |
 |---|---|---|
-| Privileges used | Owner of the procedure | Caller of the procedure |
-| Object resolution | Owner's schema | Caller's schema |
-| Caller needs table privileges | No | Yes |
-| Use for shared APIs | Yes | No |
-| Use for generic utilities | Risky | Preferred |
-| Privilege escalation risk | Higher | Lower |
-| Default | Yes | No (must specify) |
+| 使用される権限 | プロシージャの所有者 | プロシージャの呼び出し側 |
+| オブジェクトの解決 | 所有者のスキーマ | 呼び出し側のスキーマ |
+| 呼び出し側の表権限 | 不要 | 必要 |
+| 共有 API での使用 | 適している | 適していない |
+| 汎用ユーティリティでの使用 | リスクあり | 推奨される |
+| 権限昇格のリスク | 高い | 低い |
+| デフォルト動作 | はい | いいえ (明示的な指定が必要) |
 
 ```sql
--- Pattern: definer rights for data access layer
--- APP_OWNER grants EXECUTE to app role; no direct table grants
+-- パターン: データ・アクセス・レイヤーでの定義者権限
+-- APP_OWNER がアプリ・ロールに EXECUTE 権限を付与し、表権限は直接付与しない
 CREATE OR REPLACE PACKAGE customer_api_pkg
   AUTHID DEFINER
 AS
@@ -82,28 +82,28 @@ AS
 END customer_api_pkg;
 /
 -- GRANT EXECUTE ON customer_api_pkg TO app_role;
--- Revoke direct table access from app_role — only pkg access allowed
+-- app_role から表への直接アクセスを剥奪し、パッケージ経由のみ許可する
 ```
 
 ---
 
-## SQL Injection Vectors in PL/SQL
+## PL/SQL における SQL インジェクションの攻撃ベクトル
 
-SQL injection occurs when attacker-controlled data is concatenated into a SQL or PL/SQL statement. In PL/SQL, this is most common in dynamic SQL.
+SQL インジェクションは、攻撃者が制御するデータが SQL または PL/SQL 文に直接連結された場合に発生します。PL/SQL では、主に動的 SQL で発生します。
 
-### Vulnerable Pattern
+### 脆弱なパターン
 
 ```sql
--- VULNERABLE: user input concatenated directly
+-- 脆弱な例: ユーザー入力を直接連結している
 CREATE OR REPLACE PROCEDURE get_employee_bad(
   p_name IN VARCHAR2
 ) AS
   l_sql   VARCHAR2(1000);
   l_count NUMBER;
 BEGIN
-  -- If p_name = "' OR '1'='1" then this returns all rows
-  -- If p_name = "' ; DROP TABLE employees;--" Oracle ignores (EXECUTE IMMEDIATE is single-stmt)
-  -- But: "' UNION SELECT password,null,null FROM dba_users--" leaks data
+  -- p_name = "' OR '1'='1" の場合、すべての行が返される
+  -- p_name = "' ; DROP TABLE employees;--" の場合、Oracle は無視する (EXECUTE IMMEDIATE は単一文)
+  -- しかし： "' UNION SELECT password,null,null FROM dba_users--" はデータを漏洩させる可能性がある
   l_sql := 'SELECT COUNT(*) FROM employees WHERE last_name = ''' || p_name || '''';
   EXECUTE IMMEDIATE l_sql INTO l_count;
   DBMS_OUTPUT.PUT_LINE(l_count);
@@ -111,10 +111,10 @@ END get_employee_bad;
 /
 ```
 
-### Safe Pattern: Bind Variables
+### 安全なパターン: バインド変数
 
 ```sql
--- SAFE: bind variable — p_name is data, never SQL syntax
+-- 安全な例: バインド変数を使用 — p_name はあくまでデータとして扱われ、SQL 構文にはならない
 CREATE OR REPLACE PROCEDURE get_employee_safe(
   p_name IN VARCHAR2
 ) AS
@@ -128,65 +128,65 @@ END get_employee_safe;
 /
 ```
 
-### When Bind Variables Cannot Be Used
+### バインド変数が使用できないケース
 
-Table names, column names, and schema names cannot be bind variables — they are structural SQL components. For these, use `DBMS_ASSERT` to validate input before concatenation.
+表名、列名、およびスキーマ名は、構造的な SQL コンポーネントであるため、バインド変数にすることはできません。これらを動的に指定する場合は、連結する前に `DBMS_ASSERT` で入力を検証してください。
 
 ---
 
-## DBMS_ASSERT Functions
+## DBMS_ASSERT パッケージ
 
-`DBMS_ASSERT` provides validation routines that raise exceptions for invalid or potentially malicious input before it is used in dynamic SQL.
+`DBMS_ASSERT` は、動的 SQL で使用される前に、無効な、あるいは悪意のある可能性のある入力を検証して例外を発生させるルーチンを提供します。
 
 ```sql
--- Validate that input is a simple SQL name (no special characters)
+-- 入力が単純な SQL 名（特殊文字なし）であることを検証
 BEGIN
-  DBMS_ASSERT.SIMPLE_SQL_NAME('employees');     -- OK: returns 'employees'
-  DBMS_ASSERT.SIMPLE_SQL_NAME('my table');      -- RAISES ORA-44003: invalid SQL name
-  DBMS_ASSERT.SIMPLE_SQL_NAME('emp;DROP TABLE');-- RAISES ORA-44003
+  DBMS_ASSERT.SIMPLE_SQL_NAME('employees');     -- OK: 'employees' を返す
+  DBMS_ASSERT.SIMPLE_SQL_NAME('my table');      -- 例外 ORA-44003: 無効な SQL 名
+  DBMS_ASSERT.SIMPLE_SQL_NAME('emp;DROP TABLE');-- 例外 ORA-44003
 END;
 
--- Validate that input is an existing schema object
+-- 入力が存在するスキーマ・オブジェクトであることを検証
 BEGIN
-  DBMS_ASSERT.SQL_OBJECT_NAME('SCOTT.EMPLOYEES'); -- OK if object exists
-  DBMS_ASSERT.SQL_OBJECT_NAME('nonexistent_obj'); -- RAISES ORA-44002: not found
+  DBMS_ASSERT.SQL_OBJECT_NAME('SCOTT.EMPLOYEES'); -- オブジェクトが存在すれば OK
+  DBMS_ASSERT.SQL_OBJECT_NAME('nonexistent_obj'); -- 例外 ORA-44002: 見つからない
 END;
 
--- Safely quote a string literal
+-- 文字列リテラルを安全に引用符で囲む
 DECLARE
   l_safe_val VARCHAR2(200);
 BEGIN
-  -- ENQUOTE_LITERAL wraps in single quotes and doubles any embedded quotes
+  -- ENQUOTE_LITERAL は単一引用符で囲み、内部の引用符を 2 重にする
   l_safe_val := DBMS_ASSERT.ENQUOTE_LITERAL('O''Brien');
-  -- Returns: 'O''Brien'  (safe for embedding in SQL string literal)
+  -- 結果: 'O''Brien'  (SQL 文字列リテラルとして埋め込み可能)
   DBMS_OUTPUT.PUT_LINE(l_safe_val);
 END;
 
--- Safely quote an identifier (object name)
+-- 識別子 (オブジェクト名) を安全に引用符で囲む
 DECLARE
-  l_table_name VARCHAR2(100) := 'MY TABLE';  -- has a space
+  l_table_name VARCHAR2(100) := 'MY TABLE';  -- スペースを含む
   l_quoted     VARCHAR2(100);
 BEGIN
-  -- ENQUOTE_NAME wraps in double quotes for use as identifier
+  -- ENQUOTE_NAME は識別子として使用するために二重引用符で囲む
   l_quoted := DBMS_ASSERT.ENQUOTE_NAME('MY TABLE', FALSE);
-  -- Returns: "MY TABLE"  (valid quoted identifier)
+  -- 結果: "MY TABLE"  (有効な引用付き識別子)
   DBMS_OUTPUT.PUT_LINE(l_quoted);
 END;
 ```
 
-### DBMS_ASSERT Functions Reference
+### DBMS_ASSERT 関数リファレンス
 
-| Function | Purpose | Raises |
+| 関数 | 用途 | 発生する例外 |
 |---|---|---|
-| `SIMPLE_SQL_NAME(str)` | Validates name has no special chars, spaces, or SQL keywords | ORA-44003 |
-| `QUALIFIED_SQL_NAME(str)` | Validates schema.object[.subobject] format | ORA-44004 |
-| `SQL_OBJECT_NAME(str)` | Validates name AND verifies the object exists | ORA-44002 |
-| `SCHEMA_NAME(str)` | Validates and verifies the schema exists | ORA-44001 |
-| `ENQUOTE_LITERAL(str)` | Quotes string as a literal value (single quotes, escapes embedded quotes) | None documented |
-| `ENQUOTE_NAME(str, capitalize)` | Quotes identifier with double quotes | None documented |
-| `NOOP(str)` | Returns string unchanged; documents that no validation was performed | Never |
+| `SIMPLE_SQL_NAME(str)` | 特殊文字、スペース、SQL キーワードが含まれていないか検証 | ORA-44003 |
+| `QUALIFIED_SQL_NAME(str)` | schema.object[.subobject] 形式であることを検証 | ORA-44004 |
+| `SQL_OBJECT_NAME(str)` | 形式の検証に加え、オブジェクトの実在を確認 | ORA-44002 |
+| `SCHEMA_NAME(str)` | 形式の検証に加え、スキーマの実在を確認 | ORA-44001 |
+| `ENQUOTE_LITERAL(str)` | リテラル値として引用符で囲む（単一引用符、埋め込み引用符のエスケープ） | ドキュメント上の規定なし |
+| `ENQUOTE_NAME(str, cap)` | 識別子として二重引用符で囲む | ドキュメント上の規定なし |
+| `NOOP(str)` | 文字列をそのまま返す。検証が行われていないことを示す目的で使用 | 発生しない |
 
-### Safe Dynamic DDL Pattern
+### 安全な動的 DDL パターン
 
 ```sql
 CREATE OR REPLACE PROCEDURE create_partition(
@@ -198,11 +198,11 @@ CREATE OR REPLACE PROCEDURE create_partition(
   l_partition VARCHAR2(128);
   l_sql       VARCHAR2(500);
 BEGIN
-  -- Validate inputs before use in dynamic DDL
+  -- 動的 DDL に使用する前にインプットを検証
   l_table     := DBMS_ASSERT.SIMPLE_SQL_NAME(p_table_name);
   l_partition := DBMS_ASSERT.SIMPLE_SQL_NAME(p_partition_name);
 
-  -- Date value: use TO_CHAR to produce a safe literal (no injection possible with dates)
+  -- 日付値: TO_CHAR を使用して安全なリテラルを生成 (日付であればインジェクションの余地なし)
   l_sql := 'ALTER TABLE ' || l_table ||
            ' ADD PARTITION ' || l_partition ||
            ' VALUES LESS THAN (DATE ''' ||
@@ -215,161 +215,132 @@ END create_partition;
 
 ---
 
-## Privilege Escalation Risks with Definer Rights
+## 定義者権限における権限昇格のリスク
 
-A definer rights procedure that contains SQL injection vulnerability gives the attacker the owner's privileges, not the caller's. This is the most dangerous form of SQL injection in Oracle.
+SQL インジェクションの脆弱性を含む定義者権限のプロシージャでは、攻撃者は呼び出し側ではなく所有者の権限を行使できてしまいます。これは Oracle において最も危険な SQL インジェクションの形態です。
 
 ```sql
--- Owned by DBA_TOOLS (a DBA schema)
--- Has SELECT ANY TABLE privilege
+-- DBA_TOOLS (DBA権限を持つスキーマ) が所有者
+-- SELECT ANY TABLE 権限を持っているとする
 CREATE OR REPLACE PROCEDURE report_generator(
   p_table_name IN VARCHAR2
 ) AUTHID DEFINER AS
   l_sql    VARCHAR2(500);
   l_count  NUMBER;
 BEGIN
-  -- VULNERABLE: DBA privilege + SQL injection = attacker reads any table
+  -- 脆弱：DBA権限 ＋ SQLインジェクション ＝ あらゆる表を読み取られる
   l_sql := 'SELECT COUNT(*) FROM ' || p_table_name;
   EXECUTE IMMEDIATE l_sql INTO l_count;
   DBMS_OUTPUT.PUT_LINE(l_count);
 END;
--- Attacker passes: 'SYS.USER$ WHERE ROWNUM=1 UNION SELECT username FROM dba_users--'
--- Result: attacker reads DBA_USERS using DBA_TOOLS' SELECT ANY TABLE privilege
+-- 攻撃者が渡す値の例: 'SYS.USER$ WHERE ROWNUM=1 UNION SELECT username FROM dba_users--'
+-- 結果：攻撃者は DBA_TOOLS の権限を利用して DBA_USERS などを読み取ることができる
 ```
 
-**Mitigation checklist for definer rights procedures with dynamic SQL**:
-1. Use bind variables for all data values
-2. Use `DBMS_ASSERT` to validate all structural SQL components (table names, column names)
-3. Maintain a whitelist of permitted table/column names in a control table, and validate against it
-4. Avoid `SELECT ANY TABLE` or `DBA` roles for schemas owning accessible PL/SQL
+**動的 SQL を含む定義者権限プロシージャの対策チェックリスト**:
+1. すべてのデータ値にバインド変数を使用する
+2. すべての構造的 SQL 要素（表名、列名等）を `DBMS_ASSERT` で検証する
+3. 許可する表名/列名のホワイトリストを管理テーブル等で保持し、それと照らし合わせて検証する
+4. 公開プロシージャを所有するスキーマに `SELECT ANY TABLE` や `DBA` ロールを付与しない
 
 ---
 
-## Secure Coding Checklist
+## セキュア・コーディング・チェックリスト
 
-```
-[ ] All dynamic SQL uses bind variables for data values
-[ ] Table/column names in dynamic SQL are validated with DBMS_ASSERT.SIMPLE_SQL_NAME
-[ ] Definer rights procedures do not grant callers elevated privileges unintentionally
-[ ] Error messages do not expose internal schema names or SQL structure to end users
-[ ] DBMS_ASSERT.SQL_OBJECT_NAME used when an object must exist before use
-[ ] No hardcoded credentials in PL/SQL source
-[ ] EXECUTE IMMEDIATE used with USING clause (bind variables), not concatenation
-[ ] Sensitive procedures use AUTHID CURRENT_USER where caller's privileges are appropriate
-[ ] Package specs do not expose internal types or cursors that shouldn't be public
-[ ] Audit logging includes the calling user (SYS_CONTEXT('USERENV','SESSION_USER'))
-```
+- [ ] すべての動的 SQL で、データ値にバインド変数を使用しているか
+- [ ] 動的 SQL 内の表名/列名が `DBMS_ASSERT.SIMPLE_SQL_NAME` で検証されているか
+- [ ] 定義者権限のプロシージャが、意図せず呼び出し側に高い権限を与えていないか
+- [ ] エラー・メッセージが、内部のスキーマ名や SQL 構造をエンド・ユーザーに公開していないか
+- [ ] 事前に存在を確認すべきオブジェクトに `DBMS_ASSERT.SQL_OBJECT_NAME` を使用しているか
+- [ ] PL/SQL ソース内に認証情報（パスワード等）をハードコードしていないか
+- [ ] `EXECUTE IMMEDIATE` で文字列連結ではなく `USING` 句（バインド変数）を使用しているか
+- [ ] 呼び出し側の権限が適切な機密性の高いプロシージャで、`AUTHID CURRENT_USER` を検討したか
+- [ ] パッケージ仕様部で、公開すべきでない内部型やカーソルを露出させていないか
+- [ ] 監査ログに呼び出しユーザー (`SYS_CONTEXT('USERENV','SESSION_USER')`) を含めているか
 
 ---
 
-## Oracle Database Vault Context
+## Oracle Database Vault におけるコンテキスト
 
-Oracle Database Vault (optional licensed feature) adds realm-based access control on top of standard Oracle privileges. Even accounts with DBA role can be blocked from accessing application data if Database Vault realms are properly configured.
+Oracle Database Vault は、標準の Oracle 権限の上にレルムベースのアクセス制御を追加します。適切に構成されていれば、DBA ロールを持つアカウントであってもアプリケーション・データへのアクセスをブロックできます。
 
 ```sql
--- Check if Database Vault is enabled
+-- Database Vault が有効かどうかを確認
 SELECT parameter, value FROM v$option WHERE parameter = 'Oracle Database Vault';
 
--- In a Vault-enabled database, check realm membership before granting access
--- This is typically done by the Vault administrator, not application code
+-- Vault 有効時、PL/SQL で現在のセッション・コンテキストを読み取ることができる
+SELECT SYS_CONTEXT('DVSYS', 'ROLE') FROM DUAL;  -- 現在のレルム・ロール
 
--- Application code can read the current Vault session context
-SELECT SYS_CONTEXT('DVSYS', 'ROLE') FROM DUAL;  -- current realm role
-
--- Code factor example: restrict execution based on IP or authentication method
--- (Configured in Vault, readable in PL/SQL via SYS_CONTEXT)
+-- 例：接続元 IP や認証方法に基づいて実行を制限
 IF SYS_CONTEXT('DVSYS', 'NETWORK_IP_ADDRESS') NOT LIKE '10.0.%' THEN
-  RAISE_APPLICATION_ERROR(-20403, 'Access denied from this network location');
+  RAISE_APPLICATION_ERROR(-20403, '許可されていないネットワーク場所からのアクセスです');
 END IF;
 ```
 
 ---
 
-## Additional Security Patterns
+## 追加のセキュリティ・パターン
 
-### Restricting Package Access (12.2+)
+### パッケージへのアクセス制限 (12.2+)
 
 ```sql
--- Only allow specific packages to call sensitive_ops_pkg
+-- sensitive_ops_pkg を、特定のパッケージからのみ呼び出し可能にする
 CREATE OR REPLACE PACKAGE sensitive_ops_pkg
   ACCESSIBLE BY (PACKAGE order_processor_pkg, PACKAGE batch_runner_pkg)
 AS
   PROCEDURE delete_order(p_id IN NUMBER);
 END sensitive_ops_pkg;
 /
--- Calling sensitive_ops_pkg from any other unit raises PLS-00904
+-- これ以外のユニットから呼び出そうとすると、コンパイル・エラー PLS-00904 が発生する
 ```
 
-### Avoiding Data Leakage in Error Messages
+### エラー・メッセージによるデータ漏洩の回避
 
 ```sql
--- WRONG: exposes internal SQL structure
+-- 誤り：内部の SQL 構造が露出する
 EXCEPTION
   WHEN OTHERS THEN
     RAISE_APPLICATION_ERROR(-20001,
       'Error in: SELECT * FROM ' || l_table_name || ' - ' || SQLERRM);
 
--- RIGHT: generic message to client, full detail in internal log
+-- 正しい：クライアントには汎用メッセージを返し、内部ログに詳細を残す
 EXCEPTION
   WHEN OTHERS THEN
     error_logger_pkg.log_error('ORDER_PKG', 'PROCESS_ORDER');
-    RAISE_APPLICATION_ERROR(-20001, 'An internal error occurred. Reference: ' || l_log_id);
-```
-
-### Secure Logon Trigger Pattern
-
-```sql
--- Set application context at login for use in RLS policies
-CREATE OR REPLACE TRIGGER app_logon_trigger
-  AFTER LOGON ON SCHEMA
-BEGIN
-  DBMS_SESSION.SET_CONTEXT(
-    namespace => 'APP_SECURITY',
-    attribute => 'AUTHENTICATED_USER',
-    value     => SYS_CONTEXT('USERENV', 'SESSION_USER')
-  );
-  DBMS_SESSION.SET_CONTEXT(
-    namespace => 'APP_SECURITY',
-    attribute => 'CLIENT_HOST',
-    value     => SYS_CONTEXT('USERENV', 'HOST')
-  );
-END app_logon_trigger;
-/
+    RAISE_APPLICATION_ERROR(-20001, '内部エラーが発生しました。参照 ID: ' || l_log_id);
 ```
 
 ---
 
-## Common Mistakes and Anti-Patterns
+## よくある間違いとアンチパターン
 
-| Anti-Pattern | Risk | Mitigation |
+| アンチパターン | リスク | 対策 |
 |---|---|---|
-| String concatenation in dynamic SQL | SQL injection | Bind variables + `DBMS_ASSERT` |
-| Definer rights on SQL-injection-vulnerable code | Privilege escalation | Fix injection first; consider invoker rights |
-| Exposing schema structure in error messages | Information leakage | Generic errors to clients; internal logging |
-| Granting `EXECUTE ANY PROCEDURE` | Caller can run all definer-rights code | Grant execute on specific procedures only |
-| Hardcoded passwords in PL/SQL | Credential exposure | Use Oracle Wallet, database links with no password in source |
-| No validation of `p_table_name` before DDL | Table name injection | `DBMS_ASSERT.SIMPLE_SQL_NAME` + whitelist |
-| `NOOP` used as "validation" | No actual validation performed | Use actual `DBMS_ASSERT` validation functions |
-| SELECT ANY TABLE on app schema | Any app proc can read any data | Restrict to specific tables via grants |
+| 動的 SQL での文字列連結 | SQL インジェクション | バインド変数 + `DBMS_ASSERT` |
+| インジェクション脆弱性のあるコードへの定義者権限付与 | 権限昇格 | インジェクションを修正し、実行者権限を検討する |
+| エラー・メッセージでのスキーマ構造露出 | 情報漏洩 | クライアントへのエラーを汎用化し、内部ログを使用する |
+| `EXECUTE ANY PROCEDURE` の付与 | 呼び出し側があらゆる定義者権限コードを実行可能になる | 特定のプロシージャのみに権限を付与する |
+| PL/SQL 内のパスワードのハードコード | 認証情報の漏洩 | Oracle Wallet や認証情報なしの DB リンクを使用する |
+| DDL 前に `p_table_name` を検証しない | 表名インジェクション | `DBMS_ASSERT.SIMPLE_SQL_NAME` + ホワイトリスト |
+| 検証の代わりに `NOOP` を使用する | 実際には何も検証されない | 適切な `DBMS_ASSERT` 関数を使用する |
 
 ---
 
-## Oracle Version Notes (19c vs 26ai)
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- ハイブリッドな環境では、19c と 26ai の両方で構文とパッケージの動作をテストすること。デフォルトや非推奨がリリース・アップデートによって異なる場合があるため。
 
-- **Oracle 12.2+**: `ACCESSIBLE BY` clause enforces compile-time access control between PL/SQL units.
-- **Oracle 12c+**: `DBMS_PRIVILEGE_CAPTURE` enables privilege analysis — identifies which privileges are actually used, helping implement least privilege.
-- **Oracle 18c+**: `DEFAULT COLLATION` and `COLLATION` on individual columns can affect string comparison in dynamic SQL — validate that DBMS_ASSERT behavior is consistent with collation settings.
-- **All versions**: `DBMS_ASSERT` has been available since Oracle 10.2; use it consistently in all PL/SQL handling user-supplied identifiers in dynamic SQL.
+- **Oracle 12.2以降**: `ACCESSIBLE BY` 句により、PL/SQL ユニット間のアクセス制御がコンパイル時に強制されます。
+- **Oracle 12c以降**: `DBMS_PRIVILEGE_CAPTURE` による権限分析が可能となり、実際に使用されている権限を特定して最小権限の原則を適用できます。
+- **全バージョン**: `DBMS_ASSERT` は Oracle 10.2 以降で利用可能です。動的 SQL を構築する際には一貫して使用してください。
 
 ---
 
-## Sources
+## ソース
 
-- [Oracle Database PL/SQL Language Reference 19c — AUTHID Clause](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/AUTHID-clause.html) — definer rights vs invoker rights
-- [DBMS_ASSERT (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_ASSERT.html) — SQL_OBJECT_NAME, SIMPLE_SQL_NAME, ENQUOTE_LITERAL, NOOP
-- [Oracle Database Security Guide 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/dbseg/) — privilege analysis, application context, RLS
-- [Oracle Database PL/SQL Language Reference 19c — ACCESSIBLE BY Clause](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/ACCESSIBLE-BY-clause.html) — 12.2+ compile-time access control
+- [Oracle Database PL/SQL Language Reference 19c — AUTHID Clause](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/AUTHID-clause.html)
+- [DBMS_ASSERT (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_ASSERT.html)
+- [Oracle Database Security Guide 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/dbseg/)
+- [Oracle Database PL/SQL Language Reference 19c — ACCESSIBLE BY Clause](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/ACCESSIBLE-BY-clause.html)

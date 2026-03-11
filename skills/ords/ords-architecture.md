@@ -1,227 +1,227 @@
-# ORDS Architecture: Components, Request Flow, and Deployment Models
+# ORDS アーキテクチャ: コンポーネント、リクエスト・フロー、およびデプロイメント・モデル
 
-## Overview
+## 概要
 
-Oracle REST Data Services (ORDS) is a Java EE application that acts as a bridge between HTTP clients and Oracle Database. It translates REST API calls into database operations, manages connection pooling, handles authentication and authorization, and returns results as JSON or other formats. ORDS supports a wide range of use cases: AutoREST on tables and views, custom PL/SQL-backed REST APIs, Oracle APEX hosting, Database Actions (SQL Developer Web), and Oracle Graph/Spatial REST interfaces.
+Oracle REST Data Services (ORDS) は、HTTP クライアントと Oracle Database の間の架け橋として機能する Java EE アプリケーションである。REST API 呼び出しをデータベース操作に変換し、接続プールの管理、認証と認可の処理を行い、結果を JSON などの形式で返す。ORDS は、表やビューに対する AutoREST、カスタム PL/SQL ベースの REST API、Oracle APEX のホスティング、Database Actions (SQL Developer Web)、および Oracle Graph/Spatial REST インターフェースなど、幅広いユースケースをサポートしている。
 
-Understanding ORDS architecture is essential for designing reliable, scalable REST APIs on Oracle Database — choosing the right deployment model, correctly sizing connection pools, understanding URL routing, and maintaining compatibility across Oracle DB and ORDS versions.
+ORDS のアーキテクチャを理解することは、Oracle Database 上で信頼性とスケーラビリティの高い REST API を設計するために不可欠である。これには、適切なデプロイメント・モデルの選択、接続プールのサイズの適切な設定、URL ルーティングの理解、および Oracle DB と ORDS バージョン間の互換性の維持が含まれる。
 
 ---
 
-## Core Components
+## 主要コンポーネント
 
-### 1. ORDS Application Layer
+### 1. ORDS アプリケーション層
 
-ORDS is packaged as a WAR (Web Application Archive) file deployed into a Java servlet container. Its internal components include:
+ORDS は、Java サーブレット・コンテナにデプロイされる WAR (Web Application Archive) ファイルとしてパッケージ化されている。その内部コンポーネントには以下が含まれる。
 
-- **Request Router**: Parses incoming HTTP requests, matches them against registered URL patterns, and dispatches to the correct handler.
-- **Module/Template/Handler Registry**: In-memory representation of all REST modules loaded from the database metadata schema. Refreshed on a configurable interval.
-- **Connection Pool Manager**: Manages one or more database connection pools (UCP) per configured database pool.
-- **Authentication Filter**: Intercepts protected endpoints, validates Bearer tokens or basic auth credentials, and enforces privilege checks.
-- **Result Serializer**: Converts database query results (cursor rows, PL/SQL OUT parameters, BLOBs) to JSON, XML, or binary output.
+- **リクエスト・ルーター (Request Router)**: 受信した HTTP リクエストを解析し、登録された URL パターンと照合して、適切なハンドラーに振り分ける。
+- **モジュール/テンプレート/ハンドラー・レジストリ**: データベースのメタデータ・スキーマからロードされたすべての REST モジュールのメモリ内表現。設定された間隔でリフレッシュされる。
+- **接続プール・マネージャー**: 設定されたデータベース・プールごとに 1 つ以上のデータベース接続プール (UCP) を管理する。
+- **認証フィルター (Authentication Filter)**: 保護されたエンドポイントへのアクセスをインターセプトし、Bearer トークンや基本認証の資格証明を検証して、権限チェックを強制する。
+- **結果シリアライザー (Result Serializer)**: データベースのクエリ結果（カーソル行、PL/SQL OUT パラメータ、BLOB）を JSON、XML、またはバイナリ出力に変換する。
 
-### 2. ORDS Metadata Schema
+### 2. ORDS メタデータ・スキーマ
 
-ORDS stores all REST API definitions inside the Oracle Database itself, in two key schemas:
+ORDS は、すべての REST API 定義を Oracle Database 自体の中にある 2 つの主要スキーマに保存する。
 
-**ORDS_METADATA** (installed by ORDS)
-- Contains tables defining REST modules, URL templates, handlers, privileges, and OAuth clients.
-- Key tables: `ORDS_METADATA.ORDS_MODULES`, `ORDS_METADATA.ORDS_TEMPLATES`, `ORDS_METADATA.ORDS_HANDLERS`, `ORDS_METADATA.ORDS_PRIVILEGES`.
-- ORDS reads this schema at startup and on refresh intervals to build its in-memory routing table.
+**ORDS_METADATA** (ORDS によってインストールされる)
+- REST モジュール、URL テンプレート、ハンドラー、権限、および OAuth クライアントを定義する表が含まれる。
+- 主要な表: `ORDS_METADATA.ORDS_MODULES`, `ORDS_METADATA.ORDS_TEMPLATES`, `ORDS_METADATA.ORDS_HANDLERS`, `ORDS_METADATA.ORDS_PRIVILEGES`
+- ORDS は起動時およびリフレッシュ間隔ごとにこのスキーマを読み取り、メモリ内にルーティング表を構築する。
 
-**ORDS_PUBLIC_USER** (database user)
-- The low-privilege database user ORDS uses for routing decisions and AutoREST metadata lookups.
-- Does NOT execute actual REST handler SQL. The handler SQL runs as the schema owner or as the user mapped by the authentication context.
-- Must have `CREATE SESSION` privilege and grants from ORDS_METADATA.
+**ORDS_PUBLIC_USER** (データベース・ユーザー)
+- ORDS がルーティングの決定や AutoREST メタデータのルックアップに使用する、低権限のデータベース・ユーザー。
+- 実際の REST ハンドラーの SQL は実行**しない**。ハンドラーの SQL は、スキーマ所有者または認証コンテキストによってマップされたユーザーとして実行される。
+- `CREATE SESSION` 権限と ORDS_METADATA からの付与が必要である。
 
-### 3. Database Connection Pools
+### 3. データベース接続プール
 
-ORDS uses **Universal Connection Pool (UCP)** — Oracle's JDBC connection pool. Each database pool in the ORDS configuration gets its own UCP instance. Pool parameters control:
+ORDS は、Oracle の JDBC 接続プールである **Universal Connection Pool (UCP)** を使用する。ORDS 構成内の各データベース・プールには、独自の UCP インスタンスが割り当てられる。プール・パラメータにより以下を制御する。
 
-- Minimum/maximum pool size
-- Connection timeout and validation
-- Statement cache size
+- 最小/最大プール・サイズ
+- 接続のタイムアウトと検証
+- ステートメント・キャッシュ・サイズ
 
 ```shell
-# Pool settings are configured via the ORDS CLI — no hand-edited config files
+# プールの設定は ORDS CLI を介して構成する（設定ファイルを直接編集しない）
 ords config set db.hostname mydb.example.com
 ords config set db.port 1521
 ords config set db.servicename mypdb.example.com
 ords config set db.username ORDS_PUBLIC_USER
-# Passwords go into the Oracle Wallet, never into a config file:
+# パスワードは Oracle ウォレットに保存され、設定ファイルには直接記述しない
 ords config secret set db.password --password-stdin <<< "..."
 ords config set feature.sdw true
 ```
 
-### 4. ORDS Schema Objects per REST-Enabled Schema
+### 4. REST 有効化されたスキーマごとの ORDS スキーマ・オブジェクト
 
-When a schema is REST-enabled (`ORDS.ENABLE_SCHEMA`), the following metadata is created in ORDS_METADATA:
-- A schema record linking the schema's alias to its DB username
-- Module, template, and handler records for any explicitly defined REST APIs
-- AutoREST metadata for enabled objects (tables, views, procedures)
-
----
-
-## Request Flow
-
-Understanding the request lifecycle helps with troubleshooting and performance tuning.
-
-```
-HTTP Client
-    │
-    ▼
-[Load Balancer / Reverse Proxy] (optional)
-    │
-    ▼
-[ORDS Servlet Container] ─── HTTPS termination (or pass-through)
-    │
-    ├─ 1. URL Parsing & Routing
-    │      Match URL against module/template patterns in memory
-    │
-    ├─ 2. Authentication Filter
-    │      Check if endpoint is protected
-    │      Validate OAuth Bearer token OR Basic Auth
-    │      Resolve privileges/roles
-    │
-    ├─ 3. Connection Acquisition
-    │      Get a JDBC connection from UCP for the target pool
-    │
-    ├─ 4. Handler Execution
-    │      Execute SQL query / PL/SQL block with bound parameters
-    │      Implicit parameters injected (:body, :body_text, etc.)
-    │
-    ├─ 5. Result Serialization
-    │      Cursor rows → JSON array of objects
-    │      BLOB → binary stream with Content-Type header
-    │      PL/SQL OUT params → JSON object
-    │
-    └─ 6. Response
-           HTTP status, headers, body returned to client
-```
-
-A typical REST handler execution:
-1. ORDS receives `GET /ords/hr/employees/101`
-2. Router matches this to module `hr`, template `employees/:id`, handler `GET`
-3. Authentication check (if privilege attached) validates Bearer token
-4. ORDS acquires a DB connection from the `default` UCP pool
-5. Executes `SELECT * FROM employees WHERE employee_id = :id` with `:id = 101`
-6. Serializes the result row as a JSON object
-7. Returns `200 OK` with JSON body
+スキーマが REST 有効化されると (`ORDS.ENABLE_SCHEMA`)、以下のメタデータが ORDS_METADATA に作成される。
+- スキーマの別名 (Alias) と DB ユーザー名をリンクするスキーマ・レコード
+- 明示的に定義された REST API のモジュール、テンプレート、およびハンドラー・レコード
+- 有効化されたオブジェクト（表、ビュー、プロシージャ）の AutoREST メタデータ
 
 ---
 
-## URL Routing and Module/Template/Handler Hierarchy
+## リクエスト・フロー
 
-ORDS REST APIs are organized in a three-level hierarchy:
-
-```
-Module (base path)
-  └── Template (relative URL pattern)
-        └── Handler (HTTP method + SQL/PL/SQL)
-```
-
-### Module
-
-A module is the top-level container. It defines a base path and is associated with one schema.
+リクエストのライフサイクルを理解することは、トラブルシューティングやパフォーマンス・チューニングに役立つ。
 
 ```
-Base URL: /ords/{schema_alias}/{module_base_path}/
-Example:  /ords/hr/api/v1/
+HTTP クライアント
+    │
+    ▼
+[ロード・バランサ / リバース・プロキシ] (オプション)
+    │
+    ▼
+[ORDS サーブレット・コンテナ] ─── HTTPS 終端 (またはパススルー)
+    │
+    ├─ 1. URL 解析とルーティング
+    │      メモリ内のモジュール/テンプレート・パターンと URL を照合
+    │
+    ├─ 2. 認証フィルター
+    │      エンドポイントが保護されているかチェック
+    │      OAuth Bearer トークンまたは基本認証を検証
+    │      権限/ロールを解決
+    │
+    ├─ 3. 接続の取得
+    │      ターゲット・プール用の JDBC 接続を UCP から取得
+    │
+    ├─ 4. ハンドラーの実行
+    │      バインド・パラメータを使用して SQL クエリ / PL/SQL ブロックを実行
+    │      暗黙的なパラメータ（:body, :body_text など）が注入される
+    │
+    ├─ 5. 結果のシリアライズ
+    │      カーソル行 → JSON オブジェクトの配列
+    │      BLOB → Content-Type ヘッダーを伴うバイナリ・ストリーム
+    │      PL/SQL OUT パラメータ → JSON オブジェクト
+    │
+    └─ 6. レスポンス
+           HTTP ステータス、ヘッダー、ボディをクライアントに返却
 ```
 
-### Template
+典型的な REST ハンドラーの実行例:
+1. ORDS が `GET /ords/hr/employees/101` を受信
+2. ルーターがこれをモジュール `hr`、テンプレート `employees/:id`、ハンドラー `GET` に照合
+3. 認証チェック（権限が付与されている場合）により Bearer トークンを検証
+4. ORDS が `default` UCP プールから DB 接続を取得
+5. `SELECT * FROM employees WHERE employee_id = :id` を `:id = 101` で実行
+6. 結果の行を JSON オブジェクトとしてシリアライズ
+7. `200 OK` と JSON ボディを返却
 
-A template defines a URL pattern relative to the module base path. Templates support **URI parameters** using `:param` syntax.
+---
+
+## URL ルーティングとモジュール/テンプレート/ハンドラーの階層
+
+ORDS REST API は、以下の 3 レベルの階層で整理されている。
 
 ```
-Template: employees/
-Template: employees/:id
-Template: departments/:dept_id/employees
+モジュール (ベース・パス)
+  └── テンプレート (相対 URL パターン)
+        └── ハンドラー (HTTP メソッド + SQL/PL/SQL)
 ```
 
-### Handler
+### モジュール (Module)
 
-A handler is the actual SQL or PL/SQL executed for a given HTTP method on a template.
+モジュールは最上位のコンテナである。ベース・パスを定義し、1 つのスキーマに関連付けられる。
 
 ```
-GET  employees/        → SELECT query returning collection
-GET  employees/:id     → SELECT query returning single row
-POST employees/        → INSERT via PL/SQL
-PUT  employees/:id     → UPDATE via PL/SQL
-DELETE employees/:id   → DELETE via PL/SQL
+ベース URL: /ords/{schema_alias}/{module_base_path}/
+例:       /ords/hr/api/v1/
 ```
 
-### Full URL Construction
+### テンプレート (Template)
+
+テンプレートは、モジュールのベース・パスからの相対的な URL パターンを定義する。テンプレートは `:param` 構文を使用した **URI パラメータ** をサポートしている。
+
+```
+テンプレート: employees/
+テンプレート: employees/:id
+テンプレート: departments/:dept_id/employees
+```
+
+### ハンドラー (Handler)
+
+ハンドラーは、特定のテンプレートの特定の HTTP メソッドに対して実行される実際の SQL または PL/SQL である。
+
+```
+GET  employees/        → コレクションを返す SELECT クエリ
+GET  employees/:id     → 単一行を返す SELECT クエリ
+POST employees/        → PL/SQL による INSERT
+PUT  employees/:id     → PL/SQL による UPDATE
+DELETE employees/:id   → PL/SQL による DELETE
+```
+
+### 完全な URL の構築
 
 ```
 https://host:port/ords/{schema_alias}/{module_uri_prefix}/{template_uri}
                    │         │                │                  │
                    │    hr (schema)      api/v1/         employees/:id
                    │
-               fixed ORDS prefix
+               固定の ORDS プレフィックス
 ```
 
-Result: `https://host:8443/ords/hr/api/v1/employees/101`
+結果: `https://host:8443/ords/hr/api/v1/employees/101`
 
 ---
 
-## Deployment Models
+## デプロイメント・モデル
 
-### 1. Standalone (Jetty) — Development and Production
+### 1. スタンドアロン (Jetty) — 開発および本番環境
 
-ORDS ships with an embedded Eclipse Jetty server. No external application server is required.
+ORDS には、組み込みの Eclipse Jetty サーバーが同梱されている。外部のアプリケーション・サーバーは不要である。
 
 ```shell
-# Start ORDS standalone
+# ORDS スタンドアロンの起動
 ords --config /opt/oracle/ords/config serve \
   --port 8080 \
   --secure-port 8443 \
   --certificate-hostname myserver.example.com
 ```
 
-**Pros**: Simple, low overhead, easy to automate, officially supported for production.
-**Cons**: Single JVM process; for very high availability, run multiple instances behind a load balancer.
+**長所**: シンプル、低オーバーヘッド、自動化が容易で、本番環境でも公式にサポートされている。
+**短所**: 単一の JVM プロセス。非常に高い可用性が必要な場合は、ロード・バランサの背後で複数のインスタンスを実行する。
 
 ### 2. Apache Tomcat
 
-Deploy the ORDS WAR file into Tomcat's `webapps/` directory.
+ORDS WAR ファイルを Tomcat の `webapps/` ディレクトリにデプロイする。
 
 ```shell
 cp /opt/oracle/ords/ords.war $CATALINA_HOME/webapps/ords.war
-# Set ORDS config dir via environment variable
+# 環境変数で ORDS 構成ディレクトリを設定
 export ORDS_CONFIG=/opt/oracle/ords/config
 ```
 
-Tomcat handles threading, SSL/TLS (via connectors), and JVM management.
+Tomcat がスレッディング、SSL/TLS (コネクタ経由)、および JVM 管理を処理する。
 
-**Pros**: Familiar to Java operations teams; integrates with Tomcat monitoring tools.
-**Cons**: Requires Tomcat administration expertise; WAR redeployment needed on ORDS upgrades.
+**長所**: Java 運用チームになじみがある。Tomcat の監視ツールと統合できる。
+**短所**: Tomcat の管理スキルの習得が必要。ORDS アップグレード時に WAR の再デプロイが必要。
 
 ### 3. Oracle WebLogic Server
 
-Deploy ORDS WAR into a WebLogic managed server or cluster. Used in enterprise environments already running WebLogic.
+ORDS WAR を WebLogic 管理サーバーまたはクラスターにデプロイする。WebLogic をすでに使用しているエンタープライズ環境で使用される。
 
-**Pros**: Enterprise clustering, WebLogic monitoring, Oracle support bundling.
-**Cons**: Significant operational overhead; overkill for most ORDS deployments.
+**長所**: エンタープライズ・クラスター化、WebLogic 監視、Oracle サポートのバンドル。
+**短所**: 多大な運用オーバーヘッド。ほとんどの ORDS デプロイメントには過剰。
 
 ### 4. Oracle Cloud Infrastructure (OCI)
 
-#### ORDS on Autonomous Database (ADB)
+#### Autonomous Database (ADB) 上の ORDS
 
-ADB (ATP/ADW) includes ORDS pre-installed and pre-configured. There is nothing to install.
+ADB (ATP/ADW) には ORDS がプリインストールおよび事前構成されている。インストール作業は不要である。
 
-- ORDS is accessed via the ADB-specific ORDS URL shown in OCI Console.
-- Uses mTLS wallet for internal connections (no manual pool configuration needed).
-- ORDS metadata is stored in the same ADB instance.
-- Oracle manages ORDS version upgrades.
+- ORDS には、OCI コンソールに表示される ADB 専用の ORDS URL を介してアクセスする。
+- 内部接続には mTLS ウォレットを使用する（手動のプール構成は不要）。
+- ORDS メタデータは同じ ADB インスタンスに保存される。
+- Oracle が ORDS のバージョン・アップグレードを管理する。
 
 ```
 https://<unique-id>.adb.<region>.oraclecloudapps.com/ords/
 ```
 
-#### ORDS on OCI Compute / Container Instances
+#### OCI Compute / Container Instances 上の ORDS
 
-ORDS can be deployed on OCI Compute VMs or as containers in OCI Container Instances / OKE (Kubernetes). Use Oracle's official ORDS container image from Oracle Container Registry:
+ORDS は OCI Compute VM、または OCI Container Instances / OKE (Kubernetes) 内のコンテナとしてデプロイできる。Oracle Container Registry の公式 ORDS コンテナ・イメージを使用する。
 
 ```shell
 docker pull container-registry.oracle.com/database/ords:latest
@@ -238,73 +238,72 @@ docker run -d \
 
 ---
 
-## ORDS in Autonomous Database (ADB)
+## Autonomous Database (ADB) における ORDS
 
-ADB provides a fully managed ORDS deployment. Key differences from self-managed ORDS:
+ADB はフルマネージドな ORDS デプロイメントを提供する。セルフマネージド ORDS との主な違いは以下の通り。
 
-| Feature | Self-Managed ORDS | ADB ORDS |
+| 機能 | セルフマネージド ORDS | ADB ORDS |
 |---|---|---|
-| Installation | Manual | Pre-installed |
-| Connection pool | Configured manually | Auto-configured |
-| TLS | Manual cert management | Oracle-managed |
-| Version upgrades | Manual | Oracle-managed |
-| Schema URLs | `/ords/{alias}/` | `/ords/{alias}/` (same) |
-| Database Actions | Optional | Included |
-| Custom pool params | Full control | Limited via DB params |
+| インストール | 手動 | プリインストール |
+| 接続プール | 手動で構成 | 自動構成 |
+| TLS | 手動の証明書管理 | Oracle 管理 |
+| バージョン・アップグレード | 手動 | Oracle 管理 |
+| スキーマ URL | `/ords/{alias}/` | `/ords/{alias}/` (同一) |
+| Database Actions | オプション | 同梱 |
+| カスタム・プール・パラメータ | 全制御可能 | DB パラメータにより制限あり |
 
-In ADB, REST-enable schemas and define REST APIs the same way as in self-managed ORDS — via `ORDS.ENABLE_SCHEMA`, `ORDS.DEFINE_MODULE`, etc. The SQL is identical.
+ADB では、セルフマネージド ORDS と同様に `ORDS.ENABLE_SCHEMA`、`ORDS.DEFINE_MODULE` などを介してスキーマを REST 有効化し、REST API を定義する。SQL 構文は同一である。
 
 ---
 
-## Version Compatibility
+## バージョン互換性
 
-ORDS follows a separate release cadence from Oracle Database. General rules:
+ORDS は Oracle Database とは別のリリース・サイクルに従っている。一般的なルールは以下の通り。
 
-- ORDS is **forward compatible**: A newer ORDS version works with older database versions.
-- ORDS minimum database requirement: Oracle Database 11.2.0.4 (12c recommended).
-- ORDS for ADB always runs the latest validated ORDS version.
-- ORDS 22.x and later use the `ords` CLI (replacing the older `java -jar ords.war` commands).
-- ORDS 23.x introduced enhanced JWT/OAuth2 features and improved OpenAPI 3.0 support.
+- ORDS は**前方互換性**がある: 新しいバージョンの ORDS は古いデータベース・バージョンでも動作する。
+- ORDS の最小データベース要件: Oracle Database 11.2.0.4 (12c 推奨)。
+- ADB 用の ORDS は常に最新の検証済みバージョンを実行する。
+- ORDS 22.x 以降は `ords` CLI を使用する（従来の `java -jar ords.war` コマンドを置き換え）。
+- ORDS 23.x では、強化された JWT/OAuth2 機能と OpenAPI 3.0 サポートの向上が導入された。
 
 ```
-Recommended compatibility matrix:
-Oracle DB 19c / 21c / 23ai → ORDS 22.x, 23.x, 24.x (latest recommended)
-Oracle DB 12.2              → ORDS 21.x or later
-Oracle DB 12.1              → ORDS 19.x or later (limited features)
+推奨される互換性マトリックス:
+Oracle DB 19c / 21c / 23ai → ORDS 22.x, 23.x, 24.x (最新推奨)
+Oracle DB 12.2              → ORDS 21.x 以降
+Oracle DB 12.1              → ORDS 19.x 以降 (一部機能制限あり)
 ```
 
-Always check the [ORDS Release Notes](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/) for the specific version matrix before upgrading.
+アップグレードの前に、必ず [ORDS リリース・ノート](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/)で特定のバージョンのマトリックスを確認すること。
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Deploy ORDS close to the database**: High latency between ORDS and the DB degrades performance. Use the same data center / VCN.
-- **Run multiple ORDS instances behind a load balancer** for production high availability. ORDS is stateless — any instance can serve any request.
-- **Use a dedicated ORDS server separate from the DB server**: ORDS under load consumes significant CPU and memory in the JVM.
-- **Keep ORDS updated**: Security patches and performance improvements are released frequently. ORDS 22+ supports in-place upgrades with a single command.
-- **Tune UCP pool size** based on DB connection limits and expected concurrency. Default pool max (10) is too small for production.
-- **Use ORDS_PUBLIC_USER with minimum privileges**: Never use a DBA account as the ORDS connection user.
-- **Monitor the ORDS log**: Enable request logging and review slow request logs to identify performance bottlenecks.
+- **ORDS をデータベースの近くにデプロイする**: ORDS と DB 間の高レイテンシはパフォーマンスを低下させる。同じデータ・センター / VCN を使用すること。
+- **本番環境の高可用性のために、ロード・バランサの背後で複数の ORDS インスタンスを実行する**: ORDS はステートレスであり、どのインスタンスでも任意のリクエストを処理できる。
+- **DB サーバーとは別の専用 ORDS サーバーを使用する**: 負荷のかかった ORDS は、JVM 内でかなりの CPU とメモリを消費する。
+- **ORDS を最新の状態に保つ**: セキュリティ・パッチやパフォーマンス向上のためのアップデートが頻繁にリリースされている。ORDS 22 以降は、単一のコマンドでインプレース アップグレードをサポートしている。
+- **UCP プール・サイズを調整する**: DB の接続制限と予想される同時実行数に基づいて設定する。デフォルトの最大プール・サイズ (10) は本番環境には小さすぎる。
+- **最小権限の ORDS_PUBLIC_USER を使用する**: DBA アカウントを ORDS 接続ユーザーとして使用してはならない。
+- **ORDS ログを監視する**: リクエスト・ログを有効にし、遅いリクエストのログを確認してパフォーマンスのボトルネックを特定する。
 
-## Common Mistakes
+## よくある間違い
 
-- **Using the SYS or SYSTEM account as the ORDS connection pool user**: This is a major security risk. Always use a dedicated, low-privilege user.
-- **Forgetting to refresh ORDS after metadata changes**: When REST API definitions are changed directly in ORDS_METADATA tables (e.g., via SQL), ORDS needs to refresh its in-memory cache. Use `ORDS.DEFINE_*` APIs which trigger refresh automatically, or restart ORDS.
-- **Conflating schema alias with schema name**: The schema alias in the URL (e.g., `/ords/hr/`) is set when enabling the schema and can differ from the database username. Mismatches cause 404 errors.
-- **Assuming ORDS and APEX require the same version**: ORDS and APEX have independent version dependencies. Check APEX release notes for required ORDS minimum version.
-- **Not configuring HTTPS**: ORDS defaults to HTTP in standalone mode. Always configure HTTPS for any non-development deployment.
+- **SYS または SYSTEM アカウントを ORDS 接続プール・ユーザーとして使用する**: これは重大なセキュリティ・リスクである。必ず専用の低権限ユーザーを使用すること。
+- **メタデータ変更後に ORDS のリフレッシュを忘れる**: ORDS_METADATA 表で REST API 定義が直接変更された場合（SQL などを使用した場合）、ORDS はメモリ内のキャッシュをリフレッシュする必要がある。自動的にリフレッシュをトリガーする `ORDS.DEFINE_*` API を使用するか、ORDS を再起動すること。
+- **スキーマの別名 (Alias) とスキーマ名を混同する**: URL 内のスキーマの別名（例: `/ords/hr/`）はスキーマの有効化時に設定され、データベース・ユーザー名と異なる場合がある。不一致は 404 エラーの原因となる。
+- **ORDS と APEX が同じバージョンであることを前提にする**: ORDS と APEX には、それぞれ独立したバージョンの依存関係がある。APEX リリース・ノートで必要な最小 ORDS バージョンを確認すること。
+- **HTTPS を構成しない**: スタンドアロン・モードの ORDS はデフォルトで HTTP になっている。開発環境以外では必ず HTTPS を構成すること。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。混在環境では 19c 互換の代替手段を維持すること。
+- 19c と 26ai の両方をサポートする環境では、リリース・アップデートによってデフォルトや非推奨が異なる場合があるため、両方のバージョンで構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle REST Data Services Documentation](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/)
 - [ORDS Developer's Guide — Architecture Overview](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/index.html)

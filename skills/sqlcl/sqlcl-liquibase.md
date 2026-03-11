@@ -1,65 +1,65 @@
-# SQLcl Built-in Liquibase
+# SQLcl組み込みのLiquibase
 
-## Overview
+## 概要
 
-SQLcl ships with Liquibase built in. No separate Liquibase installation, Java classpath configuration, or Oracle JDBC driver setup is required — SQLcl already has the Oracle driver and Liquibase bundled and integrated. The `lb` command (also accessible as `liquibase`) is available at the SQLcl prompt and from the command line.
+SQLclには、Liquibaseが標準で組み込まれています。個別のLiquibaseのインストール、Javaクラスパスの構成、またはOracle JDBCドライバのセットアップは必要ありません。SQLclにはすでにOracleドライバとLiquibaseが同梱され、統合されています。`lb` コマンド（`liquibase` としてもアクセス可能）は、SQLclプロンプトおよびコマンドラインから使用できます。
 
-SQLcl's Liquibase integration is purpose-built for Oracle and includes Oracle-specific extensions that the standalone Liquibase CLI does not have out of the box, most notably the ability to **generate changelogs from an existing Oracle schema** — capturing tables, views, packages, triggers, sequences, indexes, synonyms, and other object types directly from the database catalog.
+SQLclのLiquibase統合は、Oracle専用に構築されており、スタンドアロンのLiquibase CLIには標準で備わっていないOracle固有の拡張機能が含まれています。最も注目すべきは、**既存のOracleスキーマから変更ログ（Changelog）を生成**できる機能です。これにより、データベース・カタログから表、ビュー、パッケージ、トリガー、シーケンス、索引、シノニムなどのオブジェクト・タイプを直接キャプチャできます。
 
-This makes SQLcl Liquibase ideal for:
-- Capturing a baseline of an existing database schema into version control
-- Tracking incremental schema changes over time
-- Deploying changes across environments (dev → test → prod)
-- Integrating database changes into CI/CD pipelines
-
----
-
-## Key Concepts
-
-### Changelog
-
-A changelog is a file (XML, YAML, JSON, or SQL) that contains an ordered list of **changesets**. Liquibase tracks which changesets have been applied to a database in a tracking table called `DATABASECHANGELOG`.
-
-### Changeset
-
-A changeset is an atomic unit of change identified by a unique combination of `id`, `author`, and `filename`. Once applied, a changeset is not re-applied (unless explicitly rolled back). Changesets can contain DDL, DML, or stored procedure definitions.
-
-### DATABASECHANGELOG Table
-
-Liquibase creates this table automatically in the schema where changes are applied. It records:
-- `ID` — The changeset ID
-- `AUTHOR` — The changeset author
-- `FILENAME` — The changelog file path
-- `DATEEXECUTED` — When the change was applied
-- `MD5SUM` — Checksum of the changeset content
-- `EXECTYPE` — EXECUTED, FAILED, RERAN, etc.
-
-### DATABASECHANGELOGLOCK Table
-
-A companion lock table that prevents concurrent Liquibase operations from conflicting.
+これにより、SQLcl Liquibaseは以下に最適です：
+- 既存のデータベース・スキーマのベースラインをバージョン管理にキャプチャする
+- 時間の経過に伴う段階的なスキーマ変更を追跡する
+- 環境間（開発 → テスト → 本番）で変更をデプロイする
+- データベースの変更をCI/CDパイプラインに統合する
 
 ---
 
-## Generating Changelogs from Existing Schema
+## 主要な概念
 
-This is SQLcl's most powerful Liquibase feature — the ability to reverse-engineer an existing Oracle schema into a Liquibase changelog.
+### 変更ログ (Changelog)
 
-### Generate Full Schema Changelog
+変更ログは、順序付けられた **チェンジセット（Changeset）** のリストを含むファイル（XML, YAML, JSON, または SQL）です。Liquibaseは、`DATABASECHANGELOG` という管理表を使用して、どのチェンジセットがデータベースに適用済みかを追跡します。
+
+### チェンジセット (Changeset)
+
+チェンジセットは、`id`、`author`、および `filename` の一意の組み合わせによって識別される、変更のアトミックな単位です。一度適用されたチェンジセットは（明示的にロールバックされない限り）再適用されません。チェンジセットには、DDL、DML、またはストアド・プロシージャの定義を含めることができます。
+
+### DATABASECHANGELOG 表
+
+Liquibaseは、変更が適用されるスキーマにこの表を自動的に作成します。以下の内容を記録します。
+- `ID` — チェンジセットID
+- `AUTHOR` — チェンジセットの作成者
+- `FILENAME` — 変更ログのファイル・パス
+- `DATEEXECUTED` — 変更が適用された日時
+- `MD5SUM` — チェンジセット内容のチェックサム
+- `EXECTYPE` — EXECUTED, FAILED, RERAN など
+
+### DATABASECHANGELOGLOCK 表
+
+同時実行のLiquibase操作による競合を防ぐためのロック管理表です。
+
+---
+
+## 既存スキーマからの変更ログ（Changelog）の生成
+
+これはSQLcl Liquibaseの最も強力な機能であり、既存のOracleスキーマをリバース・エンジニアリングしてLiquibaseの変更ログを生成できます。
+
+### スキーマ全体の変更ログ生成
 
 ```sql
--- Connect to the target schema first
+-- 最初に対象のスキーマに接続
 CONNECT hr/hr@localhost:1521/FREEPDB1
 
--- Generate changelog for entire schema
+-- スキーマ全体の変更ログを生成
 lb generate-schema -split
 ```
 
-The `-split` flag creates one file per object (recommended for version control). Without `-split`, all DDL is placed in a single file.
+`-split` フラグは、オブジェクトごとに1つのファイルを作成します（バージョン管理に推奨）。`-split` なしの場合は、すべてのDDLが1つのファイルに配置されます。
 
-The output directory structure when using `-split`:
+`-split` 使用時の出力ディレクトリ構造：
 
 ```
-controller.xml          (master changelog referencing all sub-files)
+controller.xml          (すべてのサブ・ファイルをリファレンスするマスター・変更ログ)
 table/
   employees.xml
   departments.xml
@@ -78,70 +78,70 @@ trigger/
   ...
 ```
 
-### Generate Changelog for Specific Object Types
+### 特定のオブジェクト・タイプの変更ログ生成
 
 ```sql
--- Only tables
+-- 表のみ
 lb generate-schema -object-type table
 
--- Only tables and views
+-- 表とビューのみ
 lb generate-schema -object-type table -object-type view
 
--- Only specific object types (comma-separated not supported; use multiple flags)
+-- 特定のオブジェクト・タイプ（カンマ区切りはサポートされていません。複数のフラグを使用してください）
 ```
 
-### Generate Changelog for a Single Object
+### 単一オブジェクトの変更ログ生成
 
 ```sql
--- Generate changelog for a specific table
+-- 特定の表の変更ログを生成
 lb generate-object -object-type table -object-name EMPLOYEES
 
--- Generate changelog for a view
+-- ビューの変更ログを生成
 lb generate-object -object-type view -object-name EMP_DETAILS_VIEW
 
--- Generate changelog for a package
+-- パッケージの変更ログを生成
 lb generate-object -object-type package -object-name MY_PKG
 
--- Specify output file name
+-- 出力ファイル名を指定
 lb generate-object -object-type table -object-name EMPLOYEES -file employees_changelog.xml
 ```
 
-### Output Formats
+### 出力フォーマット
 
-SQLcl Liquibase supports XML (default), YAML, JSON, and SQL formats:
+SQLcl Liquibaseは、XML（デフォルト）、YAML、JSON、および SQL フォーマットをサポートしています。
 
 ```sql
--- Generate in YAML format
+-- YAML フォーマットで生成
 lb generate-schema -format yaml
 
--- Generate in JSON format
+-- JSON フォーマットで生成
 lb generate-schema -format json
 
--- Generate in SQL format (plain DDL statements wrapped in Liquibase SQL changesets)
+-- SQL フォーマットで生成（LiquibaseのSQLチェンジセットでラップされたプレーンなDDL文）
 lb generate-schema -format sql
 ```
 
 ---
 
-## Applying Changes with `lb update`
+## lb update による変更の適用
 
-### Apply All Pending Changesets
+### すべての保留中のチェンジセットを適用
 
 ```sql
 lb update -changelog-file controller.xml
 ```
 
-Liquibase reads the changelog, checks `DATABASECHANGELOG` to find which changesets have already been applied, and runs only the new ones.
+Liquibaseは変更ログを読み取り、`DATABASECHANGELOG` をチェックしてすでに適用済みのチェンジセットを確認し、新しいものだけを実行します。
 
-### Preview Changes (updateSQL)
+### 変更のプレビュー (updateSQL)
 
-Before applying, generate the SQL that would be executed without running it:
+適用する前に、実行されるSQLを実際に実行せずに生成・確認します。
 
 ```sql
 lb update-sql -changelog-file controller.xml
 ```
 
-This outputs the SQL to the screen. Redirect to a file with SPOOL:
+これはSQLを画面に出力します。`SPOOL` でファイルにリダイレクトできます。
 
 ```sql
 SPOOL /tmp/pending_changes.sql
@@ -149,17 +149,17 @@ lb update-sql -changelog-file controller.xml
 SPOOL OFF
 ```
 
-### Apply Up to a Tag
+### タグまで適用
 
 ```sql
--- Tag the current state first
+-- 最初に現在の状態をタグ付け
 lb tag -tag v1.2.0
 
--- Later, update only up to a specific tag
+-- 後で、特定のタグまでのみアップデート
 lb update -changelog-file controller.xml -tag v1.2.0
 ```
 
-### Apply a Specific Number of Changesets
+### 指定した件数のチェンジセットを適用
 
 ```sql
 lb update-count -count 3 -changelog-file controller.xml
@@ -167,29 +167,29 @@ lb update-count -count 3 -changelog-file controller.xml
 
 ---
 
-## Rolling Back Changes
+## 変更のロールバック
 
-### Rollback to a Tag
+### タグまでロールバック
 
 ```sql
 lb rollback -tag v1.1.0 -changelog-file controller.xml
 ```
 
-Liquibase reverses all changesets applied after the specified tag. For automatic rollback to work, each changeset must include a `<rollback>` element (for DDL like `ALTER TABLE`, Liquibase can often auto-generate the rollback).
+Liquibaseは、指定されたタグ以降に適用されたすべてのチェンジセットを元に戻します。自動的なロールバックを機能させるには、各チェンジセットに `<rollback>` 要素を含める必要があります（`ALTER TABLE` などの基本的なDDLの場合、Liquibaseがロールバックを自動生成できることもよくあります）。
 
-### Rollback a Specific Number of Changesets
+### 指定した件数のチェンジセットをロールバック
 
 ```sql
 lb rollback-count -count 2 -changelog-file controller.xml
 ```
 
-### Rollback to a Date
+### 日時までロールバック
 
 ```sql
 lb rollback-to-date -date "2025-01-15 00:00:00" -changelog-file controller.xml
 ```
 
-### Preview Rollback SQL
+### ロールバックSQLのプレビュー
 
 ```sql
 lb rollback-sql -tag v1.1.0 -changelog-file controller.xml
@@ -197,9 +197,9 @@ lb rollback-sql -tag v1.1.0 -changelog-file controller.xml
 
 ---
 
-## Changeset Format Examples
+## チェンジセット（Changeset）のフォーマット例
 
-### XML Changeset (DDL)
+### XML チェンジセット (DDL)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -237,9 +237,9 @@ lb rollback-sql -tag v1.1.0 -changelog-file controller.xml
 </databaseChangeLog>
 ```
 
-### XML Changeset (PL/SQL)
+### XML チェンジセット (PL/SQL)
 
-For stored procedures, packages, and triggers, use `<sql>` with `splitStatements="false"` and the `endDelimiter`:
+ストアド・プロシージャ、パッケージ、トリガーの場合は、`<sql>` を使用し、`splitStatements="false"` と `endDelimiter` を指定します。
 
 ```xml
 <changeSet id="003" author="jdoe" runOnChange="true">
@@ -260,7 +260,7 @@ END update_product_price;
 </changeSet>
 ```
 
-### YAML Changeset
+### YAML チェンジセット
 
 ```yaml
 databaseChangeLog:
@@ -287,7 +287,7 @@ databaseChangeLog:
             tableName: PRODUCT
 ```
 
-### SQL Format Changeset
+### SQL フォーマットのチェンジセット
 
 ```sql
 --liquibase formatted sql
@@ -307,7 +307,7 @@ ALTER TABLE product ADD (category_id NUMBER(5));
 --rollback ALTER TABLE product DROP COLUMN category_id;
 ```
 
-### Master Changelog (includes)
+### マスター・変更ログ (include)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -317,7 +317,7 @@ ALTER TABLE product ADD (category_id NUMBER(5));
     xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
-    <!-- Include sub-changelogs in order -->
+    <!-- サブ変更ログを順番にインクルード -->
     <include file="table/product.xml"/>
     <include file="table/category.xml"/>
     <include file="view/product_catalog_v.xml"/>
@@ -328,42 +328,42 @@ ALTER TABLE product ADD (category_id NUMBER(5));
 
 ---
 
-## Status and Diff Commands
+## status および diff コマンド
 
 ```sql
--- Show which changesets are pending (not yet applied)
+-- 保留中の（まだ適用されていない）チェンジセットを表示
 lb status -changelog-file controller.xml
 
--- Show detailed status
+-- 詳細なステータスを表示
 lb status --verbose -changelog-file controller.xml
 
--- Check for differences between changelog and database
+-- 変更ログとデータベースの差異を確認
 lb diff -changelog-file controller.xml
 
--- Generate a changelog for the difference between two databases
+-- 2つのデータベース間の差異の変更ログを生成
 lb diff-changelog -reference-url jdbc:oracle:thin:hr/hr@prod:1521/PROD -changelog-file diff.xml
 ```
 
 ---
 
-## Tracking and History
+## トラッキングと履歴
 
 ```sql
--- View DATABASECHANGELOG content
+-- DATABASECHANGELOG の内容を表示
 SELECT id, author, filename, dateexecuted, exectype FROM databasechangelog ORDER BY dateexecuted;
 
--- Check if a specific changeset was applied
+-- 特定のチェンジセットが適用されたかを確認
 SELECT * FROM databasechangelog WHERE id = '001' AND author = 'jdoe';
 
--- Mark a changeset as already run (without executing it)
+-- チェンジセットを実行済みとしてマーク（実際には実行しない）
 lb changelog-sync -changelog-file controller.xml
 ```
 
 ---
 
-## Integrating with CI/CD
+## CI/CDとの統合
 
-### GitHub Actions Example
+### GitHub Actions の例
 
 ```yaml
 name: Deploy Database Changes
@@ -405,7 +405,7 @@ jobs:
           TNS_ADMIN: /tmp/wallet
 ```
 
-### GitLab CI Example
+### GitLab CI の例
 
 ```yaml
 deploy_db:
@@ -422,13 +422,13 @@ deploy_db:
     - main
 ```
 
-### Headless One-liner
+### ヘッドレス・ワンライナー
 
 ```shell
 echo "lb update -changelog-file controller.xml\nexit" | sql -S user/pass@service
 ```
 
-Or with a wrapper script (`deploy.sql`):
+またはラッパー・スクリプト（`deploy.sql`）を使用：
 
 ```sql
 lb update -changelog-file controller.xml
@@ -441,56 +441,56 @@ sql -S user/pass@service @deploy.sql
 
 ---
 
-## Differences from Standalone Liquibase CLI
+## スタンドアロンのLiquibase CLIとの違い
 
-| Feature | SQLcl `lb` | Standalone Liquibase CLI |
+| 機能 | SQLcl `lb` | スタンドアロン Liquibase CLI |
 |---|---|---|
-| Oracle JDBC driver | Bundled | Must download and configure |
-| `generate-schema` command | Built-in | Not available (Pro feature) |
-| `generate-object` command | Built-in | Not available |
-| Installation | Part of SQLcl | Separate install |
-| Oracle Wallet support | Native | Requires manual driver config |
-| PL/SQL support | Native Oracle parsing | Standard SQL only without extensions |
-| Changelog formats | XML, YAML, JSON, SQL | XML, YAML, JSON, SQL |
-| Core Liquibase operations | Full (update, rollback, diff, etc.) | Full |
-| Liquibase Pro features | Not included | Available with license |
+| Oracle JDBC ドライバ | 同梱済み | ダウンロードと構成が必要 |
+| `generate-schema` コマンド | 組み込み | 利用不可 (Pro機能) |
+| `generate-object` コマンド | 組み込み | 利用不可 |
+| インストール | SQLclの一部 | 個別インストール |
+| Oracle Wallet サポート | ネイティブ | 手動のドライバ構成が必要 |
+| PL/SQL サポート | ネイティブのOracleパース | 拡張機能なしでは標準SQLのみ |
+| 変更ログのフォーマット | XML, YAML, JSON, SQL | XML, YAML, JSON, SQL |
+| 主要なLiquibase操作 | 完全（update, rollback, diff, など） | 完全 |
+| Liquibase Pro 機能 | 含まれていない | ライセンスがあれば利用可能 |
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- Use `-split` when generating schema changelogs. Single-file changelogs become difficult to manage and cause large merge conflicts in version control.
-- Use `runOnChange="true"` on changesets for PL/SQL objects (packages, procedures, functions, triggers, views). This allows Liquibase to re-apply the changeset when the source changes without needing a new changeset ID.
-- Always include a `<rollback>` element in changesets. Liquibase can auto-generate rollback SQL for simple DDL like `createTable` and `addColumn`, but cannot for arbitrary SQL or PL/SQL.
-- Tag the database state before applying changes in production with `lb tag`. This gives you a clean rollback target if something goes wrong.
-- Store changelogs in the same repository as application code so database changes are versioned alongside the code that depends on them.
-- Never manually modify the `DATABASECHANGELOG` table. Use `lb changelog-sync` to mark changesets as applied without running them (e.g., for objects that were manually created before adopting Liquibase).
-- Run `lb status` before `lb update` in CI/CD pipelines to verify the expected number of changesets will be applied. Fail the pipeline if the count is zero when changes are expected.
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Mistake: Modifying a changeset that has already been applied**
-Liquibase stores a checksum of each changeset. If you modify it, the next run will fail with a checksum mismatch. For changes to PL/SQL objects, use `runOnChange="true"`. For data corrections, create a new changeset.
-
-**Mistake: Using the same changeset ID in different files**
-Changeset uniqueness is determined by the combination of `id + author + filename`. Two changesets can share the same `id` if they are in different files, but this causes confusion. Use a consistent ID naming scheme such as sequential numbers or timestamps.
-
-**Mistake: Not running `lb generate-schema` on a clean schema**
-If the target schema has manual changes not captured in the changelog, `lb update` will fail on objects that already exist. Run `lb changelog-sync` after the initial baseline generation to mark all existing objects as applied.
-
-**Mistake: Inline PL/SQL without `splitStatements="false"`**
-Liquibase splits SQL on semicolons by default. PL/SQL bodies contain semicolons within the code. Always use `splitStatements="false"` for any changeset containing PL/SQL.
-
-**Mistake: Not committing the `DATABASECHANGELOG` to version control**
-The `DATABASECHANGELOG` lives in the database, not in version control. Do not try to commit it. What you commit is the changelog files. The database table is Liquibase's runtime state.
+- スキーマの変更ログを生成する際は、`-split` を使用してください。単一ファイルの変更ログは管理が困難になり、バージョン管理で大規模なマージ競合を引き起こす原因になります。
+- PL/SQLオブジェクト（パッケージ、プロシージャ、ファンクション、トリガー、ビュー）のチェンジセットには `runOnChange="true"` を使用してください。これにより、ソースが変更されたときにチェンジセットIDを変更することなく、Liquibaseがチェンジセットを再適用できるようになります。
+- チェンジセットには常に `<rollback>` 要素を含めてください。Liquibaseは `createTable` や `addColumn` などの単純なDDLについてはロールバックSQLを自動生成できますが、任意のSQLやPL/SQLについては生成できません。
+- 本番環境に変更を適用する前に、`lb tag` でデータベースの状態をタグ付けしてください。これにより、何か問題が発生した場合にクリーンなロールバック・ターゲットが確保されます。
+- 変更ログをアプリケーション・コードと同じリポジトリに保存し、データベースの変更が依存するコードとともにバージョン管理されるようにしてください。
+- `DATABASECHANGELOG` 表を手動で変更しないでください。チェンジセットを実行せずに適用済みとしてマークしたい場合（Liquibase採用前に手動作成されたオブジェクトなど）は、`lb changelog-sync` を使用してください。
+- CI/CDパイプラインで `lb update` を実行する前に `lb status` を実行し、適用される予定のチェンジセットの数を確認してください。変更が期待されているのに件数がゼロの場合は、パイプラインを失敗させてください。
 
 ---
 
-## Sources
+## よくある間違いと回避策
 
-- [Oracle SQLcl 25.2 User's Guide](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/oracle-sqlcl-users-guide.pdf)
-- [Using Liquibase with SQLcl — Oracle Docs 19.2](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/19.2/sqcug/using-liquibase-sqlcl.html)
-- [SQLcl Liquibase Automating Deployments — ORACLE-BASE](https://oracle-base.com/articles/misc/sqlcl-automating-your-database-deployments-using-sqlcl-and-liquibase)
-- [Oracle SQLcl Releases index](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/index.html)
+**間違い：すでに適用済みのチェンジセットを変更してしまう**
+Liquibaseは各チェンジセットのチェックサムを保存しています。変更すると、次回の実行時にチェックサムの不一致で失敗します。PL/SQLオブジェクトの変更には `runOnChange="true"` を使用してください。データの修正には、新しいチェンジセットを作成してください。
+
+**間違い：異なるファイルで同じチェンジセットIDを使用してしまう**
+チェンジセットの一意性は `id + author + filename` の組み合わせで決まります。2つのチェンジセットはファイルが異なれば同じ `id` を共有できますが、混乱の原因になります。一貫したID命名規則（連番やタイムスタンプなど）を使用してください。
+
+**間違い：クリーンではないスキーマで `lb generate-schema` を実行してしまう**
+ターゲット・スキーマに変更ログにキャプチャされていない手動の変更がある場合、`lb update` はすでに存在するオブジェクトで失敗します。最初のベースライン生成後に `lb changelog-sync` を実行して、既存のすべてのオブジェクトを適用済みとしてマークしてください。
+
+**間違い：`splitStatements="false"` なしでPL/SQLをインライン記述してしまう**
+Liquibaseはデフォルトでセミコロン（;）をSQLの区切りとして扱います。PL/SQLの本体にはコード内にセミコロンが含まれています。PL/SQLを含むチェンジセットでは、常に `splitStatements="false"` を使用してください。
+
+**間違い：`DATABASECHANGELOG` をバージョン管理にコミットしようとする**
+`DATABASECHANGELOG` はデータベース内に存在し、バージョン管理するものではありません。コミットするのは変更ログ・ファイル（Changelogファイル）です。データベース内の表は、Liquibaseのランタイム状態です。
+
+---
+
+## 参考資料
+
+- [Oracle SQLcl 25.2 ユーザーズ・ガイド](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/oracle-sqlcl-users-guide.pdf)
+- [SQLcl 19.2 での Liquibase の使用 — Oracle Docs](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/19.2/sqcug/using-liquibase-sqlcl.html)
+- [SQLcl Liquibase によるデプロイメントの自動化 — ORACLE-BASE](https://oracle-base.com/articles/misc/sqlcl-automating-your-database-deployments-using-sqlcl-and-liquibase)
+- [Oracle SQLcl リリース・インデックス](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/index.html)

@@ -1,72 +1,72 @@
-# SQLcl in CI/CD Pipelines
+# CI/CDパイプラインにおけるSQLcl
 
-## Overview
+## 概要
 
-SQLcl is well-suited for CI/CD pipelines because it is a standalone Java executable with no Oracle Client installation required, supports non-interactive (headless) execution, can connect to Oracle Cloud Autonomous Database via wallet, and returns meaningful exit codes that CI/CD systems can act on. Combined with its built-in Liquibase support, SQLcl can serve as the single tool for schema migrations, data seeding, DDL extraction, and validation checks in automated deployment pipelines.
+SQLclは、Oracle Clientのインストールが不要なスタンドアロンのJava実行ファイルであり、非対話型（ヘッドレス）実行をサポートし、ウォレットを介してOracle Cloud Autonomous Databaseに接続でき、CI/CDシステムが処理可能な意味のある終了コードを返すため、CI/CDパイプラインに非常に適しています。組み込みのLiquibaseサポートと組み合わせることで、SQLclは、自動デプロイメント・パイプラインにおけるスキーマ移行、データ・シーディング、DDL抽出、および検証チェックのための単一のツールとして機能します。
 
-This guide covers:
-- Running SQLcl non-interactively
-- Handling exit codes
-- Connecting to cloud databases without interactive prompts
-- Integrating with GitHub Actions and GitLab CI
-- Environment variable substitution
-- Logging and error capture patterns
+このガイドでは以下を扱います：
+- 非対話モードでのSQLclの実行
+- 終了コードの処理
+- 対話型プロンプトなしでのクラウド・データベースへの接続
+- GitHub ActionsおよびGitLab CIとの統合
+- 環境変数の置換
+- ロギングとエラー・キャプチャのパターン
 
 ---
 
-## Running SQLcl Non-Interactively
+## 非対話モードでのSQLclの実行
 
-### Basic Headless Execution
+### 基本的なヘッドレス実行
 
-The `-S` (silent) flag suppresses the SQLcl banner and all interactive prompts:
+`-S`（silent）フラグを使用すると、SQLclのバナーとすべての対話型プロンプトが抑制されます。
 
 ```shell
-sql -S username/password@service @deploy.sql
+sql -S ユーザー名/パスワード@サービス名 @deploy.sql
 ```
 
-The `@deploy.sql` script is executed and SQLcl exits when the script completes or when an `EXIT` command is reached.
+`@deploy.sql` スクリプトが実行され、スクリプトが完了するか `EXIT` コマンドに達するとSQLclは終了します。
 
-### Passing Commands via stdin
+### stdinを介したコマンドの実行
 
 ```shell
-echo "SELECT COUNT(*) FROM employees; EXIT;" | sql -S username/password@service
+echo "SELECT COUNT(*) FROM employees; EXIT;" | sql -S ユーザー名/パスワード@サービス名
 ```
 
-Or using a heredoc (preferred for multi-line scripts):
+または、ヒアドキュメントを使用します（複数行のスクリプトに推奨）：
 
 ```shell
-sql -S username/password@service <<'EOF'
+sql -S ユーザー名/パスワード@サービス名 <<'EOF'
 SET FEEDBACK ON
 SELECT COUNT(*) FROM employees;
 EXIT
 EOF
 ```
 
-### Running a Script File
+### スクリプト・ファイルの実行
 
 ```shell
-sql -S username/password@service @/path/to/script.sql
+sql -S ユーザー名/パスワード@サービス名 @/path/to/script.sql
 ```
 
-### Command-line -c Flag (Inline Command)
+### コマンドライン -c フラグ（インライン・コマンド）
 
-> ⚠️ Unverified: The `-c` flag for passing an inline SQL command is not listed in the official SQLcl 25.2 startup flags documentation (`-H[ELP]`, `-V[ERSION]`, `-C[OMPATIBILITY]`, `-L[OGON]`, `-NOLOGINTIME`, `-R[ESTRICT]`, `-S[ILENT]`, `-mcp`). Use stdin or a script file instead.
+> ⚠️ 未検証：インラインSQLコマンドを渡すための `-c` フラグは、公式のSQLcl 25.2スタートアップ・フラグのドキュメント（`-H[ELP]`, `-V[ERSION]`, `-C[OMPATIBILITY]`, `-L[OGON]`, `-NOLOGINTIME`, `-R[ESTRICT]`, `-S[ILENT]`, `-mcp`）には記載されていません。代わりにstdinまたはスクリプト・ファイルを使用してください。
 
 ```shell
-# Preferred: use stdin or a script file
-echo "SELECT SYSDATE FROM DUAL; EXIT;" | sql -S username/password@service
-sql -S username/password@service @script.sql
+# 推奨：stdinまたはスクリプト・ファイルを使用
+echo "SELECT SYSDATE FROM DUAL; EXIT;" | sql -S ユーザー名/パスワード@サービス名
+sql -S ユーザー名/パスワード@サービス名 @script.sql
 ```
 
 ---
 
-## Exit Code Handling
+## 終了コードの処理
 
-SQLcl exits with code `0` on success and a non-zero code on failure. However, to ensure failures in SQL scripts cause non-zero exits, you must use `WHENEVER SQLERROR` at the top of your scripts.
+SQLclは、成功時には `0`、失敗時にはゼロ以外のコードで終了します。ただし、SQLスクリプト内の失敗によって確実にゼロ以外の終了コードを返すようにするには、スクリプトの先頭で `WHENEVER SQLERROR` を使用する必要があります。
 
-### Essential Exit Code Pattern
+### 基本的な終了コードのパターン
 
-Every CI/CD SQL script should begin with:
+CI/CDの各SQLスクリプトは、以下のように開始する必要があります。
 
 ```sql
 -- deploy.sql
@@ -76,24 +76,24 @@ WHENEVER OSERROR  EXIT 9 ROLLBACK
 SET FEEDBACK ON
 SET ECHO ON
 
--- Your SQL statements here
+-- ここにSQLステートメントを記述
 ALTER TABLE employees ADD (middle_name VARCHAR2(30));
 
 COMMIT;
 EXIT 0
 ```
 
-| Statement | Meaning |
+| ステートメント | 意味 |
 |---|---|
-| `WHENEVER SQLERROR EXIT SQL.SQLCODE ROLLBACK` | On any SQL error, exit with the Oracle error code and roll back uncommitted changes |
-| `WHENEVER OSERROR EXIT 9 ROLLBACK` | On any OS error, exit with code 9 and roll back |
-| `EXIT 0` | Explicit success exit at the end |
-| `EXIT 1` | Explicit failure exit (use for validation failures) |
+| `WHENEVER SQLERROR EXIT SQL.SQLCODE ROLLBACK` | SQLエラーが発生した場合、Oracleエラー・コードを返して終了し、未コミットの変更をロールバックする |
+| `WHENEVER OSERROR EXIT 9 ROLLBACK` | OSエラーが発生した場合、終了コード9を返して終了し、ロールバックする |
+| `EXIT 0` | 最後に明示的に成功として終了する |
+| `EXIT 1` | 明示的な失敗として終了する（検証に失敗した場合などに使用） |
 
-### Checking Exit Code in Shell
+### シェルでの終了コードの確認
 
 ```shell
-sql -S user/pass@service @deploy.sql
+sql -S ユーザー/パスワード@サービス名 @deploy.sql
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then
@@ -103,13 +103,13 @@ fi
 echo "Deployment successful"
 ```
 
-### Exit Codes for Validation Scripts
+### 検証スクリプトの終了コード
 
 ```sql
 -- validate_schema.sql
 WHENEVER SQLERROR EXIT SQL.SQLCODE
 
--- Check required tables exist
+-- 必要な表が存在することを確認
 DECLARE
     v_count NUMBER;
 BEGIN
@@ -123,7 +123,7 @@ BEGIN
 END;
 /
 
--- Check no invalid objects
+-- 無効なオブジェクトがないことを確認
 DECLARE
     v_count NUMBER;
 BEGIN
@@ -139,40 +139,40 @@ EXIT 0
 
 ---
 
-## Connecting with Oracle Cloud Wallet in Headless Mode
+## ヘッドリス・モードでのOracle Cloudウォレットによる接続
 
-### Wallet Setup
+### ウォレットのセットアップ
 
 ```shell
-# Unzip the wallet to a directory accessible by the CI runner
+# CIランナーからアクセス可能なディレクトリにウォレットを解凍
 mkdir -p /tmp/wallet
 echo "$WALLET_ZIP_BASE64" | base64 -d > /tmp/wallet.zip
 unzip -q /tmp/wallet.zip -d /tmp/wallet
 chmod 600 /tmp/wallet/*
 ```
 
-### Setting TNS_ADMIN
+### TNS_ADMINの設定
 
 ```shell
 export TNS_ADMIN=/tmp/wallet
 ```
 
-The `sqlnet.ora` in the wallet directory contains:
+ウォレット・ディレクトリ内の `sqlnet.ora` の内容：
 ```
 WALLET_LOCATION=(SOURCE=(METHOD=file)(METHOD_DATA=(DIRECTORY=/tmp/wallet)))
 SSL_SERVER_DN_MATCH=yes
 ```
 
-### Connecting
+### 接続
 
 ```shell
-# Use the TNS alias defined in the wallet's tnsnames.ora
+# ウォレットのtnsnames.oraで定義されているTNSエイリアスを使用
 sql -S "${DB_USER}/${DB_PASSWORD}@${DB_SERVICE_NAME}" @deploy.sql
 ```
 
-Where `DB_SERVICE_NAME` is one of the aliases defined in the wallet's `tnsnames.ora` (e.g., `myatp_high`, `myatp_medium`, `myatp_low`).
+ここで `DB_SERVICE_NAME` は、ウォレットの `tnsnames.ora` で定義されているエイリアスのいずれか（例：`myatp_high`, `myatp_medium`, `myatp_low`）です。
 
-### Full Cloud Connection Example
+### クラウド接続の完全な例
 
 ```shell
 export TNS_ADMIN=/tmp/wallet
@@ -185,11 +185,11 @@ EOF
 
 ---
 
-## Environment Variable Substitution
+## 環境変数の置換
 
-### Using Shell Variables in SQL Scripts
+### SQLスクリプトでのシェル変数の使用
 
-SQLcl supports SQL*Plus-style substitution variables (`&variable_name`). You can pass values through the environment by defining them before the script runs:
+SQLclはSQL*Plusスタイルの置換変数（`&variable_name`）をサポートしています。スクリプトを実行する前に変数を定義することで、環境を通じて値を渡すことができます。
 
 ```sql
 -- deploy_env.sql
@@ -200,15 +200,15 @@ PROMPT Deploying version &APP_VER to environment &ENV
 SELECT 'Deploying to: ' || '&ENV' AS info FROM DUAL;
 ```
 
-Pass arguments from the command line:
+コマンドラインから引数を渡します：
 
 ```shell
-sql -S user/pass@service @deploy_env.sql PROD v2.5.1
+sql -S ユーザー/パスワード@サービス名 @deploy_env.sql PROD v2.5.1
 ```
 
-### Using Shell Variable Expansion
+### シェル変数の展開の使用
 
-For environment variables from the shell, use the shell's own variable substitution in the heredoc:
+シェルの環境変数の場合は、ヒアドキュメント内でシェルの変数置換を使用します。
 
 ```shell
 export APP_VERSION="2.5.1"
@@ -225,12 +225,12 @@ EXIT 0
 EOF
 ```
 
-Note: Use `<<EOF` (not `<<'EOF'`) to allow shell variable expansion inside the heredoc.
+注：ヒアドキュメント内でシェル変数を展開できるようにするには、`<<EOF`（`<<'EOF'` ではなく）を使用してください。
 
-### DEFINE Variables for Script-internal Configuration
+### スクリプト内部構成用のDEFINE変数
 
 ```sql
--- parameters.sql (sourced at start of pipeline scripts)
+-- parameters.sql (パイプライン・スクリプトの開始時に読み込み)
 DEFINE SCHEMA_NAME  = HR
 DEFINE APP_VERSION  = 2.5.1
 DEFINE ROLLBACK_TAG = v2.4.0
@@ -250,9 +250,9 @@ EXIT 0
 
 ---
 
-## GitHub Actions Integration
+## GitHub Actionsとの統合
 
-### Basic Workflow
+### 基本的なワークフロー
 
 ```yaml
 # .github/workflows/deploy-db.yml
@@ -365,53 +365,9 @@ jobs:
           path: /tmp/sqlcl-deploy.log
 ```
 
-### Reusable Action for SQLcl Operations
-
-```yaml
-# .github/workflows/sqlcl-action.yml (reusable workflow)
-on:
-  workflow_call:
-    inputs:
-      script:
-        required: true
-        type: string
-      environment:
-        required: true
-        type: string
-    secrets:
-      DB_USER:
-        required: true
-      DB_PASS:
-        required: true
-      DB_SERVICE:
-        required: true
-      WALLET_ZIP_B64:
-        required: true
-
-jobs:
-  run-sqlcl:
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install SQLcl
-        run: |
-          curl -sL https://download.oracle.com/otn_software/java/sqldeveloper/sqlcl-latest.zip -o sqlcl.zip
-          unzip -q sqlcl.zip -d /opt
-          echo "/opt/sqlcl/bin" >> $GITHUB_PATH
-      - name: Configure wallet
-        run: |
-          mkdir -p /tmp/wallet
-          echo "${{ secrets.WALLET_ZIP_B64 }}" | base64 -d | unzip -q -d /tmp/wallet -
-          echo "TNS_ADMIN=/tmp/wallet" >> $GITHUB_ENV
-      - name: Execute SQLcl script
-        run: |
-          sql -S "${{ secrets.DB_USER }}/${{ secrets.DB_PASS }}@${{ secrets.DB_SERVICE }}" @${{ inputs.script }}
-```
-
 ---
 
-## GitLab CI Integration
+## GitLab CIとの統合
 
 ```yaml
 # .gitlab-ci.yml
@@ -479,15 +435,15 @@ verify_deployment:
 
 ---
 
-## Logging and Error Capture
+## ロギングとエラーのキャプチャ
 
-### Capturing All SQLcl Output
+### すべてのSQLcl出力のキャプチャ
 
 ```shell
-# Redirect both stdout and stderr to a log file
-sql -S user/pass@service @deploy.sql 2>&1 | tee /tmp/deploy.log
+# stdoutとstderrの両方をログ・ファイルにリダイレクト
+sql -S ユーザー/パスワード@サービス名 @deploy.sql 2>&1 | tee /tmp/deploy.log
 
-# Check exit code (tee preserves the pipeline, PIPESTATUS captures it)
+# 終了コードの確認（teeがパイプラインを維持し、PIPESTATUSがそれをキャプチャします）
 EXIT_CODE=${PIPESTATUS[0]}
 if [ $EXIT_CODE -ne 0 ]; then
     echo "Deployment failed. Log:"
@@ -496,9 +452,9 @@ if [ $EXIT_CODE -ne 0 ]; then
 fi
 ```
 
-### SPOOL for Detailed SQL-side Logging
+### 詳細なSQL側ロギングのためのSPOOL
 
-Add SPOOL to your SQL script to capture database-side output including row counts and timing:
+行数やタイミングを含むデータベース側の出力をキャプチャするために、SQLスクリプトに `SPOOL` を追加します。
 
 ```sql
 -- deploy.sql
@@ -509,14 +465,14 @@ SET FEEDBACK ON
 SET TIMING ON
 SET SERVEROUTPUT ON SIZE UNLIMITED
 
--- Your deployment statements
+-- デプロイメント・ステートメント
 lb update -changelog-file controller.xml
 
 SPOOL OFF
 EXIT 0
 ```
 
-### Structured Log Output for CI Parsing
+### CI解析用の構造化されたログ出力
 
 ```sql
 -- deploy_structured.sql
@@ -542,25 +498,25 @@ PROMPT [INFO] Deployment completed successfully
 EXIT 0
 ```
 
-### Rollback on Failure Pattern
+### 失敗時のロールバック・パターン
 
 ```sql
 -- deploy_with_rollback.sql
 WHENEVER SQLERROR EXIT SQL.SQLCODE ROLLBACK
 
--- Tag pre-deployment state for rollback target
+-- ロールバック・ターゲット用にデプロイ前の状態をタグ付け
 lb tag -tag pre-deploy-&1
 
--- Apply changes
+-- 変更の適用
 lb update -changelog-file controller.xml
 
--- Verify deployment
+-- デプロイの検証
 DECLARE
     v_invalid NUMBER;
 BEGIN
     SELECT COUNT(*) INTO v_invalid FROM user_objects WHERE status = 'INVALID';
     IF v_invalid > 0 THEN
-        -- Trigger SQLERROR path → ROLLBACK and EXIT with error
+        -- SQLERRORパスをトリガー → ROLLBACKし、エラーでEXIT
         RAISE_APPLICATION_ERROR(-20001,
             'Deployment produced ' || v_invalid || ' invalid objects. Rolling back.');
     END IF;
@@ -570,13 +526,13 @@ END;
 EXIT 0
 ```
 
-If validation fails, the `WHENEVER SQLERROR EXIT ... ROLLBACK` triggers DML rollback. To roll back Liquibase schema changes, add a shell-level rollback step:
+検証が失敗した場合、`WHENEVER SQLERROR EXIT ... ROLLBACK` がDMLロールバックをトリガーします。Liquibaseのスキーマ変更をロールバックするには、シェル・レベルのロールバック・ステップを追加します。
 
 ```shell
-sql -S user/pass@service @deploy_with_rollback.sql "$CI_COMMIT_SHORT_SHA"
+sql -S ユーザー/パスワード@サービス名 @deploy_with_rollback.sql "$CI_COMMIT_SHORT_SHA"
 if [ $? -ne 0 ]; then
     echo "Deployment failed, rolling back Liquibase changes..."
-    sql -S user/pass@service <<EOF
+    sql -S ユーザー/パスワード@サービス名 <<EOF
     lb rollback -tag pre-deploy-${CI_COMMIT_SHORT_SHA} -changelog-file controller.xml
     EXIT
 EOF
@@ -586,31 +542,31 @@ fi
 
 ---
 
-## Security Best Practices in CI/CD
+## CI/CDにおけるセキュリティのベスト・プラクティス
 
-### Never Hardcode Credentials
+### 資格情報をハードコードしない
 
-Always use CI/CD secret variables for credentials:
+資格情報には必ずCI/CDのシークレット変数を使用してください。
 
 ```shell
-# Good: credentials from environment variables
+# 推奨：環境変数から資格情報を取得
 sql -S "${DB_USER}/${DB_PASS}@${DB_SERVICE}" @deploy.sql
 
-# Bad: hardcoded credentials
+# 非推奨：資格情報のハードコード
 sql -S admin/MyPassword123@myatp_high @deploy.sql
 ```
 
-### Wallet as Base64 Secret
+### ウォレットをBase64シークレットとして保存
 
-Store the entire wallet ZIP as a base64-encoded CI/CD secret:
+ウォレットのZIP全体をBase64エンコードされたCI/CDシークレットとして保存します。
 
 ```shell
-# Convert wallet to base64 for storage as a secret
+# シークレットとして保存するためにウォレットをBase64に変換
 base64 -i Wallet_MyATP.zip > wallet_b64.txt
-# Copy the contents of wallet_b64.txt into your CI/CD secret variable
+# wallet_b64.txt の内容をCI/CDシークレット変数にコピー
 ```
 
-In the pipeline, decode and use it:
+パイプラインでデコードして使用します。
 
 ```shell
 mkdir -p /tmp/wallet
@@ -620,69 +576,58 @@ chmod 600 /tmp/wallet/*
 export TNS_ADMIN=/tmp/wallet
 ```
 
-### Least-Privilege Deployment Account
+### 最小権限のデプロイメント・アカウント
 
-Use a dedicated deployment schema or user with only the privileges required for deployment:
+デプロイに必要な権限のみを持つ、専用のデプロイ・スキーマまたはユーザーを使用してください。
 
 ```sql
--- Create a deployment user with only necessary privileges
+-- 必要な権限のみを持つデプロイ・ユーザーを作成
 CREATE USER deploy_user IDENTIFIED BY "SecurePass123!";
 GRANT CREATE SESSION TO deploy_user;
 GRANT CREATE TABLE, CREATE VIEW, CREATE PROCEDURE, CREATE SEQUENCE TO deploy_user;
 GRANT UNLIMITED TABLESPACE TO deploy_user;
--- Do NOT grant DBA unless strictly necessary
-```
-
-### Audit Deployment Activity
-
-```sql
--- Log each pipeline run to an audit table
-INSERT INTO deployment_audit (
-    pipeline_id, commit_sha, deployed_by, deploy_time, status
-) VALUES (
-    '${CI_PIPELINE_ID}', '${CI_COMMIT_SHA}', '${GITLAB_USER_LOGIN}', SYSDATE, 'STARTED'
-);
-COMMIT;
+-- 厳密に必要でない限り、DBA権限を付与しないでください
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- Always use `WHENEVER SQLERROR EXIT SQL.SQLCODE ROLLBACK` at the top of every CI/CD SQL script. Without it, SQLcl will continue executing after a SQL error and exit with code 0 even if statements failed.
-- Use the `-S` (silent) flag for all CI/CD invocations. Without it, the SQLcl banner and connection messages will appear in your pipeline log and may confuse log parsers.
-- Keep the wallet directory out of your repository. Store it as a base64-encoded CI/CD secret and decode it at pipeline runtime. Never commit wallet files (`.sso`, `.jks`, `.p12`, `ewallet.p12`) to version control.
-- Use `lb tag` before every deployment to create a rollback target. Always include the commit SHA or pipeline ID in the tag name so you can identify exactly what state the database was in.
-- Separate validation from deployment in your pipeline stages. The validate stage (checking `lb status`, running lint checks) should run on pull requests; the deploy stage should run only on merges to main/master.
-- Capture SPOOL output and upload it as a CI artifact on failure. Raw SQLcl output alone may not be sufficient to diagnose what went wrong.
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Mistake: SQL errors are silently ignored and the pipeline succeeds**
-Without `WHENEVER SQLERROR EXIT SQL.SQLCODE`, SQLcl ignores SQL errors by default and exits with code 0. Always add the `WHENEVER` directive as the very first statement in CI scripts.
-
-**Mistake: TNS_ADMIN not set before connecting**
-If `TNS_ADMIN` is not set, SQLcl cannot find the wallet and the connection fails. Set `TNS_ADMIN` as an environment variable in the pipeline step or export it in the CI step's `before_script`. Verify with `echo $TNS_ADMIN` before running SQLcl.
-
-**Mistake: Wallet files have incorrect permissions**
-On Linux, Oracle requires wallet files to be readable only by the owning user (chmod 600). CI runners may unzip files with permissions that are too open, causing SSL handshake failures. Always run `chmod 600 /tmp/wallet/*` after unzipping.
-
-**Mistake: Heredoc with variable expansion in quotes kills substitution**
-Using `<<'EOF'` (with quotes around EOF) prevents shell variable expansion inside the heredoc. Use `<<EOF` (without quotes) when you need shell variables expanded, and `<<'EOF'` when you want to pass `&variable` substitutions through to SQLcl literally.
-
-**Mistake: Pipeline uses DBA account for all operations**
-Using a DBA or ADMIN account for routine deployments is a security risk and makes it hard to audit what changes came from the pipeline versus manual intervention. Use a dedicated deployment account with only the minimum required privileges.
-
-**Mistake: Liquibase changes not rolled back on pipeline failure**
-`WHENEVER SQLERROR EXIT ... ROLLBACK` only rolls back uncommitted DML transactions. Liquibase DDL changes (CREATE TABLE, ALTER TABLE) are auto-committed by Oracle and cannot be rolled back transactionally. Always use `lb rollback -tag` for schema rollbacks after a failed deployment.
+- CI/CD用のすべてのSQLスクリプトの先頭で、必ず `WHENEVER SQLERROR EXIT SQL.SQLCODE ROLLBACK` を使用してください。これがないと、SQLエラーが発生してもSQLclは実行を継続し、ステートメントが失敗しても終了コード0で終了してしまいます。
+- すべてのCI/CD実行において、`-S`（silent）フラグを使用してください。これがないと、SQLclのバナーと接続メッセージがパイプラインのログに表示され、ログ・パーサーを混乱させる可能性があります。
+- ウォレット・ディレクトリをリポジトリに入れないでください。Base64エンコードされたCI/CDシークレットとして保存し、パイプラインの実行時にデコードしてください。ウォレット・ファイル（`.sso`, `.jks`, `.p12`, `ewallet.p12`）をバージョン管理にコミットしないでください。
+- すべてのデプロイの前に `lb tag` を使用して、ロールバック・ターゲットを作成してください。タグ名には必ずコミットSHAまたはパイプラインIDを含め、データベースがどのような状態であったかを正確に特定できるようにしてください。
+- データベースの変更が、それに依存するコードとともにバージョン管理されるように、変更ログをアプリケーション・コードと同じリポジトリに保存してください。
+- パイプライン・ステージで検証とデプロイを分離してください。検証ステージ（`lb status` のチェック、静的解析の実行）はプルリクエストで実行し、デプロイ・ステージはmain/masterブランチへのマージ時にのみ実行する必要があります。
+- 失敗時に `SPOOL` の出力をキャプチャし、CIアーティファクトとしてアップロードしてください。SQLclの生の出力だけでは、何がうまくいかなかったのかを診断するのに不十分な場合があります。
 
 ---
 
-## Sources
+## よくある間違いと回避策
 
-- [Starting and Leaving SQLcl — startup flags reference](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/startup-sqlcl-settings.html)
-- [Oracle SQLcl 25.2 User's Guide](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/oracle-sqlcl-users-guide.pdf)
-- [SQLcl Release Notes 25.2](https://www.oracle.com/tools/sqlcl/sqlcl-relnotes-25.2.html)
-- [Oracle SQLcl Releases index](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/index.html)
+**間違い：SQLエラーが黙って無視され、パイプラインが成功してしまう**
+`WHENEVER SQLERROR EXIT SQL.SQLCODE` がないと、SQLclはデフォルトでSQLエラーを無視し、終了コード0で終了します。CIスクリプトの最初のステートメントとして、必ず `WHENEVER` ディレクティブを追加してください。
+
+**間違い：接続前に TNS_ADMIN が設定されていない**
+`TNS_ADMIN` が設定されていないと、SQLclはウォレットを見つけることができず、接続に失敗します。パイプラインのステップで環境変数として `TNS_ADMIN` を設定するか、CIステップの `before_script` でエクスポートしてください。SQLclを実行する前に `echo $TNS_ADMIN` で確認してください。
+
+**間違い：ウォレット・ファイルの権限が正しくない**
+Linux上のOracleでは、ウォレット・ファイルは所有ユーザーのみが読み取り可能（chmod 600）である必要があります。CIランナーがファイルを解凍した際に権限が緩すぎる場合があり、SSLハンドシェイクの失敗を引き起こします。解凍後は必ず `chmod 600 /tmp/wallet/*` を実行してください。
+
+**間違い：変数展開を含むヒアドキュメントを引用符で囲んで展開を無効にしてしまう**
+`<<'EOF'`（EOFを引用符で囲む）を使用すると、ヒアドキュメント内でのシェル変数の展開が防止されます。シェル変数を展開する必要がある場合は `<<EOF`（引用符なし）を使用し、`&variable` 置換をそのままSQLclに渡したい場合は `<<'EOF'` を使用してください。
+
+**間違い：パイプラインですべての操作にDBAアカウントを使用している**
+日常的なデプロイにDBAまたはADMINアカウントを使用することはセキュリティ上のリスクであり、手動による介入とパイプラインによる変更の監査を困難にします。最小限の権限を持つ専用のデプロイメント・アカウントを使用してください。
+
+**間違い：パイプライン失敗時に Liquibase の変更がロールバックされない**
+`WHENEVER SQLERROR EXIT ... ROLLBACK` は、未コミットのDMLトランザクションのみをロールバックします。LiquibaseのDDL変更（CREATE TABLE, ALTER TABLE）はOracleによって自動コミットされるため、トランザクションとしてロールバックすることはできません。デプロイ失敗後のスキーマのロールバックには、必ず `lb rollback -tag` を使用してください。
+
+---
+
+## 参考資料
+
+- [SQLclの起動と終了 — 起動フラグのリファレンス](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/startup-sqlcl-settings.html)
+- [Oracle SQLcl 25.2 ユーザーズ・ガイド](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/oracle-sqlcl-users-guide.pdf)
+- [SQLcl リリース・ノート 25.2](https://www.oracle.com/tools/sqlcl/sqlcl-relnotes-25.2.html)
+- [Oracle SQLcl リリース・インデックス](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/index.html)

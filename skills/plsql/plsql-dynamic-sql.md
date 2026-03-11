@@ -1,28 +1,28 @@
-# PL/SQL Dynamic SQL
+# PL/SQL 動的 SQL (Dynamic SQL)
 
-## Overview
+## 概要
 
-Dynamic SQL constructs and executes SQL statements at runtime rather than compile time. It is powerful but carries risks: SQL injection, hard parsing overhead, and reduced compiler error detection. This guide covers when dynamic SQL is justified, both execution approaches (`EXECUTE IMMEDIATE` and `DBMS_SQL`), injection prevention, and performance considerations.
+動的 SQL は、コンパイル時ではなく実行時に SQL 文を構築して実行します。非常に強力ですが、SQL インジェクションのリスク、ハード・パースのオーバーヘッド、コンパイラによるエラー検出の減少といったリスクも伴います。このガイドでは、動的 SQL が正当化されるケース、2 つの実行アプローチ（`EXECUTE IMMEDIATE` と `DBMS_SQL`）、インジェクションの防止、およびパフォーマンスに関する考慮事項について説明します。
 
 ---
 
-## When Dynamic SQL Is Justified vs Avoidable
+## 動的 SQL が正当化されるケースと回避すべきケース
 
-### Avoidable — Use Static SQL Instead
+### 回避すべきケース — 代わりに静的 SQL を使用する
 
 ```sql
--- AVOID: dynamic WHERE clause when conditions are always known
--- (poor man's dynamic SQL)
+-- 回避すべき例: 条件が常に分かっている場合に動的な WHERE 句を使用する
+-- (「貧乏人の動的 SQL」)
 PROCEDURE get_employees(p_dept_id IN NUMBER) IS
   l_sql VARCHAR2(500);
   l_cur SYS_REFCURSOR;
 BEGIN
   l_sql := 'SELECT * FROM employees WHERE department_id = ' || p_dept_id;
-  OPEN l_cur FOR l_sql;  -- no bind variable!
+  OPEN l_cur FOR l_sql;  -- バインド変数を使用していない！
   -- ...
 END;
 
--- BETTER: static SQL with bind variable
+-- より良い例: バインド変数を使用した静的 SQL
 PROCEDURE get_employees(p_dept_id IN NUMBER) IS
 BEGIN
   FOR emp IN (SELECT * FROM employees WHERE department_id = p_dept_id) LOOP
@@ -31,71 +31,71 @@ BEGIN
 END;
 ```
 
-### Justified Use Cases
+### 正当なユースケース
 
-| Scenario | Why Dynamic SQL Is Required |
+| シナリオ | 動的 SQL が必要な理由 |
 |---|---|
-| DDL execution (CREATE, ALTER, DROP) | DDL cannot be written as static PL/SQL |
-| Table/column name as parameter | Structural SQL elements cannot be bind variables |
-| Schema name determined at runtime | Object resolution needs runtime schema name |
-| Conditional column inclusion in SELECT | Column list changes based on input |
-| Building SQL from metadata | Query structure unknown at compile time |
-| TRUNCATE TABLE | DDL, cannot be static |
-| Invoker needs to run arbitrary SQL | Generic reporting or query tools |
+| DDL の実行 (CREATE, ALTER, DROP) | DDL は静的 PL/SQL として記述できない |
+| 表名や列名をパラメータにする | 構造的な SQL 要素はバインド変数にできない |
+| 実行時にスキーマ名を決定する | オブジェクトの解決に実行時のスキーマ名が必要 |
+| SELECT で条件によって列を含める | 列リストを入力に基づいて変更する |
+| メタデータから SQL を構築する | コンパイル時にクエリ構造が不明 |
+| TRUNCATE TABLE | DDL であり、静的には記述できない |
+| 任意の SQL を実行する必要がある | 汎用的なレポート作成ツールやクエリ・ツール |
 
 ---
 
 ## EXECUTE IMMEDIATE
 
-`EXECUTE IMMEDIATE` is the primary dynamic SQL facility. It handles DDL, DML, and single-row queries.
+`EXECUTE IMMEDIATE` は、動的 SQL の主要な機能です。DDL、DML、および単一行のクエリを処理します。
 
-### DDL Execution
+### DDL の実行
 
 ```sql
--- DDL cannot be embedded in static PL/SQL
--- Must use EXECUTE IMMEDIATE
+-- DDL は静的 PL/SQL に埋め込むことができないため、
+-- EXECUTE IMMEDIATE を使用する必要がある
 PROCEDURE create_archive_table(p_year IN NUMBER) IS
   l_table_name VARCHAR2(50);
 BEGIN
-  -- Validate before use (injection prevention)
+  -- 使用前に検証 (インジェクション防止)
   IF p_year NOT BETWEEN 2000 AND 2099 THEN
-    RAISE_APPLICATION_ERROR(-20001, 'Invalid year: ' || p_year);
+    RAISE_APPLICATION_ERROR(-20001, '無効な年度です: ' || p_year);
   END IF;
 
-  l_table_name := 'ORDERS_ARCHIVE_' || p_year;  -- year is numeric, safe
+  l_table_name := 'ORDERS_ARCHIVE_' || p_year;  -- 年度（数値）なので安全
 
   EXECUTE IMMEDIATE
     'CREATE TABLE ' || l_table_name || ' AS SELECT * FROM orders WHERE 1=0';
 
-  DBMS_OUTPUT.PUT_LINE('Created: ' || l_table_name);
+  DBMS_OUTPUT.PUT_LINE('作成されました: ' || l_table_name);
 END create_archive_table;
 /
 
--- TRUNCATE: DDL only, no bind variables possible (none needed for TRUNCATE)
+-- TRUNCATE: DDL のみ。バインド変数は使用不可 (TRUNCATE には不要)
 PROCEDURE truncate_staging(p_table_name IN VARCHAR2) IS
   l_safe_name VARCHAR2(128);
 BEGIN
-  l_safe_name := DBMS_ASSERT.SIMPLE_SQL_NAME(p_table_name);  -- validate!
+  l_safe_name := DBMS_ASSERT.SIMPLE_SQL_NAME(p_table_name);  -- 検証！
   EXECUTE IMMEDIATE 'TRUNCATE TABLE ' || l_safe_name;
 END truncate_staging;
 /
 ```
 
-### DML with Bind Variables
+### バインド変数を使用した DML
 
 ```sql
--- Single bind variable
+-- 単一のバインド変数
 PROCEDURE deactivate_old_sessions(p_days IN NUMBER) IS
 BEGIN
   EXECUTE IMMEDIATE
     'DELETE FROM user_sessions WHERE last_activity < SYSDATE - :1'
-    USING p_days;  -- bind variable, no injection risk
+    USING p_days;  -- バインド変数。インジェクションのリスクなし
 
-  DBMS_OUTPUT.PUT_LINE('Deleted: ' || SQL%ROWCOUNT);
+  DBMS_OUTPUT.PUT_LINE('削除数: ' || SQL%ROWCOUNT);
 END deactivate_old_sessions;
 /
 
--- Named bind variables (more readable for multiple binds)
+-- 名前付きバインド変数 (複数のバインドがある場合に読みやすい)
 PROCEDURE update_employee_salary(
   p_employee_id IN NUMBER,
   p_new_salary  IN NUMBER,
@@ -109,19 +109,19 @@ BEGIN
             update_reason = :reason
      WHERE  employee_id = :emp_id'
     USING p_new_salary, p_reason, p_employee_id;
-    -- Named binds in USING must match order of first occurrence
+    -- USING 内の名前付きバインドは、最初に出現する順序と一致させる必要がある
 
   IF SQL%ROWCOUNT = 0 THEN
-    RAISE_APPLICATION_ERROR(-20001, 'Employee not found: ' || p_employee_id);
+    RAISE_APPLICATION_ERROR(-20001, '従業員が見つかりません: ' || p_employee_id);
   END IF;
 END update_employee_salary;
 /
 ```
 
-### Single-Row Queries with EXECUTE IMMEDIATE
+### EXECUTE IMMEDIATE による単一行クエリ
 
 ```sql
--- SELECT INTO via EXECUTE IMMEDIATE
+-- EXECUTE IMMEDIATE による SELECT INTO
 DECLARE
   l_salary employees.salary%TYPE;
   l_name   employees.last_name%TYPE;
@@ -134,14 +134,14 @@ BEGIN
   DBMS_OUTPUT.PUT_LINE(l_name || ': ' || l_salary);
 EXCEPTION
   WHEN NO_DATA_FOUND THEN
-    DBMS_OUTPUT.PUT_LINE('Not found');
+    DBMS_OUTPUT.PUT_LINE('見つかりません');
   WHEN TOO_MANY_ROWS THEN
-    DBMS_OUTPUT.PUT_LINE('Multiple rows returned');
+    DBMS_OUTPUT.PUT_LINE('複数の行が返されました');
 END;
 /
 ```
 
-### OUT Bind Variables (for DML RETURNING)
+### OUT バインド変数 (DML RETURNING 用)
 
 ```sql
 DECLARE
@@ -154,36 +154,36 @@ BEGIN
     USING 12345, 'PENDING'
     RETURNING INTO l_new_id, l_created;
 
-  DBMS_OUTPUT.PUT_LINE('Created order: ' || l_new_id || ' at ' || l_created);
+  DBMS_OUTPUT.PUT_LINE('注文作成: ' || l_new_id || ' (' || l_created || ')');
 END;
 /
 ```
 
 ---
 
-## Multi-Row Queries with SYS_REFCURSOR
+## SYS_REFCURSOR による複数行クエリ
 
-For dynamic queries returning multiple rows, open a `SYS_REFCURSOR` with `EXECUTE IMMEDIATE` via `OPEN ... FOR`.
+複数の行を返す動的クエリの場合は、`OPEN ... FOR` 構文の `EXECUTE IMMEDIATE` で `SYS_REFCURSOR` を開きます。
 
 ```sql
--- Dynamic multi-row query
+-- 動的な複数行クエリ
 PROCEDURE report_by_status(
   p_status IN VARCHAR2,
   p_cursor OUT SYS_REFCURSOR
 ) IS
 BEGIN
-  -- p_status bound safely as a bind variable
+  -- p_status はバインド変数として安全に処理される
   OPEN p_cursor FOR
     'SELECT order_id, customer_id, total_amount, created_at
      FROM   orders
      WHERE  status = :1
      ORDER BY created_at DESC'
     USING p_status;
-  -- Caller fetches from p_cursor and must close it
+  -- 呼び出し側が p_cursor からフェッチし、クローズする必要がある
 END report_by_status;
 /
 
--- Dynamic query with optional filter (build SQL carefully)
+-- オプションのフィルタがある動的クエリ (SQL 構築を慎重に行う)
 PROCEDURE get_orders_filtered(
   p_status    IN VARCHAR2  DEFAULT NULL,
   p_from_date IN DATE      DEFAULT NULL,
@@ -195,10 +195,10 @@ PROCEDURE get_orders_filtered(
   l_from   DATE;
   l_to     DATE;
 BEGIN
-  -- Build SQL with conditions; track which binds are active
+  -- 条件に応じて SQL を構築し、どのバインドがアクティブかを追跡する
   IF p_status IS NOT NULL THEN
     l_sql    := l_sql || ' AND status = :status';
-    l_status := p_status;  -- will be bound below
+    l_status := p_status;  -- 下でバインドされる
   END IF;
 
   IF p_from_date IS NOT NULL THEN
@@ -213,8 +213,8 @@ BEGIN
 
   l_sql := l_sql || ' ORDER BY created_at DESC';
 
-  -- Open cursor: USING clause must match the bind variables added above
-  -- This is fragile — consider DBMS_SQL for variable bind counts
+  -- カーソルのオープン: USING 句は上記で追加されたバインド変数と一致させる必要がある
+  -- これは壊れやすいため、バインド数が変わる場合は DBMS_SQL の検討を推奨
   IF p_status IS NOT NULL AND p_from_date IS NOT NULL AND p_to_date IS NOT NULL THEN
     OPEN p_cursor FOR l_sql USING l_status, l_from, l_to;
   ELSIF p_status IS NOT NULL AND p_from_date IS NOT NULL THEN
@@ -228,48 +228,48 @@ END get_orders_filtered;
 /
 ```
 
-The combinatorial USING clause problem above is exactly when `DBMS_SQL` is the better choice.
+上記のような `USING` 句が複雑になる組み合わせの問題を解決するには、`DBMS_SQL` が適しています。
 
 ---
 
-## DBMS_SQL for Variable Bind Counts and Unknown Column Structures
+## 可変バインド数と不明な列構造のための DBMS_SQL
 
-`DBMS_SQL` is the lower-level dynamic SQL API. It is more verbose but handles scenarios that `EXECUTE IMMEDIATE` cannot:
-1. Number of bind variables not known at compile time
-2. Number/types of SELECT columns not known at compile time
-3. Parse-once/execute-many for performance
+`DBMS_SQL` は、より低レベルな動的 SQL API です。記述は冗長になりますが、`EXECUTE IMMEDIATE` では処理できないシナリオに対応できます。
+1. コンパイル時にバインド変数の数が不明な場合
+2. コンパイル時に SELECT 列の数や型が不明な場合
+3. パフォーマンス向上のための「一度パースして何度も実行」パターン
 
-### Variable Bind Counts (Solves the Combinatorial Problem)
+### 可変バインド数 (組み合わせ問題の解決)
 
 ```sql
 CREATE OR REPLACE PROCEDURE get_orders_flexible(
-  p_filters IN SYS.ODCIVARCHAR2LIST,  -- list of 'column=value' strings
+  p_filters IN SYS.ODCIVARCHAR2LIST,  -- 'column=value' 形式の文字列リスト
   p_cursor  OUT SYS_REFCURSOR
 ) IS
   l_sql      VARCHAR2(4000) := 'SELECT * FROM orders WHERE 1=1';
   l_cur      INTEGER;
   l_rc       INTEGER;
 BEGIN
-  -- Dynamically build SQL with named binds
+  -- 名前付きバインドを使用して動的に SQL を構築
   FOR i IN 1..p_filters.COUNT LOOP
     l_sql := l_sql || ' AND ' || p_filters(i);
-    -- IMPORTANT: p_filters must come from a whitelist, not user input directly
+    -- 重要: p_filters の内容は直接ユーザー入力ではなくホワイトリスト形式にすること
   END LOOP;
 
   l_cur := DBMS_SQL.OPEN_CURSOR;
 
   DBMS_SQL.PARSE(l_cur, l_sql, DBMS_SQL.NATIVE);
 
-  -- Bind each variable
+  -- 各変数をバインド
   FOR i IN 1..p_filters.COUNT LOOP
     DBMS_SQL.BIND_VARIABLE(l_cur, ':val' || i, 'some_value_' || i);
   END LOOP;
 
-  -- Convert to REF CURSOR
+  -- REF CURSOR に変換
   l_rc      := DBMS_SQL.EXECUTE(l_cur);
   p_cursor  := DBMS_SQL.TO_REFCURSOR(l_cur);
-  -- Note: after TO_REFCURSOR, DBMS_SQL no longer manages the cursor
-  -- The REF CURSOR caller is responsible for CLOSE
+  -- 注意: TO_REFCURSOR の後は DBMS_SQL はカーソルを管理しなくなる
+  -- REF CURSOR の呼び出し側が CLOSE する責任を持つ
 
 EXCEPTION
   WHEN OTHERS THEN
@@ -285,7 +285,7 @@ END get_orders_flexible;
 
 ## DBMS_SQL.DESCRIBE_COLUMNS
 
-Used when the column structure of a query result is not known at compile time (generic reporting, metadata-driven tools).
+クエリ結果の列構造がコンパイル時に不明な場合（汎用レポート作成、メタデータ駆動ツールなど）に使用します。
 
 ```sql
 CREATE OR REPLACE PROCEDURE describe_query_result(p_sql IN VARCHAR2) IS
@@ -298,15 +298,15 @@ BEGIN
 
   DBMS_SQL.PARSE(l_cursor, p_sql, DBMS_SQL.NATIVE);
 
-  -- Describe the columns: get count and metadata
+  -- 列の記述: カウントとメタデータを取得
   DBMS_SQL.DESCRIBE_COLUMNS(l_cursor, l_col_count, l_col_descs);
 
-  -- Define each column for fetching (must define before EXECUTE)
+  -- フェッチのための各列の定義 (EXECUTE 前に行う必要がある)
   FOR i IN 1..l_col_count LOOP
-    -- Define all columns as VARCHAR2 for generic display
+    -- 汎用的な表示のため、すべての列を VARCHAR2 として定義
     DBMS_SQL.DEFINE_COLUMN(l_cursor, i, l_value, 4000);
     DBMS_OUTPUT.PUT_LINE(
-      'Column ' || i || ': ' ||
+      '列 ' || i || ': ' ||
       l_col_descs(i).col_name || ' (' ||
       CASE l_col_descs(i).col_type
         WHEN 1   THEN 'VARCHAR2'
@@ -318,7 +318,7 @@ BEGIN
     );
   END LOOP;
 
-  -- Execute and fetch
+  -- 実行とフェッチ
   DBMS_SQL.EXECUTE(l_cursor);
 
   WHILE DBMS_SQL.FETCH_ROWS(l_cursor) > 0 LOOP
@@ -340,9 +340,9 @@ END describe_query_result;
 
 ---
 
-## Parse-Once Execute-Many with DBMS_SQL
+## DBMS_SQL による一度のパースと複数回の実行
 
-When the same parameterized SQL runs many times in a batch, parse once and re-bind/execute for each row.
+同じパラメータ化された SQL をバッチ内で何度も実行する場合、一度パースしてから、各行に対して再バインドと実行を行います。
 
 ```sql
 CREATE OR REPLACE PROCEDURE load_employees_batch(
@@ -357,10 +357,10 @@ CREATE OR REPLACE PROCEDURE load_employees_batch(
 BEGIN
   l_cursor := DBMS_SQL.OPEN_CURSOR;
 
-  -- PARSE ONCE: syntax check and compilation done here only
+  -- 一度のパース: 構文チェックとコンパイルはここでのみ行われる
   DBMS_SQL.PARSE(l_cursor, c_sql, DBMS_SQL.NATIVE);
 
-  -- EXECUTE MANY: re-bind and execute without re-parsing
+  -- 複数回の実行: 再パースなしで再バインドと実行を繰り返す
   FOR i IN 1..p_employees.COUNT LOOP
     DBMS_SQL.BIND_VARIABLE(l_cursor, ':fname', p_employees(i).first_name);
     DBMS_SQL.BIND_VARIABLE(l_cursor, ':lname', p_employees(i).last_name);
@@ -382,24 +382,24 @@ END load_employees_batch;
 /
 ```
 
-**Note**: For most production batch scenarios, `FORALL` with a collection and static SQL is faster and simpler than the DBMS_SQL parse-once pattern. Use DBMS_SQL parse-once when the SQL structure itself must be dynamic.
+**注意**: ほとんどの本番バッチ・シナリオでは、コレクションを使用した静的 SQL の `FORALL` の方が、DBMS_SQL の一度パースするパターンよりも高速でシンプルです。SQL 構造自体が動的である必要がある場合にのみ、DBMS_SQL の一度パースするパターンを使用してください。
 
 ---
 
-## Injection Prevention in Dynamic SQL
+## 動的 SQL におけるインジェクション対策
 
-### The Three Rules
+### 3 つのルール
 
-1. **Data values**: Always use bind variables (`:1`, `:name`). Never concatenate.
-2. **Object names** (tables, columns, schemas): Validate with `DBMS_ASSERT` before concatenation.
-3. **SQL keywords**: Validate against a whitelist; never pass raw user input as SQL keywords.
+1. **データ値**: 常にバインド変数 (`:1`, `:name`) を使用し、直接連結しないでください。
+2. **オブジェクト名** (表、列、スキーマ): 連結する前に `DBMS_ASSERT` で検証してください。
+3. **SQL キーワード**: ホワイトリストに対して検証してください。ユーザー入力の生の値を SQL キーワードとして渡さないでください。
 
 ```sql
 CREATE OR REPLACE PROCEDURE safe_dynamic_query(
-  p_table_name  IN VARCHAR2,  -- structural: must validate
-  p_sort_column IN VARCHAR2,  -- structural: must validate
-  p_sort_dir    IN VARCHAR2,  -- keyword: must whitelist
-  p_filter_val  IN VARCHAR2,  -- data: use bind variable
+  p_table_name  IN VARCHAR2,  -- 構造要素: 検証が必要
+  p_sort_column IN VARCHAR2,  -- 構造要素: 検証が必要
+  p_sort_dir    IN VARCHAR2,  -- キーワード: ホワイトリスト化が必要
+  p_filter_val  IN VARCHAR2,  -- データ: バインド変数を使用
   p_cursor      OUT SYS_REFCURSOR
 ) IS
   l_table  VARCHAR2(128);
@@ -407,30 +407,30 @@ CREATE OR REPLACE PROCEDURE safe_dynamic_query(
   l_dir    VARCHAR2(4);
   l_sql    VARCHAR2(1000);
 BEGIN
-  -- Rule 2: validate structural elements with DBMS_ASSERT
-  l_table := DBMS_ASSERT.SQL_OBJECT_NAME(p_table_name);  -- must exist
+  -- ルール 2: DBMS_ASSERT で構造要素を検証
+  l_table := DBMS_ASSERT.SQL_OBJECT_NAME(p_table_name);  -- 存在確認も含む
   l_col   := DBMS_ASSERT.SIMPLE_SQL_NAME(p_sort_column);
 
-  -- Rule 3: whitelist SQL keywords
+  -- ルール 3: SQL キーワードをホワイトリストでチェック
   IF UPPER(p_sort_dir) NOT IN ('ASC', 'DESC') THEN
-    RAISE_APPLICATION_ERROR(-20001, 'Invalid sort direction: ' || p_sort_dir);
+    RAISE_APPLICATION_ERROR(-20001, '無効なソート方向です: ' || p_sort_dir);
   END IF;
   l_dir := UPPER(p_sort_dir);
 
-  -- Rule 1: data values use bind variables
+  -- ルール 1: データ値にはバインド変数を使用
   l_sql :=
     'SELECT * FROM ' || l_table ||
-    ' WHERE last_name LIKE :filter_val' ||  -- bind variable for data
-    ' ORDER BY ' || l_col || ' ' || l_dir;  -- safe: validated above
+    ' WHERE last_name LIKE :filter_val' ||  -- データ値用にバインド変数
+    ' ORDER BY ' || l_col || ' ' || l_dir;  -- 安全: 上記で検証済み
 
   OPEN p_cursor FOR l_sql USING p_filter_val || '%';
 END safe_dynamic_query;
 /
 ```
 
-### Column Whitelist Pattern
+### 列のホワイトリスト・パターン
 
-For maximum security, validate against a whitelist of known-safe values:
+セキュリティを最大化するには、既知の安全な値のホワイトリストと照らし合わせて検証します。
 
 ```sql
 FUNCTION is_valid_sort_column(
@@ -439,7 +439,7 @@ FUNCTION is_valid_sort_column(
 ) RETURN BOOLEAN IS
   l_count PLS_INTEGER;
 BEGIN
-  -- Check column actually exists in the table
+  -- 列が実際に表内に存在するか確認
   SELECT COUNT(*) INTO l_count
   FROM   all_tab_columns
   WHERE  owner      = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
@@ -452,34 +452,34 @@ END is_valid_sort_column;
 
 ---
 
-## Performance Considerations
+## パフォーマンスに関する考慮事項
 
-### Hard Parse Cost
+### ハード・パースのコスト
 
-Every unique SQL string requires a hard parse: syntax check, security check, execution plan generation. Hard parsing is CPU-intensive and requires latches that serialize execution. The shared pool cache stores parsed cursors; reuse is critical for scalability.
+一意の SQL 文字列ごとに、構文チェック、セキュリティ・チェック、実行計画の作成というハード・パースが必要です。ハード・パースは CPU 負荷が高く、実行をシリアル化するラッチを必要とします。共有プール・キャッシュにパース済みカーソルを保存し、再利用することがスケーラビリティにとって重要です。
 
 ```sql
--- BAD: unique SQL per call = hard parse every time
+-- 回避すべき例: 呼び出しごとに一意の SQL = 毎回ハード・パース
 EXECUTE IMMEDIATE 'SELECT * FROM orders WHERE order_id = ' || p_id;
--- Each unique p_id value = different SQL string = different cursor = hard parse
+-- 各 p_id の値ごとに異なる SQL 文字列 = 異なるカーソル = ハード・パースが発生
 
--- GOOD: bind variable = one cursor, reused every time
+-- 推奨例: バインド変数 = 1 つのカーソルを毎回再利用
 EXECUTE IMMEDIATE 'SELECT * FROM orders WHERE order_id = :1' USING p_id;
--- Same SQL string every call = soft parse (cursor reuse)
+-- 毎回同じ SQL 文字列 = ソフト・パース (カーソル再利用)
 
--- Monitor hard vs soft parse ratio
+-- ハード・パース vs ソフト・パースの割合を監視
 SELECT name, value
 FROM   v$sysstat
 WHERE  name IN ('parse count (hard)', 'parse count (total)');
--- Hard / Total should be < 1% for well-tuned OLTP systems
+-- OLTP システムでは Hard / Total が 1% 未満であることが望ましい
 ```
 
-### Shared Pool Fragmentation
+### 共有プールの断片化
 
-Dynamic SQL that produces many unique SQL strings fragments the shared pool with single-use cursors. This forces other cursors out, increasing hard parses system-wide.
+一回限りの SQL 文字列を大量に生成する動的 SQL は、一度しか使われないカーソルで共有プールを断片化させます。これにより他のカーソルが押し出され、システム全体のハード・パースが増加します。
 
 ```sql
--- Monitor cursor reuse efficiency
+-- カーソル再利用の効率を確認
 SELECT sql_text, executions, parse_calls,
        ROUND(parse_calls/NULLIF(executions,0) * 100, 1) AS parse_pct
 FROM   v$sql
@@ -487,57 +487,57 @@ WHERE  parsing_schema_name = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
   AND  executions > 0
   AND  ROUND(parse_calls/NULLIF(executions,0) * 100, 1) > 50
 ORDER BY executions DESC;
--- Rows with high parse_pct and many executions = injection or missing binds
+-- parse_pct が高く実行回数が多い行は、インジェクションの懸念があるかバインド変数が不足している
 ```
 
 ---
 
-## EXECUTE IMMEDIATE vs DBMS_SQL Decision Guide
+## EXECUTE IMMEDIATE vs DBMS_SQL 判断ガイド
 
-| Requirement | EXECUTE IMMEDIATE | DBMS_SQL |
+| 要件 | EXECUTE IMMEDIATE | DBMS_SQL |
 |---|---|---|
-| Simple DDL execution | Yes | Yes |
-| DML with fixed bind variables | Yes (preferred) | Yes |
-| Single-row SELECT | Yes | Yes |
-| Multi-row SELECT | OPEN ... FOR | FETCH_ROWS loop |
-| Variable number of bind variables | Difficult (combinatorial USING) | Yes (BIND_VARIABLE in loop) |
-| Unknown column structure at compile time | No | Yes (DESCRIBE_COLUMNS) |
-| Parse-once, execute-many pattern | No | Yes |
-| Convert DBMS_SQL cursor to REF CURSOR | N/A | TO_REFCURSOR (11g+) |
-| Readability | High | Low |
+| 単純な DDL 実行 | 可 | 可 |
+| 固定されたバインド数での DML | 可 (推奨) | 可 |
+| 単一行の SELECT | 可 | 可 |
+| 複数行の SELECT | OPEN ... FOR | FETCH_ROWS ループ |
+| 可変のバインド数 | 困難 (USING 句の組み合わせ) | 可 (ループ内 BIND_VARIABLE) |
+| コンパイル時に不明な列構造 | 不可 | 可 (DESCRIBE_COLUMNS) |
+| 一度パースし、何度も実行するパターン | 不可 | 可 |
+| DBMS_SQL カーソルを REF CURSOR に変換 | 不可 | 可 (TO_REFCURSOR) |
+| 読みやすさ | 高い | 低い |
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Problem | Fix |
+| 間違い | 問題点 | 解決策 |
 |---|---|---|
-| Concatenating data values into SQL | SQL injection | Use bind variables |
-| No DBMS_ASSERT on table/column names | Injection via structural elements | Validate all identifiers |
-| No whitelist for SQL keywords | `ORDER BY CASE WHEN ... DROP TABLE` attacks | Whitelist: `IN ('ASC', 'DESC')` |
-| Not closing DBMS_SQL cursor on exception | Resource leak, ORA-01000 | Always `IF IS_OPEN THEN CLOSE END IF` in exception handler |
-| Using EXECUTE IMMEDIATE for tight loops | Hard parse per iteration | Use static SQL with bind variables; or FORALL |
-| OPEN ... FOR with USING clause count mismatch | ORA-01006: bind variable not found | Count binds carefully; consider DBMS_SQL for variable counts |
-| Exposing SQL text in error messages | Reveals schema to attackers | Log internally; return generic message to clients |
+| SQL にデータ値を直接連結する | SQL インジェクションのリスク | バインド変数を使用する |
+| 表名や列名に DBMS_ASSERT を使用しない | 構造要素を通じたインジェクション | すべての識別子を検証する |
+| SQL キーワードをホワイトリスト化しない | `ORDER BY CASE WHEN ... DROP TABLE` 等の攻撃 | ホワイトリスト形式にする(`IN ('ASC', 'DESC')`) |
+| 例外時に DBMS_SQL カーソルを閉じない | リソース・リーク、ORA-01000 | 例外ハンドラで `IF IS_OPEN THEN CLOSE` を行う |
+| 頻繁なループ内で EXECUTE IMMEDIATE を使用 | 繰り返しハード・パースが発生 | バインド変数を持つ静的 SQL か FORALL を使用する |
+| OPEN ... FOR の USING 句の数不一致 | ORA-01006: バインド変数が見つからない | バインド数を一致させる。可変の場合は DBMS_SQL を検討 |
+| エラー・メッセージに SQL 文をそのまま出す | 攻撃者にスキーマ情報を与えてしまう | 内部でログに記録し、クライアントには汎用メッセージを返す |
 
 ---
 
-## Oracle Version Notes (19c vs 26ai)
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- ハイブリッドな環境では、19c と 26ai の両方で構文とパッケージの動作をテストすること。デフォルトや非推奨がリリース・アップデートによって異なる場合があるため。
 
-- **Oracle 8i+**: `EXECUTE IMMEDIATE` and `OPEN cursor FOR dynamic_sql USING` introduced. Replaced the older `DBMS_SQL` for most use cases.
-- **Oracle 11gR2+**: `DBMS_SQL.TO_REFCURSOR` and `DBMS_SQL.TO_CURSOR_NUMBER` allow conversion between DBMS_SQL and REF CURSOR types.
-- **Oracle 12cR1+**: `DBMS_SQL.RETURN_RESULT` for implicit result sets from procedures.
-- **Oracle 21c+**: Improved JSON support in dynamic SQL construction patterns.
-- **All versions**: `DBMS_ASSERT` available since 10.2 — use consistently for all dynamic identifier validation.
+- **Oracle 8i以降**: `EXECUTE IMMEDIATE` および `OPEN cursor FOR dynamic_sql USING` が導入されました。ほとんどのケースで `DBMS_SQL` を置き換えました。
+- **Oracle 11gR2以降**: `DBMS_SQL.TO_REFCURSOR` と `DBMS_SQL.TO_CURSOR_NUMBER` により、DBMS_SQL と REF CURSOR 型の相互変換が可能になりました。
+- **Oracle 12cR1以降**: プロシージャからの暗黙的な結果セット用の `DBMS_SQL.RETURN_RESULT` が追加されました。
+- **Oracle 21c以降**: 動的 SQL 構築パターンでの JSON サポートが向上しました。
+- **全バージョン**: `DBMS_ASSERT` は 10.2 以降で利用可能です。動的識別子の検証には一貫してこれを使用してください。
 
 ---
 
-## Sources
+## ソース
 
 - [Oracle Database PL/SQL Language Reference 19c — Dynamic SQL](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/dynamic-sql.html) — EXECUTE IMMEDIATE, OPEN...FOR, USING clause
-- [DBMS_SQL (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_SQL.html) — DBMS_SQL package, TO_REFCURSOR, RETURN_RESULT
-- [DBMS_ASSERT (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_ASSERT.html) — SQL_OBJECT_NAME, SIMPLE_SQL_NAME for injection prevention
+- [DBMS_SQL (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_SQL.html) — DBMS_SQL パッケージ, TO_REFCURSOR, RETURN_RESULT
+- [DBMS_ASSERT (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_ASSERT.html) — インジェクション防止のための SQL_OBJECT_NAME, SIMPLE_SQL_NAME

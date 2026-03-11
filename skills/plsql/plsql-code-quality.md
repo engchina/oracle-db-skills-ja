@@ -1,64 +1,63 @@
-# PL/SQL Code Quality
+# PL/SQL コード品質 (Code Quality)
 
-## Overview
+## 概要
 
-Consistent, readable, and maintainable PL/SQL requires agreed naming conventions, avoidance of well-documented anti-patterns, and automated static analysis. This guide covers style standards, anti-pattern detection, code review practices, and tooling.
+一貫性があり、読みやすく、保守性の高い PL/SQL を作成するには、合意された命名規則、文書化されたアンチパターンの回避、および自動化された静的解析が必要です。このガイドでは、スタイル基準、アンチパターンの検出、コード・レビューの実践、およびツールについて説明します。
 
 ---
 
-## Naming Conventions
+## 命名規則
 
-Consistent naming is the foundation of readable code. The most widely adopted conventions derive from Oracle's own internal standards and the Trivadis PL/SQL Coding Guidelines.
+一貫した命名は、読みやすいコードの基礎です。最も広く採用されている規約は、Oracle 社独自の内部標準や Trivadis PL/SQL コーディング・ガイドラインに基づいています。
 
-### Variable Prefixes
+### 変数の接頭辞 (Prefix)
 
-| Prefix | Scope/Kind | Example |
+| 接頭辞 | スコープ/種類 | 例 |
 |---|---|---|
-| `l_` | Local variable | `l_employee_id`, `l_salary` |
-| `g_` | Package global (package-level) variable | `g_debug_enabled`, `g_config_loaded` |
-| `p_` | Parameter (IN, OUT, IN OUT) | `p_customer_id`, `p_result` |
-| `c_` | Local constant | `c_max_retries`, `c_default_currency` |
-| `gc_` | Package global constant | `gc_app_name`, `gc_max_batch_size` |
-| `e_` | Exception variable | `e_order_not_found` |
-| `r_` | Record variable | `r_employee`, `r_order` |
-| `t_` | Type definition | `t_id_list`, `t_order_tab` |
-| `cur_` or `c_` | Cursor | `cur_employees`, `c_pending_orders` |
+| `l_` | ローカル変数 (Local) | `l_employee_id`, `l_salary` |
+| `g_` | パッケージ・グローバル変数 (Global) | `g_debug_enabled`, `g_config_loaded` |
+| `p_` | パラメータ (Parameter) | `p_customer_id`, `p_result` |
+| `c_` | ローカル定数 (Constant) | `c_max_retries`, `c_default_currency` |
+| `gc_` | パッケージ・グローバル定数 | `gc_app_name`, `gc_max_batch_size` |
+| `e_` | 例外変数 (Exception) | `e_order_not_found` |
+| `r_` | レコード変数 (Record) | `r_employee`, `r_order` |
+| `t_` | 型定義 (Type) | `t_id_list`, `t_order_tab` |
+| `cur_` または `c_` | カーソル (Cursor) | `cur_employees`, `c_pending_orders` |
 
-### Object Naming Conventions
+### オブジェクトの命名規則
 
-| Object Type | Convention | Example |
+| オブジェクト型 | 規約 | 例 |
 |---|---|---|
-| Table | Plural noun, snake_case | `employees`, `order_items` |
-| Package | Domain + `_pkg` | `order_mgmt_pkg`, `customer_api_pkg` |
-| Procedure | Verb + noun | `create_order`, `validate_customer` |
-| Function | Returns value; `get_` or `is_`/`has_` | `get_tax_rate`, `is_valid_email` |
-| Trigger | Table + `_trg` or `_trigger` | `employees_audit_trg` |
-| Sequence | Table + `_seq` | `orders_seq`, `employees_seq` |
-| Index | `idx_` + table + column(s) | `idx_orders_customer_id` |
-| Exception | `e_` + description | `e_invalid_order_status` |
-| Type | `t_` + description | `t_employee_list`, `t_id_tab` |
+| 表 (Table) | 複数形の名詞、snake_case | `employees`, `order_items` |
+| パッケージ | ドメイン + `_pkg` | `order_mgmt_pkg`, `customer_api_pkg` |
+| プロシージャ | 動詞 + 名詞 | `create_order`, `validate_customer` |
+| ファンクション | 戻り値を表す名詞。`get_` や `is_`/`has_` | `get_tax_rate`, `is_valid_email` |
+| トリガー | 表名 + `_trg` または `_trigger` | `employees_audit_trg` |
+| シーケンス | 表名 + `_seq` | `orders_seq`, `employees_seq` |
+| 索引 | `idx_` + 表名 + 列名 | `idx_orders_customer_id` |
+| 型 (Type) | `t_` + 説明 | `t_employee_list`, `t_id_tab` |
 
-### Full Example with Conventions
+### 命名規則を適用した完全な例
 
 ```sql
 CREATE OR REPLACE PACKAGE order_mgmt_pkg AS
-  -- Package constants (gc_ prefix)
+  -- パッケージ定数 (gc_ 接頭辞)
   gc_max_order_items CONSTANT PLS_INTEGER := 500;
   gc_default_currency CONSTANT VARCHAR2(3) := 'USD';
 
-  -- Public type (t_ prefix)
+  -- 公開型 (t_ 接頭辞)
   TYPE t_order_summary IS RECORD (
     order_id       orders.order_id%TYPE,
     customer_name  VARCHAR2(100),
     total_amount   NUMBER
   );
 
-  -- Public exception (e_ prefix)
+  -- 公開例外 (e_ 接頭辞)
   e_order_not_found EXCEPTION;
 
-  -- Public procedures/functions
+  -- 公開プロシージャ/ファンクション
   FUNCTION get_order_summary(
-    p_order_id IN orders.order_id%TYPE  -- p_ prefix for parameters
+    p_order_id IN orders.order_id%TYPE  -- 引数は p_ 接頭辞
   ) RETURN t_order_summary;
 
 END order_mgmt_pkg;
@@ -66,20 +65,20 @@ END order_mgmt_pkg;
 
 CREATE OR REPLACE PACKAGE BODY order_mgmt_pkg AS
 
-  -- Private global (g_ prefix)
+  -- 非公開グローバル変数 (g_ 接頭辞)
   g_cache_loaded BOOLEAN := FALSE;
 
-  -- Private type
+  -- 非公開型
   TYPE t_cache_map IS TABLE OF t_order_summary INDEX BY PLS_INTEGER;
   g_cache t_cache_map;
 
   FUNCTION get_order_summary(
     p_order_id IN orders.order_id%TYPE
   ) RETURN t_order_summary IS
-    -- Local variable (l_ prefix)
+    -- ローカル変数 (l_ 接頭辞)
     l_summary   t_order_summary;
-    -- Local constant (c_ prefix)
-    c_not_found CONSTANT VARCHAR2(50) := 'Order not found: ';
+    -- ローカル定数 (c_ 接頭辞)
+    c_not_found CONSTANT VARCHAR2(50) := '注文が見つかりません: ';
   BEGIN
     SELECT o.order_id, c.customer_name, o.total_amount
     INTO   l_summary.order_id, l_summary.customer_name, l_summary.total_amount
@@ -99,32 +98,32 @@ END order_mgmt_pkg;
 
 ---
 
-## Style Guidelines (Oracle / Trivadis / PL/SQL Cop)
+## スタイル・ガイドライン (Oracle / Trivadis / PL/SQL Cop)
 
-The [Trivadis PL/SQL and SQL Coding Guidelines](https://trivadis.github.io/plsql-and-sql-coding-guidelines/) are the most comprehensive publicly available style standard. Key rules:
+[Trivadis PL/SQL and SQL Coding Guidelines](https://trivadis.github.io/plsql-and-sql-coding-guidelines/) は、最も包括的な公開スタイル基準です。主なルールは以下の通りです：
 
-### Formatting
+### フォーマット
 
 ```sql
--- G-1010: Use meaningful names (not single letters except loop counters)
--- BAD:
-FOR i IN 1..l_c LOOP
+-- G-1010: 意味のある名前を使用する (ループカウンタを除き、1文字の名前は避ける)
+-- 悪い例:
+FOR i IN 1..l_count LOOP
   IF x > 0 THEN d := p * r; END IF;
 END LOOP;
 
--- GOOD:
+-- 良い例:
 FOR idx IN 1..l_count LOOP
   IF l_amount > 0 THEN
     l_discount := l_price * l_rate;
   END IF;
 END LOOP;
 
--- G-2130: Align variable declarations
+-- G-2130: 変数宣言を整列させる
 l_employee_id   employees.employee_id%TYPE;
 l_salary        employees.salary%TYPE;
 l_department_id employees.department_id%TYPE;
 
--- G-4130: Indent consistently (2 or 4 spaces; be consistent)
+-- G-4130: インデントを一貫させる (2 または 4 スペース)
 BEGIN
   IF condition THEN
     do_something;
@@ -135,59 +134,58 @@ BEGIN
 END;
 ```
 
-### Keywords and Identifiers
+### キーワードと識別子
 
 ```sql
--- G-1020: Keywords in UPPERCASE, identifiers in lowercase
--- BAD: select employee_id FROM Employees WHERE Department_Id = 10;
--- GOOD:
+-- G-1020: キーワードは大文字、識別子は小文字にする
+-- 悪い例: select employee_id FROM Employees WHERE Department_Id = 10;
+-- 良い例:
 SELECT employee_id FROM employees WHERE department_id = 10;
 
--- G-2180: Never use Oracle reserved words as identifiers
--- BAD: DECLARE date DATE; BEGIN ... END;
--- GOOD: DECLARE l_hire_date DATE; BEGIN ... END;
+-- G-2180: Oracle の予約語を識別子として使用しない
+-- 悪い例: DECLARE date DATE; BEGIN ... END;
+-- 良い例: DECLARE l_hire_date DATE; BEGIN ... END;
 
--- G-2230: Use %TYPE for variable declarations anchored to columns
-l_salary employees.salary%TYPE;     -- adapts to column type changes
--- vs.
-l_salary NUMBER(8,2);               -- will break if column precision changes
+-- G-2230: 列に依存する変数宣言には %TYPE を使用する
+l_salary employees.salary%TYPE;     -- 列の型変更に追従できる
+-- 悪い例:
+l_salary NUMBER(8,2);               -- 列の精度が変わるとエラーになる可能性がある
 ```
 
 ---
 
-## Anti-Patterns Reference
+## アンチパターンのリファレンス
 
 ### WHEN OTHERS THEN NULL
 
 ```sql
--- NEVER do this
+-- 決して行ってはいけない例
 EXCEPTION
   WHEN OTHERS THEN NULL;
 
--- Why it's harmful:
--- 1. Silently discards all exceptions
--- 2. Caller has no idea the operation failed
--- 3. Data may be in inconsistent state
--- 4. Impossible to diagnose in production
+-- 有害な理由:
+-- 1. すべての例外を黙って破棄する
+-- 2. 呼び出し側は操作が失敗したことを知ることができない
+-- 3. データが不整合な状態になる可能性がある
+-- 4. 本番環境での診断が不可能になる
 
--- Correct pattern: always log and re-raise
+-- 正しいパターン: 常にログを記録して再発生させる
 EXCEPTION
   WHEN OTHERS THEN
     error_logger_pkg.log_error('MY_PKG', 'MY_PROC');
     RAISE;
 ```
 
-### SELECT * in PL/SQL
+### PL/SQL 内での SELECT *
 
 ```sql
--- AVOID: SELECT * in PL/SQL
+-- 避けるべき例: SELECT *
 DECLARE l_emp employees%ROWTYPE;
 BEGIN
   SELECT * INTO l_emp FROM employees WHERE employee_id = 100;
-  -- Problem: if columns are added, reorder, or removed, this may silently
-  -- map wrong values (if %ROWTYPE is cached), or cause runtime errors
+  -- 問題: 列が追加、並び替え、または削除された場合、誤った値がマップされたり（%ROWTYPEがキャッシュされている場合）、実行時エラーが発生したりする可能性がある
 
--- PREFERRED: explicit column list
+-- 推奨される例: 列を明示的に指定する
 DECLARE
   l_emp_id   employees.employee_id%TYPE;
   l_emp_name employees.last_name%TYPE;
@@ -196,267 +194,113 @@ BEGIN
   FROM   employees WHERE employee_id = 100;
 ```
 
-**Exception**: `SELECT * ... INTO l_%ROWTYPE` is acceptable when %ROWTYPE is used and you genuinely need all columns.
+**例外**: `%ROWTYPE` を使用し、かつ本当にすべての列が必要な場合に限っては `SELECT * ... INTO l_%ROWTYPE` は許容されます。
 
-### Hardcoded Schema Names
+### スキーマ名のハードコード
 
 ```sql
--- AVOID: hardcoded schema names
-SELECT * FROM hr.employees;  -- breaks if deployed to different schema
+-- 避けるべき例: スキーマ名のハードコード
+SELECT * FROM hr.employees;  -- 別のスキーマにデプロイすると壊れる
 INSERT INTO finance.accounts VALUES ...;
 
--- PREFERRED: use synonyms or current schema references
-SELECT * FROM employees;     -- resolves via synonym or current schema
-
--- If cross-schema access is needed, use constants or configurable references
-SELECT * FROM config_pkg.schema_prefix || '.employees';
+-- 推奨される例: シノニムまたは現行スキーマの参照を使用する
+SELECT * FROM employees;     -- シノニムまたは現行スキーマ経由で解決される
 ```
 
-### Magic Numbers
+### マジック・ナンバー
 
 ```sql
--- AVOID: unexplained numeric literals
-IF l_status_code = 3 THEN ...;        -- what is 3?
-IF l_retry_count > 5 THEN ...;        -- why 5?
-l_rate := l_amount * 0.0825;          -- what rate is this?
+-- 避けるべき例: 説明のない数値リテラル
+IF l_status_code = 3 THEN ...;        -- 「3」とは何か？
+IF l_retry_count > 5 THEN ...;        -- なぜ「5」なのか？
 
--- PREFERRED: named constants
+-- 推奨される例: 名前付き定数を使用する
 DECLARE
   c_status_shipped   CONSTANT PLS_INTEGER := 3;
   c_max_retries      CONSTANT PLS_INTEGER := 5;
-  c_sales_tax_rate   CONSTANT NUMBER      := 0.0825;  -- TX state rate
 BEGIN
   IF l_status_code = c_status_shipped THEN ...;
   IF l_retry_count > c_max_retries THEN ...;
-  l_rate := l_amount * c_sales_tax_rate;
-```
-
-### Autonomous Transaction Abuse
-
-```sql
--- AVOID: using autonomous transactions to bypass constraints
-PROCEDURE sneaky_insert(p_data IN VARCHAR2) IS
-  PRAGMA AUTONOMOUS_TRANSACTION;
-BEGIN
-  -- "Getting around" the parent transaction's state
-  INSERT INTO main_table VALUES (p_data);
-  COMMIT;  -- committed regardless of parent transaction outcome
-END;
--- Problem: parent transaction may ROLLBACK, but this autonomous insert already committed
--- Data is now inconsistent
-
--- Autonomous transactions are ONLY appropriate for:
--- 1. Error/audit logging (log must survive rollback)
--- 2. Truly independent operations with no data consistency requirement
-```
-
-### Implicit Conversion
-
-```sql
--- AVOID: implicit type conversion (unpredictable, NLS-dependent)
-WHERE hire_date = '01-JAN-2024'      -- depends on NLS_DATE_FORMAT
-WHERE employee_id = '100'            -- implicit VARCHAR2 to NUMBER
-
--- PREFERRED: explicit conversion
-WHERE hire_date = DATE '2024-01-01'  -- ANSI date literal, no NLS dependency
-WHERE hire_date = TO_DATE('2024-01-01', 'YYYY-MM-DD')
-WHERE employee_id = 100              -- numeric literal, no conversion needed
 ```
 
 ---
 
-## Code Review Checklist
+## コード・レビュー・チェックリスト
 
-```
-CORRECTNESS
-[ ] No WHEN OTHERS THEN NULL
-[ ] All exceptions are logged with FORMAT_ERROR_BACKTRACE
-[ ] SQL%ROWCOUNT captured immediately after DML
-[ ] Cursors closed in exception handlers (%ISOPEN check)
-[ ] No implicit type conversions in WHERE clauses
-[ ] Date literals use DATE 'YYYY-MM-DD' or explicit TO_DATE with format
-
-PERFORMANCE
-[ ] No DML inside cursor loops (use FORALL)
-[ ] BULK COLLECT uses LIMIT clause
-[ ] No SELECT inside a loop (use JOIN or pre-fetch)
-[ ] NOCOPY used for large IN OUT collection parameters
-[ ] RESULT_CACHE considered for pure functions called repeatedly
-
-SECURITY
-[ ] Dynamic SQL uses bind variables (:1, :name), not concatenation
-[ ] Table/column names in dynamic SQL validated with DBMS_ASSERT
-[ ] Error messages don't expose schema internals to end users
-[ ] AUTHID CURRENT_USER considered for utility procedures
-
-MAINTAINABILITY
-[ ] Variable names follow prefix conventions (l_, p_, g_, c_)
-[ ] No magic numbers — all literals are named constants
-[ ] %TYPE used for anchored declarations
-[ ] Package spec is minimal — only public members declared
-[ ] Procedures are focused (single responsibility)
-[ ] No hardcoded schema names
-
-TESTING
-[ ] Unit tests exist for new procedures/functions
-[ ] Edge cases tested (NULL inputs, empty sets, boundary values)
-[ ] Error paths tested (%throws or try/catch patterns)
-```
+- [ ] `WHEN OTHERS THEN NULL` が存在しないか
+- [ ] すべての例外が `FORMAT_ERROR_BACKTRACE` 等でログに記録されているか
+- [ ] DML の直後に `SQL%ROWCOUNT` が取得されているか
+- [ ] 例外ハンドラ内でカーソルが閉じられているか（`%ISOPEN` チェック）
+- [ ] WHERE 句で暗黙の型変換が行われていないか
+- [ ] 日付リテラルに `DATE 'YYYY-MM-DD'` または書式指定の `TO_DATE` が使用されているか
+- [ ] カーソル・ループ内での DML を避け、`FORALL` を使用しているか
+- [ ] `BULK COLLECT` に `LIMIT` 句が使用されているか
+- [ ] 動的 SQL で文字列連結ではなくバインド変数を使用しているか
+- [ ] 動的 SQL 内の表名/列名が `DBMS_ASSERT` で検証されているか
+- [ ] 変数名が接頭辞規則（l_, p_, g_, c_）に従っているか
+- [ ] マジック・ナンバーを避け、定数が使用されているか
+- [ ] 型宣言に `%TYPE` が使用されているか
 
 ---
 
-## Static Analysis Tools
+## 静的解析ツール
 
 ### PL/SQL Cop (Trivadis)
 
-PL/SQL Cop is a commercial static analysis tool based on Trivadis guidelines. It integrates with Maven, Gradle, and CI/CD pipelines.
+PL/SQL Cop は、Trivadis のガイドラインに基づいた商業的な静的解析ツールです。
 
-```bash
-# Command-line usage
-tvdcc -url jdbc:oracle:thin:@host:1521/service \
-      -user scott -password tiger \
-      -path /path/to/plsql/sources \
-      -format html \
-      -output report.html
+- **G-2150**: NULL との比較を避け、`IS NULL` / `IS NOT NULL` を使用すること
+- **G-5030**: 仕様部にロジックを書かず、本体（Body）に記述すること
+- **G-7810**: `RAISE` なしの `WHEN OTHERS` を使用しないこと
 
-# Results show violations by rule category:
-# G-2150: Avoid comparisons with NULL — use IS NULL / IS NOT NULL
-# G-5030: Never write logic in the spec — keep it in the body
-# G-7810: Never use WHEN OTHERS without RAISE or RAISE_APPLICATION_ERROR
-```
+### SQL Developer コード分析
 
-### SonarQube PL/SQL Plugin
-
-SonarQube with the Oracle PL/SQL plugin (part of SonarQube Developer Edition) provides:
-- Rule-based static analysis
-- Code complexity metrics
-- Duplication detection
-- Issue tracking over time
-- Integration with pull request reviews
-
-```yaml
-# sonar-project.properties for PL/SQL project
-sonar.projectKey=my_plsql_project
-sonar.sources=src/plsql
-sonar.language=plsql
-sonar.plsql.jdbc.url=jdbc:oracle:thin:@host:1521/service
-sonar.plsql.jdbc.username=sonar_user
-sonar.plsql.jdbc.password=sonar_password
-```
-
-### SQL Developer Code Analysis
-
-SQL Developer includes a built-in code analysis tool:
-1. **Tools > Code Analysis > Run Analysis**
-2. Select rules (PL/SQL Best Practices, Security, etc.)
-3. Results appear in the Code Analysis panel with line numbers
+SQL Developer にはコード分析ツールが組み込まれています。
+1. **[ツール] > [コード分析] > [分析を実行]**
+2. ルール（PL/SQL ベスト・プラクティス、セキュリティなど）を選択。
+3. 結果がコード分析パネルに行番号付きで表示されます。
 
 ---
 
-## McCabe Cyclomatic Complexity
+## McCabe の循環的複雑度 (Cyclomatic Complexity)
 
-Cyclomatic complexity measures the number of linearly independent paths through code. High complexity = harder to test and maintain.
+循環的複雑度は、コード内の線形的に独立したパスの数を測定します。複雑度が高いほど、テストと保守が困難になります。
 
-**Formula**: Complexity = Number of decision points + 1
+**計算式**: 複雑度 = 判定ポイントの数 + 1
 
-Decision points: `IF`, `ELSIF`, `CASE WHEN`, `LOOP`, `WHILE`, `FOR`, `EXCEPTION WHEN`, `AND`, `OR` in conditions.
+判定ポイント: `IF`, `ELSIF`, `CASE WHEN`, `LOOP`, `WHILE`, `FOR`, `EXCEPTION WHEN`, 条件内の `AND`, `OR`。
 
-| Complexity | Rating | Action |
+| 複雑度 | 評価 | 推奨アクション |
 |---|---|---|
-| 1–5 | Low | Good — simple to understand and test |
-| 6–10 | Moderate | Acceptable — review carefully |
-| 11–15 | High | Consider refactoring |
-| 16–25 | Very High | Strong refactoring recommendation |
-| > 25 | Extreme | Must refactor before code review approval |
-
-```sql
--- High complexity example (refactor this)
-PROCEDURE process_order(p_id IN NUMBER, p_type IN VARCHAR2) IS
-BEGIN
-  IF p_type = 'EXPRESS' THEN
-    IF p_id > 0 THEN
-      IF check_stock THEN
-        FOR item IN c_items LOOP
-          IF item.available THEN
-            IF item.quantity > 10 THEN
-              apply_bulk_discount;
-            ELSE
-              apply_standard_price;
-            END IF;
-          END IF;
-        END LOOP;
-      END IF;
-    END IF;
-  ELSIF p_type = 'STANDARD' THEN
-    -- ... more nesting ...
-  END IF;
-END process_order;
--- Complexity > 10 — extract inner logic into focused helper procedures
-
--- Refactored: lower complexity per procedure
-PROCEDURE process_express_order(p_id IN NUMBER) IS
-BEGIN
-  IF check_stock THEN
-    apply_item_pricing;  -- extracted procedure handles item loop
-  END IF;
-END process_express_order;
-```
+| 1–5 | 低 | 良好 — 理解しやすく、テストも容易 |
+| 6–10 | 中 | 許容範囲 — 注意深くレビューすること |
+| 11–15 | 高 | リファクタリングを検討すべき |
+| 16–25 | 非常に高い | リファクタリングを強く推奨 |
+| > 25 | 極めて高い | コード・レビュー承認前にリファクタリングが必須 |
 
 ---
 
-## Maximum Procedure Length Guidelines
+## プロシージャの長さのガイドライン
 
-| Recommendation | Guideline |
+| 項目 | ガイドライン |
 |---|---|
-| Maximum procedure body | 60–80 lines (excluding declarations) |
-| Maximum package body | 1000–1500 lines before splitting |
-| Maximum nesting depth | 3–4 levels of IF/LOOP nesting |
-| Maximum parameters | 7–10 parameters; use record type for more |
-
-When a procedure exceeds these limits, extract clearly-named helper procedures. The original procedure becomes a coordinator.
+| プロシージャ本体の最大行数 | 60〜80行 (宣言部を除く) |
+| パッケージ本体の最大行数 | 分割を検討する前に 1000〜1500行 |
+| ネストの深さ | `IF`/`LOOP` のネストは 3〜4レベルまで |
+| パラメータ数 | 7〜10個まで。それ以上の場合はレコード型を使用する |
 
 ---
 
-## Automated Quality Gate Example (CI/CD)
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-```bash
-#!/bin/bash
-# quality_gate.sh: fail the build if quality thresholds are not met
-
-# Run SonarQube analysis
-sonar-scanner \
-  -Dsonar.host.url=https://sonar.mycompany.com \
-  -Dsonar.token=$SONAR_TOKEN
-
-# Check quality gate status (wait for analysis to complete)
-STATUS=$(curl -s -u "$SONAR_TOKEN:" \
-  "https://sonar.mycompany.com/api/qualitygates/project_status?projectKey=my_plsql_project" \
-  | python3 -c "import sys, json; print(json.load(sys.stdin)['projectStatus']['status'])")
-
-if [ "$STATUS" != "OK" ]; then
-  echo "Quality gate failed: $STATUS"
-  exit 1
-fi
-```
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- ハイブリッドな環境では、19c と 26ai の両方で構文とパッケージの動作をテストすること。
 
 ---
 
-## Oracle Version Notes (19c vs 26ai)
+## ソース
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-- **All versions**: Naming conventions and anti-patterns apply regardless of Oracle version.
-- **Oracle 12.2+**: `ACCESSIBLE BY` clause enforces API access restrictions, supporting encapsulation guidelines.
-- **Trivadis Guidelines**: Updated regularly; current version covers Oracle through 21c. Available at https://trivadis.github.io/plsql-and-sql-coding-guidelines/
-- **PL/SQL Cop**: Version 6.x supports Oracle 12c through 21c patterns.
-- **SonarQube PL/SQL**: Available in Developer Edition and above; rules updated with each SonarQube release.
-
----
-
-## Sources
-
-- [Trivadis PL/SQL and SQL Coding Guidelines](https://trivadis.github.io/plsql-and-sql-coding-guidelines/) — naming conventions, anti-patterns, complexity metrics
-- [Oracle Database PL/SQL Language Reference 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/) — language features referenced in quality guidelines
-- [Oracle Database Reference 19c — USER_ERRORS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/USER_ERRORS.html) — compile error detection
+- [Trivadis PL/SQL and SQL Coding Guidelines](https://trivadis.github.io/plsql-and-sql-coding-guidelines/)
+- [Oracle Database PL/SQL Language Reference 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/)
+- [Oracle Database Reference 19c — USER_ERRORS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/USER_ERRORS.html)

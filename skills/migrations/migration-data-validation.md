@@ -1,30 +1,30 @@
-# Migration Data Validation
+# 移行データの検証
 
-## Overview
+## 概要
 
-Data validation is the most overlooked phase of database migrations. The schema can be converted automatically, the data can load without errors, and the migration can appear successful — only for the application to silently return wrong results because rows are missing, numeric values have been truncated, dates are offset by hours due to timezone differences, or NULL handling differs between the source and Oracle.
+データの検証は、データベース移行において最も見落とされやすいフェーズである。スキーマが自動的に変換され、エラーなくデータがロードされたとしても、行の欠落、数値の切り捨て、タイムゾーンの違いによる日時のずれ、あるいは NULL の扱いの違い（移行元と Oracle の差異）などが原因で、アプリケーションが静かに誤った結果を返す可能性がある。
 
-This guide provides a comprehensive, query-driven data validation framework. Use these patterns to validate immediately after initial load, after each incremental sync, and as ongoing drift detection after cutover.
+本ガイドでは、SQL クエリ・ベースの包括的なデータ検証フレームワークを提供する。これらのパターンを使用して、初期ロード直後、各増分同期後、および切り替え後の継続的なドリフト（差異）検出を行っていただきたい。
 
 ---
 
-## Row Count Validation
+## 行数検証
 
-The first and simplest validation is a row count comparison across all migrated tables.
+最初に行うべき、最もシンプルな検証は、移行されたすべての表にわたる行数の比較である。
 
-### Basic Row Count Query
+### 基本的な行数クエリ
 
-Run this on both source and target and compare results:
+移行元と移行先の両方で以下を実行し、結果を比較する。
 
 ```sql
--- Source (PostgreSQL)
+-- 移行元 (PostgreSQL)
 SELECT 'customers'::text AS table_name, COUNT(*) AS row_count FROM customers
 UNION ALL SELECT 'orders', COUNT(*) FROM orders
 UNION ALL SELECT 'order_items', COUNT(*) FROM order_items
 UNION ALL SELECT 'products', COUNT(*) FROM products
 ORDER BY table_name;
-
--- Oracle target (same pattern)
+27: 
+-- 移行先 Oracle (同様のパターン)
 SELECT 'customers' AS table_name, COUNT(*) AS row_count FROM customers
 UNION ALL SELECT 'orders', COUNT(*) FROM orders
 UNION ALL SELECT 'order_items', COUNT(*) FROM order_items
@@ -32,9 +32,9 @@ UNION ALL SELECT 'products', COUNT(*) FROM products
 ORDER BY table_name;
 ```
 
-### Automated Row Count Comparison (PL/SQL)
+### PL/SQL による行数比較の自動化
 
-This procedure stores expected row counts from the source and compares them to Oracle:
+以下のプロシージャは、移行元から期待される行数を保存し、Oracle 側の件数と比較する。
 
 ```sql
 CREATE TABLE migration_row_counts (
@@ -50,14 +50,14 @@ CREATE TABLE migration_row_counts (
                                ELSE 'FAIL' END) VIRTUAL
 );
 
--- After loading source counts (from source database query):
+-- 移行元の件数をロード (移行元データベースのクエリ結果から)
 INSERT INTO migration_row_counts (table_name, source_count) VALUES
     ('CUSTOMERS',   150000),
     ('ORDERS',      1200000),
     ('ORDER_ITEMS', 4800000),
     ('PRODUCTS',    5000);
 
--- After migration, update with Oracle counts:
+-- 移行後に Oracle の件数で更新
 BEGIN
     FOR t IN (SELECT table_name FROM migration_row_counts WHERE oracle_count IS NULL) LOOP
         EXECUTE IMMEDIATE
@@ -70,58 +70,58 @@ BEGIN
 END;
 /
 
--- Review results
+-- 結果の確認
 SELECT table_name, source_count, oracle_count, difference, status
 FROM migration_row_counts
 ORDER BY status DESC, ABS(difference) DESC;
 ```
 
-### Partitioned Table Row Count Validation
+### パーティション表の行数検証
 
-For partitioned tables, also validate per-partition counts:
+パーティション表の場合は、パーティションごとの件数も検証する。
 
 ```sql
--- Oracle: row count per partition
+-- Oracle: パーティションごとの行数
 SELECT table_name, partition_name, num_rows
 FROM user_tab_partitions
 WHERE table_name = 'FACT_SALES'
 ORDER BY partition_position;
 
--- Force fresh stats first if needed:
+-- 必要に応じて、事前に統計情報を明示的に収集する
 EXEC DBMS_STATS.GATHER_TABLE_STATS(USER, 'FACT_SALES', GRANULARITY => 'ALL');
 ```
 
 ---
 
-## Hash-Based Comparison with ORA_HASH
+## ORA_HASH を使用したハッシュ・ベースの比較
 
-Row counts confirm quantity but not content. Hash-based validation compares the actual data values.
+行数は「量」を確認できるが、「内容」は確認できない。ハッシュ・ベースの検証では、実際のデータ値を比較する。
 
-### ORA_HASH Overview
+### ORA_HASH の概要
 
-`ORA_HASH(expr, max_bucket, seed)` returns a deterministic hash bucket number (0 to max_bucket) for any scalar expression. By concatenating all column values and hashing each row, then summing or XOR-ing the row hashes, you can produce a "fingerprint" of an entire table's content.
+`ORA_HASH(expr, max_bucket, seed)` は、任意のスカラー式に対して決定論的なハッシュ・バケット番号（0 から `max_bucket`）を返す。すべての列値を連結して各行をハッシュ化し、それらを合計（SUM）または排他的論理和（XOR）することで、表全体の内容の「フィンガープリント（指紋）」を作成できる。
 
 ```sql
--- Oracle: compute a table-level hash fingerprint
+-- Oracle: 表レベルのハッシュ・フィンガープリントを計算
 SELECT
     SUM(ORA_HASH(
         customer_id || '|' || first_name || '|' || last_name || '|' ||
         email || '|' || TO_CHAR(created_date, 'YYYY-MM-DD HH24:MI:SS'),
-        4294967295  -- max bucket = max 32-bit unsigned int
+        4294967295  -- max bucket = 32ビット符号なし整数の最大値
     )) AS table_hash,
     COUNT(*) AS row_count
 FROM customers;
 ```
 
-The result on Oracle should match a corresponding hash computed on the source database. Since hash functions differ by platform, you need to use the same hash algorithm or compare intermediate results.
+Oracle での結果は、移行元データベースで計算された対応するハッシュと一致する必要がある。ハッシュ関数はプラットフォームによって異なるため、同じハッシュ・アルゴリズムを使用するか、中間結果を比較する必要がある。
 
-### Cross-Platform Hash Comparison Strategy
+### クロス・プラットフォームでのハッシュ比較戦略
 
-Because `ORA_HASH` is Oracle-specific, use a platform-neutral approach: hash individual columns to strings, then compare those strings:
+`ORA_HASH` は Oracle 固有であるため、プラットフォームに依存しないアプローチをとる。個別の行をハッシュ化して文字列にし、それらを比較する。
 
-**Step 1: Export ordered key + hash from source (PostgreSQL):**
+**ステップ 1：移行元 (PostgreSQL) からキーとハッシュを出力する**
 ```sql
--- PostgreSQL: compute MD5 of each row, order by PK
+-- PostgreSQL: 各行の MD5 を計算し、主キーでソート
 SELECT
     customer_id,
     MD5(COALESCE(first_name, '') || '|' ||
@@ -131,12 +131,12 @@ SELECT
     AS row_hash
 FROM customers
 ORDER BY customer_id
-LIMIT 1000;  -- validate a sample first
+LIMIT 1000;  -- 最初はサンプルで検証
 ```
 
-**Step 2: Compute the same hash in Oracle:**
+**ステップ 2：Oracle で同じハッシュを計算する**
 ```sql
--- Oracle: compute MD5 of each row using DBMS_CRYPTO
+-- Oracle: DBMS_CRYPTO を使用して各行の MD5 を計算
 SELECT
     customer_id,
     LOWER(RAWTOHEX(
@@ -156,17 +156,17 @@ WHERE customer_id <= 1000
 ORDER BY customer_id;
 ```
 
-**Step 3: Compare results** — export both result sets to CSV and diff them, or load Oracle results into a comparison table and join:
+**ステップ 3：結果を比較する** — 両方の結果セットを CSV に出力して diff をとるか、Oracle 側の比較用表にロードして結合（JOIN）する。
 
 ```sql
--- Load source hashes into staging
+-- 移行元のハッシュをステージング表にロード
 CREATE TABLE hash_staging_src (
     customer_id NUMBER,
     row_hash    VARCHAR2(32)
 );
 
--- After loading source hashes via SQL*Loader or INSERT:
--- Compare against Oracle-computed hashes
+-- SQL*Loader や INSERT で移行元のハッシュをロードした後：
+-- Oracle で計算したハッシュと比較
 SELECT
     o.customer_id,
     s.row_hash AS source_hash,
@@ -191,27 +191,27 @@ ORDER BY o.customer_id;
 
 ---
 
-## Data Sampling Strategies
+## データ・サンプリング戦略
 
-Full-table hash validation is impractical for billion-row tables during initial validation. Use stratified sampling to achieve statistical confidence in less time.
+初期検証において、数十億行の表に対して完全なハッシュ検証を行うのは現実的ではない。層化サンプリングを使用して、短時間で統計的な信頼性を得る。
 
-### Random Sample Validation
+### ランダム・サンプリング検証
 
 ```sql
--- Oracle: validate a random 0.1% sample of a large table
+-- Oracle: 大規模な表の 0.1% をランダムに抽出して検証
 SELECT customer_id, email, created_date, status
 FROM customers
 SAMPLE(0.1)
 ORDER BY customer_id;
--- SAMPLE(n) is Oracle-specific: selects approximately n% of rows
+-- SAMPLE(n) は Oracle 固有：行の約 n% を抽出する
 ```
 
-### Boundary Value Sampling
+### 境界値サンプリング
 
-Always validate the extremes of value ranges:
+値の範囲の極端なケースは必ず検証する。
 
 ```sql
--- Validate min/max values across key columns
+-- 主要な列における最小値/最大値の検証
 SELECT
     'order_amount' AS column_name,
     MIN(total_amount) AS min_val,
@@ -241,10 +241,10 @@ SELECT
 FROM orders;
 ```
 
-### Stratified Sample by Date Range
+### 日付範囲による層化サンプリング
 
 ```sql
--- Validate row counts by month — should match source exactly
+-- 月ごとの行数検証 — 移行元と完全に一致するはず
 SELECT
     TO_CHAR(order_date, 'YYYY-MM') AS order_month,
     COUNT(*) AS row_count,
@@ -257,12 +257,12 @@ GROUP BY TO_CHAR(order_date, 'YYYY-MM')
 ORDER BY order_month;
 ```
 
-### Top-N Validation
+### Top-N 検証
 
-Check that the largest/most important records migrated correctly:
+最大の値や最も重要なレコードが正しく移行されているか確認する。
 
 ```sql
--- Compare the top 100 orders by value
+-- 金額の大きい上位100件の注文を比較
 SELECT order_id, customer_id, total_amount, status, order_date
 FROM orders
 ORDER BY total_amount DESC
@@ -271,14 +271,14 @@ FETCH FIRST 100 ROWS ONLY;
 
 ---
 
-## Date and Numeric Precision Checks
+## 日付と数値の精度チェック
 
-### Date Offset Detection
+### 日付の「ずれ（オフセット）」の検出
 
-One of the most common migration bugs is a timezone offset applied during migration that silently shifts all dates by hours.
+移行で最も多いバグの1つは、移行中に特定のタイムゾーン・オフセットが適用されてしまい、すべての時刻が数時間ずれてしまうことである。
 
 ```sql
--- Compare date distribution: verify no systematic shift
+-- 日付分布の比較：体系的なずれがないか確認
 SELECT
     TRUNC(order_date, 'HH24') AS hour_of_day,
     COUNT(*) AS order_count
@@ -286,21 +286,21 @@ FROM orders
 WHERE order_date BETWEEN DATE '2024-01-01' AND DATE '2024-01-31'
 GROUP BY TRUNC(order_date, 'HH24')
 ORDER BY hour_of_day;
--- Compare this distribution against the source — should be identical
+-- この分布を移行元と比較する。同一である必要がある。
 ```
 
 ```sql
--- Check for suspicious midnight concentration (may indicate DATE precision loss)
+-- 不自然に「午前0時（00:00:00）」に集中していないか確認 (DATE 精度の欠落を示唆)
 SELECT
     CASE WHEN TO_CHAR(order_date, 'HH24:MI:SS') = '00:00:00' THEN 'Midnight' ELSE 'Non-midnight' END AS time_class,
     COUNT(*) AS row_count
 FROM orders
 GROUP BY CASE WHEN TO_CHAR(order_date, 'HH24:MI:SS') = '00:00:00' THEN 'Midnight' ELSE 'Non-midnight' END;
--- If all dates are midnight and source had actual times, data has been truncated
+-- すべてが Midnight であり、移行元では実際の時刻情報があった場合、データが切り捨てられている。
 ```
 
 ```sql
--- Check TIMESTAMP precision
+-- TIMESTAMP 精度の確認
 SELECT
     order_id,
     order_timestamp,
@@ -308,17 +308,17 @@ SELECT
 FROM orders
 WHERE EXTRACT(SECOND FROM order_timestamp) != TRUNC(EXTRACT(SECOND FROM order_timestamp))
 FETCH FIRST 10 ROWS ONLY;
--- If this returns rows, fractional seconds are preserved
+-- 行が返ってくれば、秒の小数部が保持されている。
 ```
 
-### Numeric Precision Validation
+### 数値精度の検証
 
 ```sql
--- Check for truncation in decimal columns
+-- 小数点以下の列での切り捨てを確認
 SELECT
     order_id,
-    original_amount,  -- from source system (loaded into staging)
-    oracle_amount,    -- in Oracle table
+    original_amount,  -- 移行元から（ステージングにロードしたもの）
+    oracle_amount,    -- Oracle 表内の値
     original_amount - oracle_amount AS difference
 FROM (
     SELECT
@@ -328,42 +328,42 @@ FROM (
     FROM orders o
     JOIN orders_source_staging s ON o.order_id = s.order_id
 )
-WHERE ABS(original_amount - oracle_amount) > 0.0001  -- tolerance for float comparison
+WHERE ABS(original_amount - oracle_amount) > 0.0001  -- 浮動小数比較の許容誤差
 ORDER BY ABS(original_amount - oracle_amount) DESC;
 ```
 
 ```sql
--- Check for scientific notation issues (BINARY_DOUBLE vs DECIMAL)
+-- 指数表記の問題を確認 (BINARY_DOUBLE vs DECIMAL)
 SELECT order_id, amount, TO_CHAR(amount, 'FM9999999999.999999') AS formatted_amount
 FROM orders
-WHERE amount != ROUND(amount, 4)  -- find amounts with more than 4 decimal places
+WHERE amount != ROUND(amount, 4)  -- 小数点以下4桁を超える金額を探す
 FETCH FIRST 20 ROWS ONLY;
 ```
 
 ---
 
-## NULL Handling Differences
+## NULL 处理の差異
 
-### Empty String vs NULL (PostgreSQL → Oracle)
+### 空文字 vs NULL (PostgreSQL → Oracle)
 
-The most common NULL-related migration issue is empty string to NULL conversion. Oracle 21c and earlier treat `''` as NULL. PostgreSQL treats `''` as an empty string distinct from NULL.
+NULL に関する最も一般的な問題は、空文字から NULL への変換である。Oracle 21c 以前では `''` は NULL として扱われる。PostgreSQL では `''` は NULL とは異なる空文字として扱われる。
 
 ```sql
--- Oracle: find rows where expected-non-null values are NULL
--- (may indicate empty strings from source were converted)
+-- Oracle: 期待される非 null 値が NULL になっている行を探す
+-- (移行元での空文字が変換された可能性がある)
 SELECT
     COUNT(*) AS total_rows,
     COUNT(CASE WHEN email IS NULL THEN 1 END) AS null_email_count,
-    COUNT(CASE WHEN email = '' THEN 1 END) AS empty_email_count,  -- should always be 0 in Oracle
-    COUNT(CASE WHEN LENGTH(email) = 0 THEN 1 END) AS zero_len_email_count  -- also 0
+    COUNT(CASE WHEN email = '' THEN 1 END) AS empty_email_count,  -- Oracle では常に 0 になるはず
+    COUNT(CASE WHEN LENGTH(email) = 0 THEN 1 END) AS zero_len_email_count  -- これも 0
 FROM customers;
 
--- Compare null percentages against source
--- Source NULL% should match Oracle NULL% + empty string %
+-- NULL の割合を移行元と比較
+-- 移行元の NULL% = Oracle の NULL% + 空文字% になっているか確認
 ```
 
 ```sql
--- Audit unexpected NULLs in NOT NULL columns
+-- NOT NULL 列における予期しない NULL の調査
 DECLARE
     v_count NUMBER;
 BEGIN
@@ -386,10 +386,10 @@ END;
 /
 ```
 
-### BOOLEAN Value Validation
+### BOOLEAN 値の検証
 
 ```sql
--- Verify BOOLEAN columns migrated to 0/1 correctly
+-- BOOLEAN 列が正しく 0/1 に移行されているか確認
 SELECT
     COUNT(*) AS total,
     COUNT(CASE WHEN is_active = 1 THEN 1 END) AS active_count,
@@ -397,19 +397,19 @@ SELECT
     COUNT(CASE WHEN is_active NOT IN (0, 1) THEN 1 END) AS invalid_count,
     COUNT(CASE WHEN is_active IS NULL THEN 1 END) AS null_count
 FROM customers;
--- invalid_count and null_count should both be 0
+-- invalid_count と null_count は共に 0 である必要がある
 ```
 
 ---
 
-## Building a Reconciliation Report
+## 照合報告（リコンシリエーション・レポート）の作成
 
-### Master Validation Report Query
+### マスター検証レポート・クエリ
 
-This query produces a single summary report across all validated tables:
+すべての検証済み表を対象に、1つの要約レポートを作成するクエリ。
 
 ```sql
--- Create a validation results table
+-- 検証結果保存用の表を作成
 CREATE TABLE migration_validation_results (
     check_id        NUMBER GENERATED ALWAYS AS IDENTITY,
     table_name      VARCHAR2(128),
@@ -422,9 +422,9 @@ CREATE TABLE migration_validation_results (
     checked_at      TIMESTAMP DEFAULT SYSTIMESTAMP
 );
 
--- Insert validation results
+-- 検証結果の挿入
 INSERT INTO migration_validation_results (table_name, check_type, check_detail, expected_value, actual_value, status)
--- Row counts (expected values loaded from source earlier)
+-- 行数 (事前に移行元からロードしておいた期待値を使用)
 SELECT
     mrc.table_name,
     'ROW_COUNT',
@@ -436,7 +436,7 @@ FROM migration_row_counts mrc;
 
 COMMIT;
 
--- Generate summary report
+-- 要約レポートの生成
 SELECT
     check_type,
     COUNT(*) AS total_checks,
@@ -449,7 +449,7 @@ GROUP BY check_type
 ORDER BY failed DESC, check_type;
 ```
 
-### Executive Summary Report
+### エグゼクティブ・サマリー・レポート
 
 ```sql
 SELECT
@@ -469,14 +469,14 @@ FROM migration_validation_results;
 
 ---
 
-## Ongoing Drift Detection
+## 継続的なドリフト検出
 
-After cutover, if the source database remains online for fallback purposes, or if you are running in parallel-write mode, detect drift between source and Oracle continuously.
+切り替え後、フォールバックのために移行元データベースがオンラインのまま維持されている場合、あるいはパラレル・ライト（並列書き込み）モードで実行している場合、移行元と Oracle 間のドリフトを継続的に検出する。
 
-### Drift Detection Framework
+### ドリフト検出フレームワーク
 
 ```sql
--- Drift check: track high-watermark row counts
+-- ドリフト監視：行数のハイウォーターマークを追跡
 CREATE TABLE drift_monitor (
     table_name      VARCHAR2(128)  NOT NULL,
     check_timestamp TIMESTAMP      DEFAULT SYSTIMESTAMP,
@@ -487,7 +487,7 @@ CREATE TABLE drift_monitor (
                         (ROUND((oracle_count - expected_count) / NULLIF(expected_count, 0) * 100, 4)) VIRTUAL
 );
 
--- Scheduled drift check (run via DBMS_SCHEDULER)
+-- スケジュール実行されるドリフト・チェック・プロシージャ
 CREATE OR REPLACE PROCEDURE run_drift_check AS
     v_count NUMBER;
 BEGIN
@@ -502,7 +502,7 @@ BEGIN
 END;
 /
 
--- Schedule drift check every hour
+-- ジョブのスケジュール (1時間おき)
 BEGIN
     DBMS_SCHEDULER.CREATE_JOB(
         job_name        => 'DRIFT_CHECK_JOB',
@@ -515,39 +515,39 @@ END;
 /
 ```
 
-### Alert on Significant Drift
+### 重大なドリフトの警告
 
 ```sql
--- Query to identify tables with > 0.01% drift
+-- 0.01% を超えるドリフトが発生している表を特定
 SELECT table_name, check_timestamp, oracle_count, expected_count, drift_pct
 FROM drift_monitor
-WHERE drift_pct > 0.01  -- more than 0.01% row count difference
+WHERE drift_pct > 0.01  -- 0.01% 以上の行数差
   AND check_timestamp > SYSTIMESTAMP - INTERVAL '24' HOUR
 ORDER BY ABS(drift_pct) DESC;
 ```
 
-### Checksum Drift Detection
+### チェックサムによるドリフト検出
 
-For critical financial tables, run checksum drift checks on a scheduled basis:
+重要な財務系表などの場合は、スケジュール・ベースでチェックサムによるドリフト検出を実行する。
 
 ```sql
--- Track aggregate checksums over time for critical tables
+-- 重要な表の集計チェックサムを追跡
 CREATE TABLE checksum_monitor (
     table_name       VARCHAR2(128),
     check_timestamp  TIMESTAMP DEFAULT SYSTIMESTAMP,
     row_count        NUMBER,
-    sum_of_key_col   NUMBER,  -- e.g., SUM(total_amount)
+    sum_of_key_col   NUMBER,  -- 例：売上合計 SUM(total_amount)
     max_of_key_col   NUMBER,
     min_of_key_col   NUMBER
 );
 
--- Financial integrity check for orders table
+-- 注文表に対する財務整合性チェック
 INSERT INTO checksum_monitor (table_name, row_count, sum_of_key_col, max_of_key_col, min_of_key_col)
 SELECT 'ORDERS', COUNT(*), SUM(total_amount), MAX(total_amount), MIN(total_amount)
 FROM orders;
 COMMIT;
 
--- Compare current state to baseline
+-- 現在の状態をベースラインと比較
 SELECT
     c.check_timestamp,
     c.row_count,
@@ -569,82 +569,80 @@ ORDER BY c.check_timestamp DESC;
 
 ---
 
-## Constraint Validation
+## 制約の検証
 
-After migration, verify that Oracle's constraints are actually enforced and that all data conforms:
+移行後、Oracle の制約が実際に有効であり、すべてのデータがそれに適合していることを確認する。
 
 ```sql
--- Check for constraint violations using Oracle's VALIDATE feature
--- This re-validates existing data against existing constraints
+-- Oracle の VALIDATE 機能を使用して制約違反を確認
+-- 既存のデータを既存の制約に照らして再検証する
 ALTER TABLE customers ENABLE VALIDATE CONSTRAINT pk_customers;
 ALTER TABLE orders ENABLE VALIDATE CONSTRAINT fk_orders_customer;
 
--- If Oracle raises ORA-02293, the data does not satisfy the constraint
--- Find the violating rows:
+-- ORA-02293 が発生した場合、データが制約を満たしていない。
+-- 違反している行を特定する：
 SELECT o.order_id, o.customer_id
 FROM orders o
 WHERE NOT EXISTS (
     SELECT 1 FROM customers c WHERE c.customer_id = o.customer_id
 );
 
--- Find NOT NULL violations (should be none if data was loaded correctly)
+-- NOT NULL 違反の確認 (正しくロードされていれば 0 になるはず)
 SELECT COUNT(*) FROM customers WHERE customer_id IS NULL;
 SELECT COUNT(*) FROM orders WHERE customer_id IS NULL;
-SELECT COUNT(*) FROM orders WHERE order_date IS NULL;
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Automate validation from day one.** Build validation queries into a script that can be run with one command. Manual validation is error-prone and skipped under time pressure.
+1. **初日から検証を自動化する。** 検証クエリを1つのコマンドで実行できるスクリプトに組み込むこと。手動の検証はミスが発生しやすく、時間が迫ると省略されがちである。
 
-2. **Validate incrementally, not only at the end.** Run row count checks after each table loads. Do not wait until all tables are loaded to discover a problem.
+2. **最後だけでなく段階的に検証する。** 各表のロード後に行数チェックを実行する。すべての表をロードし終えるまで問題を放置してはいけない。
 
-3. **Keep source row counts in a staging table.** Extract source counts before migration begins and store them in Oracle. This provides the baseline for comparison even after the source database is decommissioned.
+3. **移行元の行数をステージング表に保持する。** 移行開始前に移行元の行数を抽出し、Oracle 内に保存しておく。これにより、移行元データベースが廃止された後でも比較のベースラインとして機能する。
 
-4. **Test with edge case data explicitly.** Include rows with NULL values, maximum-length strings, dates near Unix epoch boundaries, negative numbers, and zero values in your sample validation queries.
+4. **境界ケースのデータを明示的にテストする。** NULL 値、最大長の文字列、Unix エポック境界付近の日付、負の数、ゼロ値などを含む行をサンプル検証クエリに含めること。
 
-5. **Compare aggregate checksums for financial data.** For any table containing monetary values, compare SUM(amount), SUM(quantity), etc. between source and Oracle. A row count match does not guarantee amount accuracy.
+5. **財務データには集計チェックサムを比較する。** 金額を含む表の場合は、移行元と Oracle で `SUM(amount)` や `SUM(quantity)` などを比較すること。行数が一致していても金額が正しいとは限らない。
 
-6. **Document every validation failure and resolution.** Keep a log of what failed, why it failed, and how it was resolved. This becomes the validation sign-off documentation for the go/no-go decision.
+6. **すべての検証失敗と解決策を記録する。** 何が失敗し、なぜ失敗し、どう解決したかのログを保存する。これは、Go/No-Go 判断を下す際の検証承諾ドキュメントとなる。
 
 ---
 
-## Common Validation Pitfalls
+## よくある検証の落とし穴
 
-**Pitfall 1 — Comparing FLOAT/DOUBLE precision across platforms:**
-IEEE 754 floating-point arithmetic can produce slightly different results on different hardware. When comparing float columns across databases, use a tolerance:
+**落とし穴 1 — プラットフォーム間での FLOAT/DOUBLE 精度の比較：**
+IEEE 754 浮動小数点演算は、ハードウェアによってわずかに異なる結果を生むことがある。データベース間で float 列を比較する場合は、許容誤差（tolerance）を使用する。
 ```sql
--- Wrong: exact float comparison
+-- 誤り：正確な一致を比較
 WHERE ABS(source_val - oracle_val) = 0
 
--- Right: tolerance-based comparison
+-- 正解：許容誤差に基づく比較
 WHERE ABS(source_val - oracle_val) > 0.00001
 ```
 
-**Pitfall 2 — Timezone in timestamp comparison:**
-Source timestamps in UTC may appear as local time in Oracle or vice versa depending on session settings. Always use `AT TIME ZONE 'UTC'` when comparing timestamps from different systems.
+**落とし穴 2 — TIMESTAMP 比較におけるタイムゾーン：**
+セッション設定によっては、UTC のタイムゾーンが Oracle でローカル時刻として表示されたり、その逆が発生したりする。異なるシステムのタイムゾーンを比較する場合は、常に `AT TIME ZONE 'UTC'` を使用すること。
 
-**Pitfall 3 — Collation differences cause "missing" rows:**
-If source database uses case-insensitive collation and values were normalized differently (e.g., 'ALICE' vs 'alice'), the data is present but appears different. Use `UPPER()` normalization in hash computations for string columns.
+**落とし穴 3 — 照合順序（Collation）の違いによる「行の欠落」：**
+移行元が格文字を区別しない照合順序を使用しており、値が異なる形式で正規化されていた場合（例：'ALICE' と 'alice'）、データは存在するが、ハッシュ結果が変わってしまう。文字列のハッシュ計算では `UPPER()` による正規化を使用すること。
 
-**Pitfall 4 — Row count can match but data is wrong:**
-A row count match guarantees only that the right number of rows exists. Rows could be in the wrong order, with swapped column values, or corrupted. Always supplement row counts with hash-based or aggregate-based validation for critical tables.
+**落とし穴 4 — 行数は一致しているがデータが誤っている：**
+行数の一致は、正しい「数」の行が存在することしか保証しない。行の順序が逆転していたり、列の値が入れ替わっていたり、データが破損している可能性がある。重要な表については、必ずハッシュ・ベースまたは集計ベースの検証で補完すること。
 
-**Pitfall 5 — Partitioned table stats lag:**
-Oracle's `ALL_TAB_PARTITIONS.NUM_ROWS` is populated from statistics, not a live count. Use `COUNT(*)` for validation, not the statistics-based NUM_ROWS, until fresh stats are gathered post-load.
+**落とし穴 5 — パーティション表の統計情報の遅延：**
+Oracle の `ALL_TAB_PARTITIONS.NUM_ROWS` は統計情報から計算されており、リアルタイムの件数ではない。ロード直後の検証には、NUM_ROWS ではなく `COUNT(*)` を使用すること。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ファイル内の基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c, 23c, または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 複数バージョンをサポートする環境では、リリース更新（RU）によってデフォルト値や非推奨機能が異なる場合があるため、19c と 26ai の両方で動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c PL/SQL Packages Reference — DBMS_CRYPTO (for hash functions)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_CRYPTO.html)
 - [Oracle Database 19c Reference — DBA_TABLES (NUM_ROWS, AVG_ROW_LEN)](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/DBA_TABLES.html)

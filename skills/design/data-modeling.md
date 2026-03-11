@@ -1,59 +1,59 @@
-# Data Modeling for Oracle Database
+# Oracle Databaseのデータ・モデリング
 
-## Overview
+## 概要
 
-Data modeling is the process of defining how data is organized, stored, and related within a database. It operates across three abstraction levels: **conceptual** (business concepts), **logical** (platform-independent relational structure), and **physical** (Oracle-specific DDL with storage parameters). This guide covers logical and physical modeling techniques, data warehouse schema patterns, Operational Data Store design, and Oracle-specific physical model considerations including storage clauses, compression, and partitioning.
-
----
-
-## 1. Modeling Levels
-
-### Conceptual Model
-
-The conceptual model captures business entities and their high-level relationships without any technical detail. It is tool-agnostic and intended for communication with business stakeholders.
-
-- Entities: Customer, Order, Product
-- Relationships: Customer places Order, Order contains Product
-- No data types, no keys, no constraints
-
-### Logical Model
-
-The logical model is platform-independent but technically complete. It defines:
-
-- All entities as tables with column names and data types (generic: STRING, INTEGER, DECIMAL)
-- Primary keys, foreign keys, and candidate keys
-- Normalization applied (typically to 3NF for OLTP, denormalized for OLAP)
-- Constraints and business rules (referential integrity, NOT NULL)
-
-### Physical Model
-
-The physical model is Oracle-specific DDL. It adds:
-
-- Oracle data types (`VARCHAR2`, `NUMBER`, `DATE`, `TIMESTAMP`, `CLOB`, `BLOB`)
-- Storage clauses (`TABLESPACE`, `STORAGE`, `PCTFREE`, `PCTUSED`)
-- Partitioning strategy
-- Index definitions
-- Compression settings
-- Parallel query hints
+データ・モデリングとは、データベース内でデータがどのように整理、格納、および関連付けられるかを定義するプロセスである。これは、**概念**（ビジネス概念）、**論理**（プラットフォームに依存しない関係構造）、および**物理**（ストレージ・パラメータを含む Oracle 固有の DDL）という 3 つの抽象化レベルで実行される。このガイドでは、論理および物理モデリングの手法、データウェアハウスのスキーマ・パターン、運用データ・ストア (ODS) の設計、およびストレージ句、圧縮、パーティショニングを含む Oracle 固有の物理モデルの考慮事項について説明する。
 
 ---
 
-## 2. OLTP Logical Modeling
+## 1. モデリング・レベル
 
-Online Transaction Processing (OLTP) systems prioritize **write performance**, **data integrity**, and **concurrency**. The logical model for OLTP follows normalization rules closely (3NF minimum).
+### 概念モデル (Conceptual Model)
 
-### Key Characteristics
+概念モデルは、技術的な詳細を一切含まず、ビジネス・エンティティ（実体）とその高レベルな関係を把握する。これはツールに依存せず、ビジネス関係者とのコミュニケーションを目的としている。
 
-- High insert/update/delete volume
-- Small, targeted queries (single-row or narrow range lookups)
-- Many short transactions with high concurrency
-- Row-level locking is critical
-- Normalized to minimize redundancy and lock contention
+- エンティティ: 顧客 (Customer)、注文 (Order)、製品 (Product)
+- 関係: 顧客が注文を行う、注文は製品を含む
+- データ型、キー、制約は含まない
 
-### Sample OLTP Schema
+### 論理モデル (Logical Model)
+
+論理モデルはプラットフォームには依存しないが、技術的には完全である。以下の内容を定義する：
+
+- 列名とデータ型（汎用的なもの。例：STRING, INTEGER, DECIMAL）を持つテーブルとしてのすべての実体
+- 主キー (PK)、外部キー (FK)、および一意キー (候補キー)
+- 適用された正規化（通常、OLTP では第3正規形 (3NF) まで、OLAP では非正規化）
+- 制約とビジネス・ルール（参照整合性、NOT NULL）
+
+### 物理モデル (Physical Model)
+
+物理モデルは、Oracle 固有の DDL である。以下の内容を追加する：
+
+- Oracle のデータ型 (`VARCHAR2`, `NUMBER`, `DATE`, `TIMESTAMP`, `CLOB`, `BLOB`)
+- ストレージ句 (`TABLESPACE`, `STORAGE`, `PCTFREE`, `PCTUSED`)
+- パーティショニング戦略
+- 索引（インデックス）の定義
+- 圧縮設定
+- パラレル・クエリ・ヒント
+
+---
+
+## 2. OLTP 論理モデリング
+
+オンライン・トランザクション処理 (OLTP) システムは、**書込みパフォーマンス**、**データ整合性**、および**並行性**を優先する。OLTP の論理モデルは正規化ルールに厳密に従う（最低でも 3NF）。
+
+### 主な特徴
+
+- 大量の挿入 (Insert) / 更新 (Update) / 削除 (Delete)
+- 特定のデータを対象とした小規模なクエリ（単一行または狭い範囲の検索）
+- 高い並行性を伴う多数の短いトランザクション
+- 行レベル・ロックが極めて重要
+- 冗長性を最小限に抑え、ロック競合を減らすために正規化されている
+
+### OLTP スキーマのサンプル
 
 ```sql
--- Normalized OLTP schema for an e-commerce system
+-- eコマース・システム用の正規化された OLTP スキーマ
 
 CREATE TABLE CUSTOMERS (
     customer_id   NUMBER         GENERATED ALWAYS AS IDENTITY,
@@ -78,7 +78,7 @@ CREATE TABLE ORDERS (
     CONSTRAINT ck_order_status   CHECK (status IN ('PENDING','CONFIRMED','SHIPPED','DELIVERED','CANCELLED'))
 )
 TABLESPACE users_data
-PCTFREE 15;  -- higher PCTFREE for rows likely to grow via updates
+PCTFREE 15;  -- 更新による行の拡張が予想される場合は PCTFREE を高めに設定
 
 CREATE INDEX IX_ORDERS_CUSTOMER_ID ON ORDERS (customer_id) TABLESPACE users_idx;
 CREATE INDEX IX_ORDERS_ORDER_DATE  ON ORDERS (order_date)  TABLESPACE users_idx;
@@ -86,48 +86,48 @@ CREATE INDEX IX_ORDERS_ORDER_DATE  ON ORDERS (order_date)  TABLESPACE users_idx;
 
 ---
 
-## 3. Data Warehouse Dimensional Modeling
+## 3. データウェアハウスのディメンショナル・モデリング
 
-Data warehouses prioritize **read performance** for analytical queries over large data volumes. **Dimensional modeling** (Ralph Kimball methodology) structures data into **fact tables** and **dimension tables**.
+データウェアハウス (DW) は、大量のデータに対する分析クエリの**読取りパフォーマンス**を優先する。**ディメンショナル・モデリング** (Ralph Kimball 手法) は、データを**ファクト表**と**ディメンション表**に構造化する。
 
-### Fact Tables
+### ファクト表 (Fact Tables)
 
-Fact tables store measurable business events (sales, transactions, events). They contain:
+ファクト表は、測定可能なビジネス・イベント（売上、取引、イベント）を格納する。以下が含まれる：
 
-- Foreign keys to dimension tables
-- Numeric measures (quantity, amount, duration)
-- Degenerate dimensions (order number stored in the fact, not a separate dimension)
-- Typically very large (hundreds of millions to billions of rows)
+- ディメンション表への外部キー
+- 数値メジャー（数量、金額、時間）
+- 縮退ディメンション (Degenerate dimensions: 独立したディメンションではなく、ファクト内に直接格納される注文番号など)
+- 通常、非常に巨大（数億から数十億行）
 
-### Dimension Tables
+### ディメンション表 (Dimension Tables)
 
-Dimension tables store descriptive context for facts. They contain:
+ディメンション表は、ファクトに対する記述的なコンテキスト（背景情報）を格納する。以下が含まれる：
 
-- A surrogate primary key (not the natural/business key)
-- Descriptive attributes (names, categories, hierarchies)
-- Typically much smaller than fact tables
-- Updated infrequently (Slowly Changing Dimensions)
+- サロゲート主キー（ナチュラル・キーやビジネス・キーではない代替キー）
+- 記述的な属性（名前、カテゴリ、階層）
+- 通常、ファクト表よりもはるかに小さい
+- 更新頻度は低い (徐々に変化するディメンション: SCD)
 
 ---
 
-## 4. Star Schema
+## 4. スター・スキーマ (Star Schema)
 
-The **star schema** is the simplest and most query-efficient dimensional model. The fact table is in the center; dimension tables radiate outward like a star. There is no normalization between dimension tables — all descriptive attributes are collapsed into a single wide dimension table.
+**スター・スキーマ**は、最もシンプルでクエリ効率の高いディメンショナル・モデルである。中心にファクト表があり、ディメンション表が星のように外側に放射状に配置される。ディメンション表間には正規化は行わず、すべての記述的な属性は単一の「幅の広い」ディメンション表に集約される。
 
 ```
                  DIM_DATE
                     |
 DIM_CUSTOMER -- FACT_SALES -- DIM_PRODUCT
                     |
-              DIM_STORE
+               DIM_STORE
 ```
 
-### Star Schema DDL Example
+### スター・スキーマの DDL 例
 
 ```sql
--- Dimension: Date
+-- ディメンション: 日付 (Date)
 CREATE TABLE DIM_DATE (
-    date_key        NUMBER(8)    NOT NULL,  -- YYYYMMDD surrogate key
+    date_key        NUMBER(8)    NOT NULL,  -- YYYYMMDD のサロゲート・キー
     full_date       DATE         NOT NULL,
     day_of_week     VARCHAR2(10) NOT NULL,
     day_of_month    NUMBER(2)    NOT NULL,
@@ -140,12 +140,12 @@ CREATE TABLE DIM_DATE (
     CONSTRAINT pk_dim_date PRIMARY KEY (date_key)
 )
 TABLESPACE dw_data
-COMPRESS FOR QUERY HIGH;  -- Hybrid Columnar Compression (HCC) — requires Exadata or Oracle ZFS/ODA storage
+COMPRESS FOR QUERY HIGH;  -- ハイブリッド列圧縮 (HCC) — Exadata または Oracle ZFS/ODA ストレージが必要
 
--- Dimension: Customer (denormalized — city/state/country collapsed in)
+-- ディメンション: 顧客 (Customer - 都市/州/国が非正規化され集約されている)
 CREATE TABLE DIM_CUSTOMER (
     customer_key    NUMBER       GENERATED ALWAYS AS IDENTITY,
-    customer_bk     VARCHAR2(50) NOT NULL,  -- business/natural key
+    customer_bk     VARCHAR2(50) NOT NULL,  -- ビジネス/ナチュラル・キー
     full_name       VARCHAR2(200) NOT NULL,
     email           VARCHAR2(255),
     city            VARCHAR2(100),
@@ -160,7 +160,7 @@ CREATE TABLE DIM_CUSTOMER (
 TABLESPACE dw_data
 COMPRESS FOR QUERY HIGH;
 
--- Dimension: Product (denormalized — category hierarchy collapsed in)
+-- ディメンション: 製品 (Product - カテゴリ階層が非正規化され集約されている)
 CREATE TABLE DIM_PRODUCT (
     product_key       NUMBER        GENERATED ALWAYS AS IDENTITY,
     product_bk        VARCHAR2(50)  NOT NULL,
@@ -177,14 +177,14 @@ CREATE TABLE DIM_PRODUCT (
 TABLESPACE dw_data
 COMPRESS FOR QUERY HIGH;
 
--- Fact: Sales (central fact table)
+-- ファクト: 売上 (Sales - 中心となるファクト表)
 CREATE TABLE FACT_SALES (
     sales_id          NUMBER        GENERATED ALWAYS AS IDENTITY,
     date_key          NUMBER(8)     NOT NULL,
     customer_key      NUMBER        NOT NULL,
     product_key       NUMBER        NOT NULL,
     store_key         NUMBER        NOT NULL,
-    order_number      VARCHAR2(50),           -- degenerate dimension
+    order_number      VARCHAR2(50),           -- 縮退ディメンション
     quantity_sold     NUMBER(10)    NOT NULL,
     unit_price        NUMBER(12,2)  NOT NULL,
     unit_cost         NUMBER(12,2)  NOT NULL,
@@ -206,21 +206,21 @@ PARTITION BY RANGE (date_key) (
     PARTITION p_future VALUES LESS THAN (MAXVALUE)
 );
 
--- Bitmap indexes — extremely efficient for low-cardinality FK columns in DW
+-- ビットマップ索引 — DW におけるカーディナリティの低い外部キー列に非常に有効
 CREATE BITMAP INDEX BIX_FS_DATE     ON FACT_SALES (date_key)     LOCAL TABLESPACE dw_idx;
 CREATE BITMAP INDEX BIX_FS_CUSTOMER ON FACT_SALES (customer_key) LOCAL TABLESPACE dw_idx;
 CREATE BITMAP INDEX BIX_FS_PRODUCT  ON FACT_SALES (product_key)  LOCAL TABLESPACE dw_idx;
 ```
 
-**Note:** Bitmap indexes are ideal for data warehouse FK columns (low cardinality, read-heavy, infrequent DML). Never use bitmap indexes on OLTP tables with high concurrent writes — they cause severe lock contention.
+**注意:** ビットマップ索引は、データウェアハウスの外部キー列（低カーディナリティ、検索重視、更新頻度が低い）に最適である。書き込みが頻発する OLTP テーブルにはビットマップ索引を使用してはいけない。深刻なロック競合が発生する。
 
-> **Important:** `COMPRESS FOR QUERY HIGH` uses Oracle Hybrid Columnar Compression (HCC). HCC is **not** a general Advanced Compression feature — it requires Exadata, Oracle ZFS Storage Appliance, Oracle Database Appliance (ODA), or another HCC-compatible engineered system. On standard server storage, this clause will not achieve columnar compression. For non-Exadata environments use `ROW STORE COMPRESS ADVANCED` (Advanced Row Compression, requires Advanced Compression option) or `COMPRESS BASIC` (direct-path inserts only, all editions).
+> **重要:** `COMPRESS FOR QUERY HIGH` は Oracle ハイブリッド列圧縮 (HCC) を使用する。HCC は一般的なアドバンスト圧縮機能ではなく、Exadata、Oracle ZFS Storage Appliance、Oracle Database Appliance (ODA)、またはその他の HCC 互換エンジニアド・システムが必要である。標準的なサーバー・ストレージでは、この句を指定しても列形式の圧縮は実現されない。非 Exadata 環境では、`ROW STORE COMPRESS ADVANCED` (アドバンスト行圧縮: Advanced Compression オプションが必要) または `COMPRESS BASIC` (ダイレクト・パス・インサートのみ: すべてのエディションで使用可能) を使用する。
 
 ---
 
-## 5. Snowflake Schema
+## 5. スノーフレーク・スキーマ (Snowflake Schema)
 
-The **snowflake schema** normalizes dimension tables, splitting out sub-hierarchies into separate tables. This reduces storage for dimension data but introduces additional joins.
+**スノーフレーク・スキーマ**はディメンション表を正規化し、階層構造を別のテーブルに分割する。これによりディメンション・データのストレージ容量は削減されるが、結合 (Join) の数が増える。
 
 ```
 DIM_PRODUCT_CATEGORY
@@ -230,10 +230,10 @@ DIM_PRODUCT_CATEGORY
                DIM_DATE
 ```
 
-### Snowflake DDL Example
+### スノーフレーク・スキーマの DDL 例
 
 ```sql
--- Normalized product dimension hierarchy
+-- 正規化された製品ディメンション階層
 CREATE TABLE DIM_PRODUCT_CATEGORY (
     category_key   NUMBER       GENERATED ALWAYS AS IDENTITY,
     category_name  VARCHAR2(100) NOT NULL,
@@ -261,75 +261,75 @@ CREATE TABLE DIM_PRODUCT (
 );
 ```
 
-### Star vs Snowflake: When to Use Each
+### スター vs スノーフレーク: 使い分けの目安
 
-| Criteria | Star Schema | Snowflake Schema |
+| 基準 | スター・スキーマ | スノーフレーク・スキーマ |
 |---|---|---|
-| Query performance | Better (fewer joins) | Slower (more joins) |
-| Storage | More (denormalized dimensions) | Less (normalized dimensions) |
-| ETL complexity | Simpler | More complex |
-| Maintenance | Harder (update in many rows) | Easier (update dimension table) |
-| BI tool compatibility | Better (most tools prefer star) | Acceptable |
-| Best for | Most DW use cases | Very large dimensions with deep hierarchies |
+| クエリ・パフォーマンス | 優れている (結合が少ない) | 低下する (結合が多い) |
+| ストレージ容量 | 多い (非正規化されたディメンション) | 少ない (正規化されたディメンション) |
+| ETL の複雑さ | 単純 | 複雑 |
+| メンテナンス | 困難 (多数の行を更新) | 容易 (ディメンション表のみ更新) |
+| BI ツールとの互換性 | 極めて良好 (多くがスター推奨) | 許容範囲 |
+| 最適なケース | ほとんどの DW ユースケース | 深い階層を持つ非常に巨大なディメンション |
 
 ---
 
 ## 6. Operational Data Store (ODS)
 
-An **Operational Data Store** bridges OLTP source systems and the data warehouse. It provides:
+**運用データ・ストア (ODS)** は、OLTP ソース・システムとデータウェアハウスの橋渡しをする。以下を提供する：
 
-- Near-real-time integrated operational reporting
-- A staging/cleansing layer before DW loading
-- A single integrated view across multiple source systems
+- 準リアルタイムの統合された運用レポート
+- DW ロード前のステージング / クレンジング・レイヤー
+- 複数のソース・システムにわたる単一の統合ビュー
 
-### ODS Design Principles
+### ODS の設計原則
 
-- **Subject-oriented**: Organized around business subjects, not source systems
-- **Integrated**: Data from multiple sources reconciled into a common model
-- **Current**: Reflects near-real-time operational state (unlike DW which is historical)
-- **Volatile**: ODS data is updated in-place (unlike DW which is append-only)
+- **サブジェクト指向 (Subject-oriented)**: ソース・システムではなく、ビジネス上の主題（顧客、注文など）に基づいて編成される
+- **統合されている (Integrated)**: 複数のソースからのデータが共通モデルに統合される
+- **最新である (Current)**: 準リアルタイムの運用状態を反映する (履歴を重視する DW とは異なる)
+- **更新可能 (Volatile)**: ODS データはその場で更新される (追記型の DW とは異なる)
 
 ```sql
--- ODS table with source system tracking and audit columns
+-- ソース・システムの追跡と監査列を持つ ODS 表
 CREATE TABLE ODS_CUSTOMER (
     ods_customer_id     NUMBER        GENERATED ALWAYS AS IDENTITY,
-    -- Source system tracking
+    -- ソース・システムの追跡
     source_system       VARCHAR2(50)  NOT NULL,  -- 'CRM', 'ERP', 'WEB'
     source_system_id    VARCHAR2(100) NOT NULL,
-    -- Business key (unified across source systems)
+    -- ビジネス・キー (複数のソース・システム間で統一)
     customer_email      VARCHAR2(255) NOT NULL,
-    -- Integrated attributes
+    -- 統合属性
     full_name           VARCHAR2(200),
     phone_number        VARCHAR2(30),
     address_line1       VARCHAR2(255),
     city                VARCHAR2(100),
     country_code        CHAR(2),
     customer_status     VARCHAR2(20),
-    -- ODS audit columns
+    -- ODS 監査列
     source_created_at   TIMESTAMP,
     source_updated_at   TIMESTAMP,
     ods_loaded_at       TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     ods_updated_at      TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
-    ods_checksum        VARCHAR2(64),  -- MD5/SHA of key fields for change detection
+    ods_checksum        VARCHAR2(64),  -- 変更検出のための主要フィールドのハッシュ (MD5/SHA)
     CONSTRAINT pk_ods_customer       PRIMARY KEY (ods_customer_id),
     CONSTRAINT uq_ods_cust_src       UNIQUE (source_system, source_system_id)
 )
 TABLESPACE ods_data;
 
--- Index for common ODS lookup patterns
+-- 一般的な ODS 検索パターンのための索引
 CREATE INDEX IX_ODS_CUST_EMAIL  ON ODS_CUSTOMER (customer_email)  TABLESPACE ods_idx;
 CREATE INDEX IX_ODS_CUST_LOADED ON ODS_CUSTOMER (ods_loaded_at)   TABLESPACE ods_idx;
 ```
 
 ---
 
-## 7. Slowly Changing Dimensions (SCD)
+## 7. 徐々に変化するディメンション (SCD)
 
-SCDs manage changes to dimension data over time. Oracle supports all three common types.
+SCD (Slowly Changing Dimensions) は、時間の経過に伴うディメンション・データの変更を管理する。Oracle は 3 つの一般的なタイプをすべてサポートしている。
 
-### SCD Type 1 — Overwrite
+### SCD タイプ 1 — 上書き (Overwrite)
 
-No history retained. Simplest approach. Used when history is not relevant.
+履歴を保持しない。最も単純な手法。履歴が重要でない場合に使用される。
 
 ```sql
 UPDATE DIM_CUSTOMER
@@ -339,19 +339,19 @@ WHERE  customer_bk = :customer_bk
 AND    is_current  = 'Y';
 ```
 
-### SCD Type 2 — Add New Row (Full History)
+### SCD タイプ 2 — 新しい行の追加 (履歴全体を保持)
 
-A new row is inserted for every change. Previous row is closed out.
+変更ごとに新しい行が挿入される。前の行は有効期限が設定されて閉じられる。
 
 ```sql
--- Close the current record
+-- 現在のレコードを閉じる
 UPDATE DIM_CUSTOMER
 SET    effective_to = TRUNC(SYSDATE) - INTERVAL '1' SECOND,
        is_current   = 'N'
 WHERE  customer_bk  = :customer_bk
 AND    is_current   = 'Y';
 
--- Insert the new current record
+-- 新しい現在のレコードを挿入
 INSERT INTO DIM_CUSTOMER (
     customer_bk, full_name, email, city, state_province, country_code,
     customer_segment, effective_from, effective_to, is_current
@@ -361,9 +361,9 @@ INSERT INTO DIM_CUSTOMER (
 );
 ```
 
-### SCD Type 3 — Previous Value Column
+### SCD タイプ 3 — 以前の値の列
 
-Stores the current and one previous value. Limited history but simple queries.
+現在の値と 1 つ前の値を格納する。履歴は限定的だがクエリは単純になる。
 
 ```sql
 ALTER TABLE DIM_CUSTOMER ADD (
@@ -380,42 +380,42 @@ WHERE  customer_bk = :customer_bk;
 
 ---
 
-## 8. Oracle Physical Model Considerations
+## 8. Oracle の物理モデルに関する考慮事項
 
-### Oracle Data Types
+### Oracle のデータ型
 
-Choose data types carefully for storage efficiency and correctness:
+ストレージ効率と正確性のために、データ型を慎重に選択すること：
 
 ```sql
 CREATE TABLE PHYSICAL_MODEL_EXAMPLE (
-    -- Numeric types
-    id              NUMBER(10)          NOT NULL,  -- integers up to 10 digits
-    amount          NUMBER(18,4)        NOT NULL,  -- financial: precision + scale
+    -- 数値型
+    id              NUMBER(10)          NOT NULL,  -- 最大 10 桁の整数
+    amount          NUMBER(18,4)        NOT NULL,  -- 会計用: 精度 + 位取り
     percentage      NUMBER(5,2)         NOT NULL,  -- 999.99
+    
+    -- 文字型
+    short_code      CHAR(3)             NOT NULL,  -- 固定長: ISO コードなど
+    description     VARCHAR2(4000)      NOT NULL,  -- 可変長。最大 4000 バイト
+    large_text      CLOB,                          -- 4000 文字超
+    json_data       CLOB CHECK (json_data IS JSON),-- JSON 検証 (12c+)
 
-    -- Character types
-    short_code      CHAR(3)             NOT NULL,  -- fixed-length: ISO codes
-    description     VARCHAR2(4000)      NOT NULL,  -- variable, up to 4000 bytes
-    large_text      CLOB,                          -- > 4000 chars
-    json_data       CLOB CHECK (json_data IS JSON),-- JSON validation (12c+)
+    -- 日付/時刻型
+    event_date      DATE                NOT NULL,  -- 日付 + 時刻 (タイムゾーンなし)
+    created_at      TIMESTAMP(6)        NOT NULL,  -- マイクロ秒の精度
+    updated_at      TIMESTAMP WITH TIME ZONE,      -- グローバルアプリ用: 常に TZ を保存
+    duration_days   INTERVAL DAY(3) TO SECOND(0),  -- 経過時間
 
-    -- Date/Time types
-    event_date      DATE                NOT NULL,  -- date + time (no TZ)
-    created_at      TIMESTAMP(6)        NOT NULL,  -- microsecond precision
-    updated_at      TIMESTAMP WITH TIME ZONE,      -- global apps: always store TZ
-    duration_days   INTERVAL DAY(3) TO SECOND(0),  -- elapsed time
-
-    -- Binary types
-    file_content    BLOB,                          -- binary files
-    thumbnail       RAW(2000),                     -- small binary (<= 2000 bytes)
+    -- バイナリ型
+    file_content    BLOB,                          -- バイナリ・ファイル
+    thumbnail       RAW(2000),                     -- 小規模なバイナリ (2000 バイト以下)
 
     CONSTRAINT pk_pme PRIMARY KEY (id)
 );
 ```
 
-### Storage Clauses
+### ストレージ句
 
-Oracle storage parameters control physical space allocation within a segment:
+Oracle のストレージ・パラメータは、セグメント内での物理スペースの割り当てを制御する：
 
 ```sql
 CREATE TABLE ORDERS (
@@ -424,34 +424,34 @@ CREATE TABLE ORDERS (
     CONSTRAINT pk_orders PRIMARY KEY (order_id)
 )
 TABLESPACE users_data
-PCTFREE   15     -- 15% of each block reserved for row updates (UPDATE growth)
-PCTUSED   40     -- block re-eligible for inserts when used% drops below 40 (MSSM only)
-INITRANS  4      -- initial transaction slots per block (higher for concurrent DML)
-MAXTRANS  255    -- maximum concurrent transactions per block
+PCTFREE   15     -- 行の更新（拡張）用に各ブロックの 15% を予約
+PCTUSED   40     -- 使用率が 40% を下回った場合に挿入対象となる (MSSMのみ)
+INITRANS  4      -- ブロックあたりの初期トランザクション・スロット数 (並行 DML が多い場合に高くする)
+MAXTRANS  255    -- ブロックあたりの最大並列トランザクション数
 STORAGE (
-    INITIAL     64K    -- initial extent size
-    NEXT        64K    -- subsequent extent sizes (locally managed: ignored)
-    MINEXTENTS  1      -- minimum number of extents
+    INITIAL     64K    -- 初期エクステント・サイズ
+    NEXT        64K    -- 次のエクステント・サイズ (ローカル管理では無視される)
+    MINEXTENTS  1      -- 最小エクステント数
     MAXEXTENTS  UNLIMITED
-    PCTINCREASE 0      -- no geometric growth (locally managed: ignored)
+    PCTINCREASE 0      -- 増分率 (ローカル管理では無視される)
 );
 ```
 
-**PCTFREE tuning guide:**
+**PCTFREE チューニング・ガイド:**
 
-| Workload | Recommended PCTFREE | Rationale |
+| ワークロード | 推奨 PCTFREE | 理由 |
 |---|---|---|
-| Insert-only (append) | 0–5 | Rows never updated; maximize block density |
-| Mix of inserts + updates | 10–20 | Reserve space for row growth |
-| Heavy updates (row growth) | 25–40 | Prevent row chaining/migration |
-| Data warehouse (query only) | 0–5 | Maximize scan density |
+| 挿入のみ (追加) | 0–5 | 更新されないため。ブロック密度を最大化する |
+| 挿入 + 更新の混在 | 10–20 | 行の拡張に備えてスペースを予約する |
+| 大幅な更新 (行の拡張) | 25–40 | 行連鎖/行移行を防ぐ |
+| データウェアハウス (検索のみ) | 0–5 | スキャン密度を最大化する |
 
-### Oracle Compression
+### Oracle の圧縮
 
-Oracle provides multiple compression tiers:
+Oracle は複数の圧縮ティアを提供している：
 
 ```sql
--- Basic Compression (all editions) — compresses during direct-path inserts only
+-- 基本圧縮 (Basic Compression: 全エディション) — ダイレクト・パス・インサート時のみ圧縮される
 CREATE TABLE SALES_ARCHIVE (
     sale_id     NUMBER,
     sale_date   DATE,
@@ -460,7 +460,7 @@ CREATE TABLE SALES_ARCHIVE (
 COMPRESS BASIC
 TABLESPACE dw_data;
 
--- Advanced Row Compression (Enterprise) — compresses all DML operations
+-- アドバンスト行圧縮 (Advanced Row Compression: Enterprise) — すべての DML 操作で圧縮される
 CREATE TABLE ORDERS (
     order_id    NUMBER,
     customer_id NUMBER,
@@ -469,8 +469,8 @@ CREATE TABLE ORDERS (
 ROW STORE COMPRESS ADVANCED
 TABLESPACE users_data;
 
--- Hybrid Columnar Compression — REQUIRES Exadata, ZFS Storage Appliance, or ODA
--- Not available on standard server/SAN storage; will silently fall back to no compression
+-- ハイブリッド列圧縮 (HCC) — Exadata, ZFS Storage Appliance, または ODA が必要
+-- 標準的なサーバー/SAN ストレージでは利用不可。警告なしで非圧縮にフォールバックされる
 CREATE TABLE FACT_SALES (
     date_key    NUMBER(8),
     amount      NUMBER(14,2)
@@ -478,24 +478,23 @@ CREATE TABLE FACT_SALES (
 COMPRESS FOR QUERY HIGH
 TABLESPACE dw_data;
 
--- In-Memory Compression (12c 12.1.0.2+) — in-memory columnar store
--- MEMCOMPRESS and PRIORITY must be combined in a single INMEMORY clause
+-- インメモリー圧縮 (12c 12.1.0.2 以降) — インメモリー列形式ストア
 ALTER TABLE FACT_SALES
     INMEMORY MEMCOMPRESS FOR QUERY HIGH PRIORITY CRITICAL;
 ```
 
-### Parallel Query Configuration
+### パラレル・クエリの構成
 
-For data warehouse tables, configure parallel DML and query:
+データウェアハウスのテーブルに対して、パラレル DML およびクエリを構成する：
 
 ```sql
--- Enable parallel query on a table (DW fact table example)
+-- テーブルでのパラレル・クエリを有効化 (DW ファクト表の例)
 ALTER TABLE FACT_SALES PARALLEL 8;
 
--- Session-level parallel DML
+-- セッション・レベルでパラレル DML を有効化
 ALTER SESSION ENABLE PARALLEL DML;
 
--- Hint-based parallel query
+-- ヒントを使用したパラレル・クエリ
 SELECT /*+ PARALLEL(f, 8) PARALLEL(d, 4) */
        d.year_number,
        SUM(f.gross_revenue) AS total_revenue
@@ -507,38 +506,38 @@ ORDER  BY d.year_number;
 
 ---
 
-## 9. Best Practices
+## 9. ベスト・プラクティス
 
-- **Separate OLTP and DW schemas** into different tablespaces (and ideally different databases or PDBs) to isolate I/O profiles and backup strategies.
-- **Use surrogate keys in dimension tables**, never business/natural keys as dimension primary keys. Natural keys change; surrogate keys never do.
-- **Pre-aggregate judiciously.** Oracle materialized views can serve as pre-aggregated summaries that the query optimizer uses automatically (query rewrite).
-- **Apply compression to data warehouse tables.** On Exadata (HCC), `COMPRESS FOR QUERY HIGH` achieves 10x or more compression on fact tables. On non-Exadata environments, use `ROW STORE COMPRESS ADVANCED` (Advanced Compression option required) which typically achieves 2:1 to 4:1 ratios for DW bulk loads.
-- **Design for ETL patterns.** Include audit columns (`LOAD_DATE`, `SOURCE_SYSTEM`, `BATCH_ID`) in every DW table from day one — retrofitting them is expensive.
-- **Avoid triggers on DW fact tables.** High-volume bulk loads with row-level triggers destroy performance. Use ETL logic in the load process instead.
-- **Document the grain** of every fact table explicitly — the grain is the most precise level of detail the fact table records (e.g., "one row per order line item per day").
+- **OLTP サービスと DW スキーマを別の表領域に分ける** (理想的には別のデータベースや PDB)。I/O プロファイルとバックアップ戦略を分離するため。
+- **ディメンション表ではサロゲート・キーを使用し**、ビジネス/ナチュラル・キーをディメンションの主キーに使用しない。ナチュラル・キーは変更される可能性があるが、サロゲート・キーは不変である。
+- **慎重に事前集計を行う。** Oracle のマテリアライズド・ビューは、オプティマイザが自動的に使用（クエリ・リライト）できる事前集計サマリーとして機能する。
+- **データウェアハウス表に圧縮を適用する。** Exadata (HCC) では、`COMPRESS FOR QUERY HIGH` により、ファクト表で 10 倍以上の圧縮を実現できる。非 Exadata 環境では、`ROW STORE COMPRESS ADVANCED` (オプションが必要) を使用することで、DW の一括ロードで通常 2:1 から 4:1 の圧縮率が得られる。
+- **ETL パターンを考慮して設計する。** 初日からすべての DW テーブルに監査列 (`LOAD_DATE`, `SOURCE_SYSTEM`, `BATCH_ID`) を含めること。後からの追加は非常にコストがかかる。
+- **DW ファクト表でのトリガー使用を避ける。** 大容量の一括ロードで単一行レベルのトリガーを使用するとパフォーマンスが壊滅的になる。ロード・プロセス内の ETL ロジックで行うこと。
+- **すべてのファクト表の粒度 (Grain) を明示的に文書化する。** 粒度とは、ファクト表が記録する最も詳細なレベルのこと（例：「1日あたり、注文の1明細行あたり1行」）。
 
 ---
 
-## 10. Common Mistakes and How to Avoid Them
+## 10. よくある間違いとその回避方法
 
-### Mistake 1: Using OLTP Schema for Analytical Queries
+### 間違い 1: 分析クエリに OLTP スキーマを使用する
 
-Running analytical queries against a normalized OLTP schema produces massive join trees and full table scans. Maintain a separate dimensional model (star schema) for analytics.
+正規化された OLTP スキーマに対して分析クエリを実行すると、巨大な結合ツリーと全表スキャンが発生する。分析用には別のディメンショナル・モデル（スター・スキーマなど）を維持すること。
 
-### Mistake 2: Using Operational Primary Keys as Dimension Surrogate Keys
+### 間違い 2: オペレーショナルな主キーをディメンションのサロゲート・キーとして使用する
 
-Business keys (order numbers, product SKUs, customer emails) change over time. Always generate a new surrogate key for dimension tables.
+ビジネス・キー（注文番号、製品 SKU、顧客メールアドレス）は時間の経過とともに変更される可能性がある。ディメンション表には常に新しくサロゲート・キーを生成すること。
 
-### Mistake 3: Missing SCD Strategy
+### 間違い 3: SCD 戦略が欠如している
 
-Failing to decide on SCD type before go-live means historical changes are silently lost. Document and implement SCD type per dimension table before the first data load.
+本番開始前に SCD タイプを決定していないと、履歴の変更が警告なしに失われてしまう。最初のデータ・ロードの前に、ディメンション表ごとに SCD タイプを文書化し、実装すること。
 
-### Mistake 4: Not Partitioning Large Fact Tables
+### 間違い 4: 巨大なファクト表をパーティション化していない
 
-Fact tables exceeding 50–100 million rows without partitioning will suffer full table scans and extremely slow maintenance operations (archiving, deletes, statistics gathering).
+パーティショニングなしで 5,000万から 1億行を超えるファクト表は、全表スキャンや非常に遅いメンテナンス操作（アーカイブ、削除、統計収集）に悩まされることになる。
 
 ```sql
--- Add range partitioning to an existing large table (Oracle 12.2+ online)
+-- 既存の巨大なテーブルにレンジ・パーティショニングを追加 (12.2 以降のオンライン操作)
 ALTER TABLE FACT_SALES MODIFY
     PARTITION BY RANGE (date_key) INTERVAL (10000) (
         PARTITION p_initial VALUES LESS THAN (20200101)
@@ -546,24 +545,24 @@ ALTER TABLE FACT_SALES MODIFY
     ONLINE;
 ```
 
-### Mistake 5: Bitmap Indexes on OLTP Tables
+### 間違い 5: OLTP テーブルにビットマップ索引を使用する
 
-Bitmap indexes lock at the bitmap segment level during DML — a single insert or update to a fact table can block dozens of concurrent transactions. Reserve bitmap indexes exclusively for data warehouse tables that receive bulk loads during maintenance windows.
+ビットマップ索引は DML 操作中にビットマップ・セグメント・レベルでロックされる。ファクト表への単一の挿入や更新が、数十の並行トランザクションをブロックする可能性がある。ビットマップ索引は、メンテナンス・ウィンドウ中に一括ロードを行うデータウェアハウス表専用とすること。
 
-### Mistake 6: Storing Calculated Fields Without Documentation
+### 間違い 6: 文書化せずに計算フィールドを保存する
 
-Storing pre-calculated values (gross profit, discounts) is sometimes valid for performance, but without documenting the formula, discrepancies between source and derived values are inevitable. Use virtual columns where possible, or document the formula as a column comment.
+パフォーマンスのために計算済みの値（粗利益、割引額など）を保存することは有効だが、式（計算式）を文書化しておかないと、ソースと計算値との間に不一致が生じた際に原因の特定が困難になる。可能な限り仮想列 (Virtual Column) を使用するか、列のコメントとして式を記述しておくこと。
 
 ---
 
 
-## Oracle Version Notes (19c vs 26ai)
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-## Sources
+## ソース
 
 - [Oracle Database 23ai Concepts Guide](https://docs.oracle.com/en/database/oracle/oracle-database/23/cncpt/)
 - [Oracle Database 23ai SQL Language Reference — CREATE TABLE](https://docs.oracle.com/en/database/oracle/oracle-database/23/sqlrf/CREATE-TABLE.html)

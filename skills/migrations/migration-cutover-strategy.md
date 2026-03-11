@@ -1,125 +1,125 @@
-# Migration Cutover Strategy
+# 移行切り替え（カットオーバー）戦略
 
-## Overview
+## 概要
 
-Cutover is the moment when the production workload moves from the source database to Oracle. It is the highest-risk phase of any migration project — execution errors at this point can cause data loss, extended downtime, and emergency rollbacks. A well-planned cutover turns this moment into a routine, predictable operational procedure rather than a crisis.
+切り替え（カットオーバー）とは、本番のワークロードを移行元データベースから Oracle データベースへ移行する瞬間のことである。これは移行プロジェクト全体の中で最もリスクの高いフェーズであり、この時点での実行ミスはデータの損失、ダウンタイムの延長、あるいは緊急のロールバックを引き起こす可能性がある。入念に計画された切り替え戦略は、この「危機」となりがちな瞬間を、日常的で予測可能な運用手順へと変える。
 
-This guide covers the full arc of cutover planning: phases, parallel run strategy, dual-write patterns, go/no-go criteria, rollback planning, minimizing downtime with Oracle GoldenGate, and stakeholder communication.
-
----
-
-## Cutover Planning Phases
-
-### Phase 1 — Pre-Cutover Preparation (Weeks Before)
-
-The cutover plan should be ready and rehearsed before the migration project even begins. During this phase:
-
-**Technical preparation:**
-- [ ] Complete schema migration and data validation (see `migration-data-validation.md`)
-- [ ] Complete application code changes (connection strings, SQL dialect adjustments)
-- [ ] Performance benchmark critical queries on Oracle — response times acceptable
-- [ ] Configure Oracle for production: connection pooling, resource manager, user accounts
-- [ ] Set up monitoring: Oracle Enterprise Manager, AWR baselines, alert thresholds
-- [ ] Configure Oracle backups: RMAN, Data Guard, snapshot schedule
-- [ ] Establish network routes: Oracle listeners accessible from all application hosts
-- [ ] Test Oracle from every application server (not just DBAs)
-- [ ] Test all reporting tools and ETL pipelines against Oracle target
-
-**Process preparation:**
-- [ ] Document the cutover runbook (step-by-step with owners and time estimates)
-- [ ] Schedule the cutover window on the change management calendar
-- [ ] Notify all stakeholders (business users, support teams, upstream/downstream systems)
-- [ ] Prepare rollback runbook with specific decision criteria
-- [ ] Book support contacts: application vendors, Oracle support, DBA on call
-- [ ] Establish a war room or call bridge for the cutover window
-
-### Phase 2 — Cutover Rehearsal (1–2 Weeks Before)
-
-A dry-run cutover in a staging environment that mirrors production as closely as possible:
-
-```
-Rehearsal Checklist:
-[ ] Execute the full cutover runbook in staging
-[ ] Time each step — record actual duration
-[ ] Simulate rollback scenario — practice the rollback runbook
-[ ] Test application startup against Oracle staging
-[ ] Run smoke tests against Oracle staging
-[ ] Identify gaps between runbook and actual execution
-[ ] Update runbook with timing corrections and clarifications
-[ ] Confirm all team members know their roles
-```
-
-The rehearsal should reveal:
-- Steps that take longer than estimated
-- Missing runbook steps discovered during execution
-- Dependency ordering issues
-- Team communication gaps
-
-### Phase 3 — Pre-Cutover Day (Day Before)
-
-**24 hours before cutover:**
-- [ ] Final incremental data sync — bring Oracle as close to current as possible
-- [ ] Freeze non-emergency changes to source database and application
-- [ ] Complete final validation queries (row counts, aggregates)
-- [ ] Confirm rollback decision deadline: "We will not proceed past T+2h if Oracle is not stable"
-- [ ] Brief all team members on roles and the communication plan
-- [ ] Verify monitoring is in place for the cutover window
-- [ ] Confirm backup of source database is current
-
-### Phase 4 — Cutover Execution
-
-**The cutover window itself — sample timeline:**
-
-```
-T-0:00  Announce maintenance window begins. Prevent new connections to source DB.
-T-0:05  Verify source DB traffic has drained (active session count = 0 non-admin).
-T-0:10  Run final DML on source DB — log the exact timestamp.
-T-0:15  Final incremental data sync: export changes since last sync, load to Oracle.
-T-0:35  Run validation queries: row counts, critical aggregate comparisons.
-T-0:45  GO/NO-GO decision point.
-T-0:50  Update connection strings / DNS / load balancer to point to Oracle.
-T-0:55  Application servers restart with Oracle connection configuration.
-T-1:00  Run application smoke tests (key workflows, login, search, checkout, etc.).
-T-1:15  Monitoring check: Oracle CPU, memory, I/O, wait events — all normal?
-T-1:20  Open for business: announce maintenance window complete.
-T-2:00  Post-cutover monitoring checkpoint: all systems normal? Declare success.
-```
-
-### Phase 5 — Post-Cutover Stabilization (48–72 Hours After)
-
-- Heightened monitoring for the first 48–72 hours
-- DBAs on standby for performance issues (missing indexes, bad plans, lock contention)
-- Application teams available to address any SQL compatibility issues found in production traffic
-- Run drift detection queries every hour (see `migration-data-validation.md`)
-- Decommission source database only after this stabilization period, not immediately
+本ガイドでは、切り替え計画の全体像を網羅する。具体的には、フェーズ分け、並行実行（パラレル・ラン）戦略、二重書き込み（デュアル・ライト）パターン、Go/No-Go 判断基準、ロールバック計画、Oracle GoldenGate によるダウンタイムの最小化、およびステークホルダー（利害関係者）とのコミュニケーションについて解説する。
 
 ---
 
-## Parallel Run Strategy
+## 切り替え計画のフェーズ
 
-A parallel run operates both databases simultaneously, comparing output to build confidence before committing to Oracle as the authoritative system.
+### フェーズ 1 — 切り替え前の準備 (数週間前)
 
-### Read-Only Parallel Run
+切り替え計画は、移行プロジェクトの開始前に準備し、リハーサルを行っておく必要がある。このフェーズでは以下を実施する。
 
-The simplest form: direct read-only queries (reports, analytics) to Oracle while writes still go to the source database.
+**技術的な準備：**
+- [ ] スキーマ移行とデータ検証の完了 (`migration-data-validation.md` を参照)
+- [ ] アプリケーション・コードの変更完了（接続文字列、SQL 方言の調整）
+- [ ] Oracle 上での主要クエリのパフォーマンス・ベンチマークの実施 — 許容範囲内であることを確認
+- [ ] 本番用 Oracle の構成：接続プーリング、リソース・マネージャ、ユーザー・アカウント
+- [ ] モニタリングのセットアップ：Oracle Enterprise Manager、AWR ベースライン、アラートしきい値
+- [ ] Oracle バックアップの構成：RMAN、Data Guard、スナップショット・スケジュールの設定
+- [ ] ネットワーク経路の確立：すべてのアプリケーション・ホストから Oracle リスナーにアクセス可能であること
+- [ ] すべてのアプリケーション・サーバからの Oracle 接続テスト (DBA だけでなく全サーバで実施)
+- [ ] すべてのレポーティング・ツールおよび ETL パイプラインが Oracle ターゲットに対して動作することを確認
+
+**プロセスの準備：**
+- [ ] 切り替え用手順書（ランブック）の作成（担当者と見積もり時間を含むステップ・バイ・ステップの手順）
+- [ ] 変更管理カレンダー上での切り替え期間のスケジュール確保
+- [ ] すべてのステークホルダー（ビジネス・ユーザー、サポート・チーム、上位/下位システム担当者）への通知
+- [ ] 具体的な判断基準を含むロールバック用手順書の準備
+- [ ] サポート連絡先の確保：アプリケーション・ベンダー、Oracle サポート、オンコール DBA
+- [ ] 切り替え期間中の「ウォー・ルーム（対策本部）」または電話会議用ブリッジの設置
+
+### フェーズ 2 — 切り替えリハーサル (1–2 週間前)
+
+本番環境を可能な限り忠実に再現したステージング環境で、切り替えのドライラン（予行演習）を実施する。
 
 ```
-Application Traffic Split:
-  WRITES    → Source Database (authoritative)
-  READ queries (reports, dashboards) → Oracle
-  Compare report results between systems weekly
+リハーサル・チェックリスト：
+[ ] 手順書 (ランブック) の全ステップをステージングで実行
+[ ] 各ステップの時間を計測し、実際の所要時間を記録
+[ ] ロールバック・シナリオのシミュレーション — ロールバック手順を練習
+[ ] ステージングの Oracle に対するアプリケーション起動テスト
+[ ] ステージングの Oracle に対する疎通（スモーク）テストの実行
+[ ] 手順書と実際の実行結果とのギャップを特定
+[ ] 時間の計測結果と明確化された事項を反映して手順書を更新
+[ ] すべてのチーム・メンバーが自身の役割を理解していることを確認
 ```
 
-This approach carries no risk to data integrity and allows you to validate Oracle query performance and results under real workload before cutover.
+リハーサルによって以下のことが明らかになる。
+- 見積もりよりも時間がかかるステップ
+- 実行中に発見された不足しているステップ
+- 依存関係や順序の問題
+- チーム間のコミュニケーション不足
 
-### Dual-Read with Comparison
+### フェーズ 3 — 切り替え前日 (1 日前)
 
-A more rigorous parallel run where the same read queries are executed against both databases and results are compared programmatically:
+**切り替え 24 時間前：**
+- [ ] 最終的な増分データ同期 — Oracle を最新の状態に可能な限り近づける
+- [ ] 移行元データベースおよびアプリケーションへの（緊急時以外の）変更凍結
+- [ ] 最終的な検証クエリの実行（行数、集計値）
+- [ ] ロールバック判断期限の確認：「T+2時間（開始から2時間後）を過ぎても Oracle が安定しない場合は続行しない」
+- [ ] 役割とコミュニケーション計画について全チーム・メンバーへの説明
+- [ ] 切り替え期間中のモニタリング体制の最終確認
+- [ ] 移行元データベースの最新のバックアップが取得されていることを確認
+
+### フェーズ 4 — 切り替えの実行
+
+**切り替え作業当日 — タイムラインのサンプル：**
+
+```
+T-0:00  メンテナンス期間の開始を発表。移行元 DB への新規接続を遮断。
+T-0:05  移行元 DB のトラフィックがなくなったことを確認 (管理者以外の接続数 = 0)。
+T-0:10  移行元 DB で最終的な DML を実行 — 正確なタイムスタンプを記録。
+T-0:15  最終的な増分データ同期：前回の同期以降の変更をエクスポートし、Oracle にロード。
+T-0:35  検証クエリの実行：行数、主要な集計値の比較。
+T-0:45  GO/NO-GO 判断ポイント。
+T-0:50  接続文字列 / DNS / ロードバランサを更新し、Oracle を指すように変更。
+T-0:55  Oracle 接続構成を使用してアプリケーション・サーバを再起動。
+T-1:00  アプリケーションのスモーク・テスト（主要ワークフロー、ログイン、検索、購入等）。
+T-1:15  モニタリングのチェック：Oracle CPU、メモリ、I/O、待機イベントが正常かを確認。
+T-1:20  サービスの公開：メンテナンス時間の終了を発表。
+T-2:00  切り替え後のモニタリング・チェック：全システムが正常か？ 成功宣言。
+```
+
+### フェーズ 5 — 切り替え後の安定化 (48–72 時間後)
+
+- 最初の 48–72 時間はモニタリングを強化
+- パフォーマンスの問題（インデックスの不足、不適切な実行計画、ロック競合）に対応するため DBA が待機
+- 本番トラフィックで発見された SQL 互換性の問題に対応するためアプリケーション・チームが待機
+- ドリフト（差異）検出クエリを 1 時間おきに実行 (`migration-data-validation.md` を参照)
+- 移行元データベースの廃止は、直後ではなくこの安定化期間を経てから行う
+
+---
+
+## 並行実行（パラレル・ラン）戦略
+
+パラレル・ランでは両方のデータベースを同時に稼働させ、出力を比較することで、Oracle を正式な信頼できるシステムとして運用する前に確信を得ることができる。
+
+### 読み取り専用パラレル・ラン
+
+最もシンプルな形態。書き込みは依然として移行元データベースに行いつつ、読み取り専用のクエリ（レポート、分析など）を Oracle に向ける。
+
+```
+アプリケーション・トラフィックの分割：
+  書き込み    → 移行元データベース (信頼できるソース)
+  読み取りクエリ (レポート、ダッシュボード) → Oracle
+  週次でシステム間のレポート結果を比較
+```
+
+このアプローチはデータの整合性に対するリスクがなく、切り替え前に実際のワークロード下で Oracle のクエリ・パフォーマンスと結果を検証できる。
+
+### 比較を伴う二重読み取り
+
+読み取りクエリを両方のデータベースに対して実行し、結果をプログラムで比較する、より厳格なパラレル・ラン。
 
 ```python
-# Application-level dual-read comparison (Python example)
+# アプリケーション・レベルでの二重読み取り比較 (Python の例)
 def get_customer_orders(customer_id):
-    # Execute against both databases
+    # 両方のデータベースに対して実行
     source_result = source_db.execute(
         "SELECT order_id, total FROM orders WHERE customer_id = %s ORDER BY order_id",
         (customer_id,)
@@ -130,15 +130,15 @@ def get_customer_orders(customer_id):
         (customer_id,)
     ).fetchall()
 
-    # Compare results
+    # 結果を比較
     if source_result != oracle_result:
         log_discrepancy('customer_orders', customer_id, source_result, oracle_result)
 
-    # Return source result (still authoritative)
+    # 移行元の結果を返す (依然としてこちらが正式)
     return source_result
 ```
 
-Log discrepancies to a monitoring table:
+不一致（discrepancy）を監視用テーブルに記録する。
 
 ```sql
 CREATE TABLE parallel_run_discrepancies (
@@ -151,151 +151,151 @@ CREATE TABLE parallel_run_discrepancies (
 );
 ```
 
-Review discrepancies daily. Zero discrepancies over a defined period (e.g., 2 business days with representative traffic) is a strong indicator that Oracle is ready.
+毎日不一致を確認する。一定期間（例：代表的なトラフィックが発生した営業日2日間）にわたって不一致がゼロであれば、Oracle の準備が整っていることを示す強力な指標となる。
 
 ---
 
-## Dual-Write Pattern
+## 二重書き込み（デュアル・ライト）パターン
 
-The dual-write pattern writes every data change to both the source and Oracle simultaneously. This keeps Oracle fully synchronized without depending on batch replication, and allows instant cutover of reads.
+二重書き込みパターンは、すべてのデータ変更を移行元と Oracle の両方に同時に書き込む。これにより、バッチ・レプリケーションに依存することなく Oracle を完全に同期させ、読み取り側の瞬時の切り替えを可能にする。
 
-### Application-Level Dual Write
+### アプリケーション・レベルの二重書き込み
 
 ```python
-# Application dual-write (conceptual pattern)
+# アプリケーションの二重書き込み (概念的なパターン)
 def create_order(customer_id, items, total):
     try:
-        # Write to source database first (authoritative)
+        # 最初に移行元データベースに書き込む (正式)
         with source_db.transaction():
             order_id = source_db.execute(
                 "INSERT INTO orders (customer_id, total) VALUES (%s, %s) RETURNING order_id",
                 (customer_id, total)
             ).fetchone()[0]
-            # insert line items...
+            # 明細行の挿入...
 
-        # Write to Oracle (shadow write)
+        # Oracle への書き込み (シャドー・ライト)
         try:
             with oracle_db.transaction():
                 oracle_db.execute(
                     "INSERT INTO orders (order_id, customer_id, total) VALUES (:1, :2, :3)",
                     (order_id, customer_id, total)
                 )
-                # insert line items...
+                # 明細行の挿入...
         except Exception as oracle_err:
-            # Log Oracle write failure but do NOT fail the user request
+            # Oracle への書き込み失敗を記録するが、ユーザー・リクエスト全体を失敗とはしない
             log_oracle_write_failure('create_order', oracle_err, order_id)
 
         return order_id
 
     except Exception as source_err:
-        raise  # Source database failures always propagate
+        raise  # 移行元データベースの失敗は、常に例外として伝播させる
 ```
 
-**Key principles of dual-write:**
-1. Source database failures always fail the request
-2. Oracle failures are logged but do NOT fail the user-facing operation
-3. A reconciliation job runs periodically to detect and correct drift
-4. Once Oracle drift falls below an acceptable threshold, switch Oracle to primary
+**二重書き込みの主要原則：**
+1. 移行元データベースの失敗は常にリクエストを失敗させる。
+2. Oracle の失敗は記録されるが、ユーザー向けの操作は失敗させない。
+3. ドリフト（差異）を検出・修正するため、定期的に照合（レプリケーション）ジョブを実行する。
+4. Oracle のドリフトが許容しきい値を下回ったら、Oracle をプライマリに切り替える。
 
-### Database-Level Dual Write (Triggers)
+### データベース・レベルの二重書き込み (トリガー)
 
-For applications where modifying application code is not feasible, use source-database triggers to replicate changes:
+アプリケーション・コードの変更が不可能な場合は、移行元データベースのトリガーを使用して変更をレプリケートする。
 
 ```sql
--- SQL Server trigger replicating to Oracle via linked server
--- (Not recommended for high-throughput systems due to latency)
+-- リンク・サーバー経由で Oracle にレプリケートする SQL Server トリガー
+-- (レイテンシのため、高スルーパットなシステムには非推奨)
 CREATE TRIGGER tr_orders_replicate
 ON orders
 AFTER INSERT, UPDATE
 AS
 BEGIN
-    -- This approach adds latency to every write on the source
-    -- Only suitable for low-volume tables
+    -- このアプローチは移行元のすべての書き込みにレイテンシを追加する
+    -- データ量の少ないテーブルにのみ適している
     INSERT INTO [OracleLinkedServer]..orders (order_id, customer_id, total, order_date)
     SELECT order_id, customer_id, total, order_date FROM inserted;
 END;
 ```
 
-### Preferred Approach: Change Data Capture + Oracle GoldenGate
+### 推奨アプローチ：Change Data Capture + Oracle GoldenGate
 
-For production migrations, Oracle GoldenGate provides real-time, low-latency replication without application changes:
+本番環境の移行においては、Oracle GoldenGate がアプリケーションの変更なしにリアルタイム・低レイテンシのレプリケーションを提供する。
 
 ```
-Source DB ──[GoldenGate Extract]──► Trail Files ──[GoldenGate Replicat]──► Oracle Target
-                                                         ^
-                                             (lag typically < 1 second)
+移行元 DB ──[GoldenGate Extract]──► Trail Files ──[GoldenGate Replicat]──► Oracle Target
+                                                          ^
+                                              (遅延は通常 1 秒未満)
 ```
 
-During the parallel run period, GoldenGate continuously applies changes from source to Oracle. At cutover, the only downtime is the time needed for the lag to drain to zero and the application to reconnect.
+パラレル・ラン期間中、GoldenGate は移行元から Oracle へ変更を継続的に適用する。切り替え時、ダウンタイムは遅延をゼロにするための時間とアプリケーションの再接続時間のみとなる。
 
 ---
 
-## Go/No-Go Criteria Checklist
+## Go/No-Go 判断基準チェックリスト
 
-This checklist must be completed and approved **at the go/no-go decision point** during cutover. If any mandatory item is not PASS, do not proceed — execute the rollback plan.
+このチェックリストは、切り替え作業中の **Go/No-Go 判断ポイント**にて完了および承認される必要がある。必須項目で「不合格 (FAIL)」がある場合は、続行せず、ロールバック計画を実行すること。
 
-### Mandatory (Must All Pass)
+### 必須項目 (すべて合格が必要)
 
-| Criterion | Threshold | Check Method | Result |
+| 判断基準 | しきい値 | 確認方法 | 結果 |
 |---|---|---|---|
-| Row count validation | 100% match for all tables | SQL comparison queries | |
-| Financial aggregate match | < 0.001% difference | SUM(amount) comparison | |
-| Constraint violations | 0 violations | ALTER TABLE VALIDATE | |
-| Application smoke tests | 100% pass | Automated test suite | |
-| Oracle error rate | 0 ORA- errors in smoke test | Oracle alert log | |
-| Response time — P50 | < 2× source baseline | Load test or benchmark | |
-| Response time — P99 | < 5× source baseline | Load test or benchmark | |
-| Rollback plan tested | Rollback rehearsed successfully | Rehearsal documentation | |
-| Support team available | DBA, App, Network on standby | Call confirmation | |
-| Monitoring active | All dashboards green | OEM / custom monitoring | |
+| 行数検証 | 全テーブルで 100% 一致 | SQL 比較クエリ | |
+| 財務合計の一致 | 差異 0.001% 未満 | SUM(amount) の比較 | |
+| 制約違反 | 0 件 | ALTER TABLE VALIDATE | |
+| アプリケーション疎通（スモーク）テスト | 100% 合格 | 自動テスト・スイート | |
+| Oracle エラー率 | スモーク・テスト中に ORA- エラーなし | Oracle アラート・ログ | |
+| レスポンス・タイム — P50 | 移行元の 2 倍未満 | 負荷テストまたはベンチマーク | |
+| レスポンス・タイム — P99 | 移行元の 5 倍未満 | 負荷テストまたはベンチマーク | |
+| ロールバック計画のテスト | リハーサルが成功していること | リハーサル・ドキュメント | |
+| サポート・チームの待機 | DBA, アプリ, ネットワークが待機中 | 点呼確認 | |
+| モニタリングの稼働 | すべてのダッシュボードが正常 | OEM / カスタム監視 | |
 
-### Advisory (Failures May Delay Cutover)
+### 参考項目 (不合格でも切り替えを遅らせる程度)
 
-| Criterion | Threshold | Action if Not Met |
+| 判断基準 | しきい値 | 未達成時のアクション |
 |---|---|---|
-| GoldenGate replication lag | < 10 seconds | Wait for lag to drain |
-| Oracle SGA/PGA usage | < 80% | Resize if needed |
-| Oracle redo log switches | < 4 per hour | Resize redo logs if thrashing |
-| Batch jobs validated | All critical batch jobs tested | Schedule post-cutover validation |
+| GoldenGate レプリケーション遅延 | 10 秒未満 | 遅延がなくなるまで待機 |
+| Oracle SGA/PGA 使用率 | 80% 未満 | 必要に応じてリサイズ |
+| Oracle REDO ログの切り替え | 1 時間に 4 回以下 | スラッシングが発生している場合はリサイズ |
+| バッチ・ジョブの検証 | すべての重要バッチ・ジョブのテスト完了 | 切り替え後の検証をスケジュール |
 
 ---
 
-## Rollback Plan
+## ロールバック計画
 
-A rollback plan must be defined, documented, and rehearsed before cutover begins. Define a clear rollback deadline — a specific time after cutover starts at which you will automatically initiate rollback if Oracle is not stable.
+ロールバック計画は、切り替えを開始する前に定義、文書化、およびリハーサルされていなければならない。切り替え開始後の特定の時間（切り替えの期限）を明確に定め、Oracle が安定しない場合にはその時点で自動的にロールバックを開始するようにする。
 
-### Rollback Decision Triggers
+### ロールバック判断のトリガー
 
-Automatically initiate rollback if ANY of the following occur within the rollback window:
+ロールバック期間内に以下のいずれかが発生した場合、自動的にロールバックを開始する。
 
-- Oracle is returning errors for > 5% of requests for more than 5 consecutive minutes
-- A critical application workflow is completely broken (login, checkout, data save)
-- Oracle performance is > 10× worse than source baseline for P99 latency
-- Data corruption detected (validation query returns unexpected results)
-- Oracle instance crashes or becomes unreachable
+- 5 分間以上、リクエストの 5% 以上で Oracle がエラーを返している。
+- 重要なアプリケーション・ワークフロー（ログイン、決済、データ保存）が完全に壊れている。
+- Oracle の P99 レイテンシが、移行元のベースラインより 10 倍以上悪い。
+- データの破損が検出された（検証クエリで予期しない結果が返る）。
+- Oracle インスタンスがクラッシュした、または到達不能になった。
 
-### Rollback Runbook
+### ロールバック手順書（ランブック）
 
 ```
-ROLLBACK PROCEDURE — Execute only with explicit approval from Incident Commander
+ロールバック手順 — インシデント・コマンダー（指揮官）の明示的な承認がある場合のみ実行
 
-T+0:00  Declare rollback initiated. Notify all stakeholders.
-T+0:02  Stop all application servers.
-T+0:05  Revert connection strings / DNS to point to source database.
-T+0:08  Verify source database is still accessible and current.
-T+0:10  Restart application servers against source database.
-T+0:15  Application smoke tests against source database — all pass?
-T+0:20  Reopen service to users.
-T+0:25  Begin incident review: capture Oracle alert logs, OEM snapshot, application logs.
-T+1:00  Post-mortem meeting: identify root cause, plan remediation, schedule re-migration.
+T+0:00  ロールバックの開始を宣言。全ステークホルダーに通知。
+T+0:02  すべてのアプリケーション・サーバを停止。
+T+0:05  接続文字列 / DNS を元の移行元データベースを指すように戻す。
+T+0:08  移行元データベースが依然としてアクセス可能で最新であることを確認。
+T+0:10  アプリケーション・サーバを移行元データベースに対して再起動。
+T+0:15  移行元データベースに対するアプリケーション・スモーク・テスト — すべて合格か？
+T+0:20  ユーザーへのサービスを再開。
+T+0:25  インシデント・レビューの開始：Oracle アラート・ログ、OEM スナップショット、アプリ・ログを採取。
+T+1:00  ポストモータム（事後検証）会議：根本原因の特定、是正計画の策定、再移行スケジュールの調整。
 ```
 
-### Preserving Source Database During Rollback Window
+### ロールバック期間中の移行元データベースの維持
 
-Never decommission the source database until the rollback window has closed (typically 48–72 hours after cutover):
+ロールバック期間が終了するまで（通常は切り替えから 48–72 時間）、移行元データベースを廃止してはならない。
 
 ```sql
--- Oracle: document rollback deadline in a migration log
+-- Oracle: 移行ログにロールバックの期限を記録
 CREATE TABLE migration_log (
     event_type    VARCHAR2(50),
     event_time    TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP,
@@ -304,196 +304,195 @@ CREATE TABLE migration_log (
 );
 
 INSERT INTO migration_log (event_type, details)
-VALUES ('CUTOVER_COMPLETE', 'Production cutover completed. Source DB remains live until ' ||
-        TO_CHAR(SYSTIMESTAMP + INTERVAL '72' HOUR, 'YYYY-MM-DD HH24:MI TZR'));
+VALUES ('CUTOVER_COMPLETE', '本番切り替え完了。移行元 DB は ' ||
+        TO_CHAR(SYSTIMESTAMP + INTERVAL '72' HOUR, 'YYYY-MM-DD HH24:MI TZR') || ' まで稼働を維持。');
 COMMIT;
 ```
 
 ---
 
-## Minimizing Downtime with GoldenGate Replication
+## GoldenGate レプリケーションによるダウンタイムの最小化
 
-Oracle GoldenGate is the industry-standard tool for near-zero-downtime database migration. Here is the high-level architecture and cutover procedure:
+Oracle GoldenGate は、ニアゼロ・ダウンタイムのデータベース移行における業界標準のツールである。以下にハイレベルなアーキテクチャと切り替え手順を示す。
 
-### GoldenGate Setup for Near-Zero Downtime
+### ニアゼロ・ダウンタイムのための GoldenGate セットアップ
 
-**Phase 1 — Initial bulk load (while GoldenGate captures changes):**
+**フェーズ 1 — 初期のバルク・ロード (GoldenGate が変更をキャプチャしている間に実施):**
 
 ```bash
-# Start GoldenGate Extract on source (begin capturing changes from this SCN/LSN)
+# 移行元で GoldenGate Extract を開始 (この SCN/LSN からの変更キャプチャを開始)
 GGSCI> ADD EXTRACT ext_src, TRANLOG, BEGIN NOW
 GGSCI> ADD EXTTRAIL ./dirdat/et, EXTRACT ext_src
 GGSCI> START EXTRACT ext_src
 
-# While GoldenGate is capturing, perform initial bulk load via Data Pump or SQL*Loader
-# This can take hours for large databases
+# キャプチャを行っている間に、Data Pump または SQL*Loader で初期データを一括ロード
+# 大規模データベースの場合、数時間かかることがある
 expdp source_user/pass TABLES=... DUMPFILE=initial_load.dmp
 impdp oracle_user/pass DUMPFILE=initial_load.dmp TABLE_EXISTS_ACTION=APPEND
 ```
 
-**Phase 2 — GoldenGate replication applies accumulated changes:**
+**フェーズ 2 — GoldenGate レプリケーションが蓄積された変更を適用:**
 
 ```bash
-# Configure Replicat on Oracle target
+# Oracle ターゲット側で Replicat を構成
 GGSCI> ADD REPLICAT rep_tgt, INTEGRATED, EXTTRAIL ./dirdat/rt
 GGSCI> START REPLICAT rep_tgt
 
-# Monitor replication lag
+# レプリケーションの遅延を監視
 GGSCI> INFO REPLICAT rep_tgt
-# Watch "Lag at Chkpt" — when it approaches 0, you're ready
+# "Lag at Chkpt" を監視。これが 0 に近づけば準備完了。
 ```
 
-**Phase 3 — Cutover (lag approaches zero):**
+**フェーズ 3 — 切り替え (遅延がゼロに近づいた時点):**
 
 ```bash
-# When lag < 5 seconds:
-# 1. Stop new writes to source (application maintenance mode)
-# 2. Wait for GoldenGate lag to reach 0
+# 遅延が 5 秒未満になったら：
+# 1. 移行元への新しい書き込みを停止 (アプリケーションのメンテナンス・モード)
+# 2. GoldenGate の遅延が 0 になるのを待つ
 GGSCI> STATS REPLICAT rep_tgt, TOTALSONLY *
-# 3. Confirm Oracle row counts match source
-# 4. Switch application connections to Oracle
-# 5. Stop GoldenGate processes
+# 3. Oracle の行数が移行元と一致することを確認
+# 4. アプリケーションの接続先を Oracle に切り替える
+# 5. GoldenGate プロセスを停止
 GGSCI> STOP EXTRACT ext_src
 GGSCI> STOP REPLICAT rep_tgt
 ```
 
-### GoldenGate Parameter Files
+### GoldenGate パラメータ・ファイルの例
 
 ```
--- GoldenGate Extract parameter file (ext_src.prm)
+-- GoldenGate Extract パラメータ・ファイル (ext_src.prm)
 EXTRACT ext_src
 SOURCEDB mydb, USERID gg_user, PASSWORD gg_pass
 EXTTRAIL ./dirdat/et
 GETTRUNCATES
 TABLE myschema.*;
 
--- GoldenGate Replicat parameter file (rep_tgt.prm)
+-- GoldenGate Replicat パラメータ・ファイル (rep_tgt.prm)
 REPLICAT rep_tgt
 TARGETDB oracle_db USERID gg_user PASSWORD gg_pass
 MAP myschema.*, TARGET myschema.*;
--- Handle sequence updates
+-- シーケンスの更新を処理
 SEQNO SQLEXEC (ID upd_seq, QUERY "BEGIN EXECUTE IMMEDIATE 'ALTER SEQUENCE &3 RESTART START WITH ' || :1; END;", PARAMS (v_seqno))
 ```
 
-### Expected GoldenGate Downtime
+### GoldenGate による期待されるダウンタイム
 
-| Scenario | Expected Cutover Window |
+| シナリオ | 期待される切り替え時間 |
 |---|---|
-| Small schema (< 50 GB) | 15–30 minutes |
-| Medium schema (50–500 GB) | 30–90 minutes |
-| Large schema (> 500 GB) | 60–240 minutes (for final sync only) |
-| GoldenGate with near-zero lag | 2–10 minutes |
+| 小規模スキーマ (< 50 GB) | 15–30 分 |
+| 中規模スキーマ (50–500 GB) | 30–90 分 |
+| 大規模スキーマ (> 500 GB) | 60–240 分 (最終同期のみ) |
+| ニアゼロ遅延の GoldenGate | 2–10 分 |
 
 ---
 
-## Communicating Cutover to Stakeholders
+## ステークホルダーへの切り替え通知
 
-### 4-Week Communication Timeline
+### 4 週間のコミュニケーション・タイムライン
 
-**4 weeks before cutover:**
-- Announce planned maintenance window to all business users
-- Identify impacted downstream systems and notify their owners
-- Request testing participation from key business users
+**切り替え 4 週間前：**
+- 全ビジネス・ユーザーに予定されているメンテナンス期間を通知。
+- 影響を受ける下位システムを特定し、その担当者に通知。
+- 主要なビジネス・ユーザーにテストへの参加を依頼。
 
-**2 weeks before:**
-- Confirm maintenance window with IT management sign-off
-- Send detailed impact summary: expected downtime, affected services
-- Schedule go/no-go call with decision-makers
+**2 週間前：**
+- IT マネジメント層の承認を得て、メンテナンス期間を確定。
+- 影響の要約を詳細に送付：期待されるダウンタイム、影響を受けるサービス。
+- 意思決定者との Go/No-Go 回議をスケジュール。
 
-**1 week before:**
-- Final reminder to all users
-- Confirm support team availability roster
-- Distribute escalation contact list
+**1 週間前：**
+- 全ユーザーへの最終リマインド。
+- サポート・チームの待機ローテーションを確認。
+- エスカレーション連絡先リストを配布。
 
-**Day before:**
-- Final confirmation email with exact window times
-- Confirm war room bridge / chat channel
-- Verify everyone knows the rollback decision deadline
+**前日：**
+- 正確なメンテナンス時間を含む最終確認メール。
+- ウォー・ルームのブリッジ / チャット・チャネルの確認。
+- 全員がロールバック判断期限を把握していることを確認。
 
-**Cutover day:**
-- Send "maintenance starting" notification at window open
-- Provide status updates every 30 minutes during window
-- Send "migration complete" notification when service restored
-- Send post-cutover summary within 2 hours of completion
+**当日：**
+- メンテナンス開始時に通知を送付。
+- メンテナンス期間中、30 分おきにステータスを更新。
+- サービス復旧時に「移行完了」通知を送付。
+- 完了から 2 時間以内に切り替え後の要約レポートを送付。
 
-### Sample Stakeholder Communication
+### ステークホルダー向けの通知サンプル
 
 ```
-Subject: [ACTION REQUIRED] Database Migration Maintenance Window — Saturday Mar 15, 2AM-6AM EST
+件名：【重要】データベース移行に伴うメンテナンスのお知らせ（3月15日土曜、午前2時～6時）
 
-Team,
+チームの皆様、
 
-We will be migrating our production database to Oracle on Saturday, March 15 from 2:00 AM to
-6:00 AM EST. The following systems will be UNAVAILABLE during this window:
+3月15日（土）午前2:00から午前6:00まで、本番データベースの Oracle への移行作業を実施いたします。この期間中、以下のシステムをご利用いただけなくなります。
 
-  - Customer Portal (portal.company.com)
-  - Order Management System
-  - Reporting Dashboard
+  - カスタマー・ポータル (portal.company.com)
+  - 注文管理システム
+  - レポーティング・ダッシュボード
 
-IMPACT: No orders can be placed or modified during this window.
-AFFECTED USERS: All users of the above systems.
-ROLLBACK PLAN: If issues are detected, we will revert within 2 hours. Maximum possible impact is a
-4-hour outage, with a target of 2 hours.
+影響：この期間中、注文の登録や修正は行えません。
+対象ユーザー：上記システムを利用するすべてのユーザー。
+ロールバック計画：問題が検出された場合、2 時間以内に元の状態に戻します。最大の影響時間は
+4 時間の停止となりますが、2 時間での完了を目指しています。
 
-ACTION REQUIRED: If you have scheduled jobs or automated processes that run during this window,
-contact [dba-team@company.com] to coordinate.
+必要なアクション：この期間中に実行されるスケジュール・ジョブや自動化プロセスがある場合は、
+調整のため [dba-team@company.com] までご連絡ください。
 
-Questions or concerns? Contact: [migration-project@company.com]
+ご質問等はございますか？ 連絡先： [migration-project@company.com]
 ```
 
 ---
 
-## Post-Cutover Checklist
+## 切り替え後のチェックリスト
 
-Complete this checklist in the 72 hours following a successful cutover:
+切り替えが成功した後、72 時間以内に以下のチェックリストを完了させる。
 
-**Hour 0–4 (immediate post-cutover):**
-- [ ] Application smoke tests passed
-- [ ] Oracle error log clean (no ORA- errors from application activity)
-- [ ] Performance monitoring baseline established
-- [ ] GoldenGate stopped and configuration archived
+**0–4 時間 (切り替え直後)：**
+- [ ] アプリケーションのスモーク・テストに合格。
+- [ ] Oracle エラー・ログが正常（アプリケーションからの ORA- エラーなし）。
+- [ ] パフォーマンス監視のベースラインを確立。
+- [ ] GoldenGate を停止し、構成をアーカイブ。
 
-**Hours 4–24:**
-- [ ] Full business day of traffic processed without incidents
-- [ ] All scheduled batch jobs ran successfully on Oracle
-- [ ] Reporting and analytics tools verified against Oracle data
-- [ ] Row count drift check — still zero drift
+**4–24 時間：**
+- [ ] 1 日分の本番トラフィックを問題なく処理。
+- [ ] すべてのスケジュール・バッチ・ジョブが Oracle 上で成功。
+- [ ] レポーティングおよび分析ツールが Oracle 側のデータで検証済み。
+- [ ] 行数のドリフトをチェック — 依然として差異なし。
 
-**Hours 24–72:**
-- [ ] All weekly/bi-weekly batch processes tested on Oracle
-- [ ] Source database decommission checklist initiated (if rollback window closed)
-- [ ] Post-mortem document drafted: what went well, what to improve
-- [ ] Migration project formally closed and documented
-- [ ] Oracle monitoring tuned based on first 72 hours of production patterns
-- [ ] AWR baseline created from first week of production data
-
----
-
-## Best Practices
-
-1. **Never skip the dry run.** Performing the cutover runbook in staging reveals timing issues, missing steps, and team coordination gaps that would cause extended downtime in production.
-
-2. **Define the rollback deadline in writing.** "We will rollback if Oracle is not stable by T+2 hours" must be agreed in advance by all stakeholders. Without a pre-committed deadline, the pressure of the moment can lead to continuing with an unstable system for too long.
-
-3. **Make connection string changes atomic.** Use a load balancer, service mesh, or DNS-based redirect for Oracle connection switching. This allows instantaneous rollback of connectivity without restarting applications one by one.
-
-4. **Do not decommission the source database immediately.** Keep the source database read-only and available for at least 72 hours after cutover. This is your safety net for unexpected issues.
-
-5. **Plan for the unexpected.** Every migration encounters at least one issue not anticipated during planning. The cutover window must have buffer time built in (30–50% of estimated active work time) for unexpected debugging.
-
-6. **Treat cutover as a product launch.** All the communication, monitoring, and stakeholder coordination disciplines of a major product launch apply. The technical work is the easy part; the coordination and communication determine the experience.
+**24–72 時間：**
+- [ ] すべての週次 / 隔週バッチ・プロセスが Oracle 上でテスト済み。
+- [ ] 移行元データベースの廃止チェックリストを開始（ロールバック期間終了後）。
+- [ ] ポストモータム文書の草案作成：うまくいった点、改善すべき点。
+- [ ] 移行プロジェクトの正式なクローズと文書化。
+- [ ] 最初の 72 時間の本番パターンに基づき、Oracle モニタリングを微調整。
+- [ ] 本番データの最初の 1 週間分から AWR ベースラインを作成。
 
 ---
 
-## Common Cutover Pitfalls
+## ベスト・プラクティス
 
-**Pitfall 1 — Forgetting to update connection strings in all locations.**
-Connection strings exist in: application config files, environment variables, docker/k8s secrets, LDAP/directory services, JDBC datasource pools, hard-coded values in legacy code, reporting tool configurations, ETL pipeline configurations, and monitoring probes. Create a complete inventory before cutover.
+1. **予行演習（ドライラン）を省略しない。** ステージングで切り替え手順書を実行することで、本番でダウンタイムを延長させてしまう可能性のある、タイミングの問題、欠落したステップ、チームの連携ミスなどが明らかになる。
 
-**Pitfall 2 — Oracle sequence values behind the source.**
-After data migration, Oracle sequences must be reset to values higher than any existing ID. If sequences are not updated before the application starts writing, INSERT statements will fail with ORA-00001 (unique constraint violated).
+2. **ロールバック期限を文書で定義する。** 「T+2時間（2時間後）までに Oracle が安定しなければロールバックする」というルールを、すべてのステークホルダーが事前に合意しておく必要がある。期限をあらかじめ決めておかないと、現場のプレッシャーにより不安定なシステムを使い続けてしまうリスクがある。
+
+3. **接続文字列の変更をアトミックにする。** Oracle への切り替えには、ロードバランサ、サービス・メッシュ、あるいは DNS ベースのリダイレクトを使用する。これにより、アプリケーションを1つずつ再起動することなく、瞬時に接続先を切り替える（戻す）ことが可能。
+
+4. **移行元データベースをすぐに廃止しない。** 切り替え後少なくとも 72 時間は、移行元データベースを読み取り専用状態で維持しておく。これが予期せぬ問題に対するセーフティ・ネットとなる。
+
+5. **予期せぬ事態を想定しておく。** どのような移行でも、計画段階では予期しなかった問題が少なくとも1つは発生する。切り替え期間には、予期せぬデバッグのためのバッファ・タイム（見積もり時間の 30～50%）を組み込んでおく必要がある。
+
+6. **切り替えを「製品ローンチ」として扱う。** 主要な製品ローンチと同様の、コミュニケーション、モニタリング、ステークホルダー間の調整が求められる。技術的な作業は一部に過ぎず、成否を分けるのは調整とコミュニケーションである。
+
+---
+
+## 切り替え時のよくある落とし穴
+
+**落とし穴 1 — すべての場所で接続文字列を更新し忘れる。**
+接続文字列は多岐にわたる場所に存在する：アプリケーション構成ファイル、環境変数、Docker/k8s シークレット、LDAP/ディレクトリ・サービス、JDBC データソース・プール、レガシー・コード内のハードコード、レポーティングツールの設定、ETL パイプラインの設定、監視用プローブ。切り替え前に完全なリストを作成すること。
+
+**落とし穴 2 — Oracle のシーケンス値が移行元より遅れている。**
+データ移行後、Oracle のシーケンス値を既存の ID よりも大きな値にリセットしなければならない。アプリケーションの書き込み開始前にシーケンスが更新されていないと、INSERT ステートメントが ORA-00001 (一意制約違反) で失敗する。
 ```sql
--- Reset all sequences post-migration
+-- 移行後にすべてのシーケンスをリセットする
 BEGIN
     FOR t IN (SELECT table_name, column_name FROM (
         SELECT 'CUSTOMERS' AS table_name, 'CUSTOMER_ID' AS column_name FROM DUAL
@@ -508,30 +507,30 @@ END;
 /
 ```
 
-**Pitfall 3 — Time zone misconfiguration.**
-Oracle session time zone defaults to the OS time zone of the database server. If the application was connecting to a UTC source database but Oracle is configured for a local time zone, timestamp values may be offset. Set Oracle session time zone explicitly:
+**落とし穴 3 — タイムゾーンの構成ミス。**
+Oracle のセッション・タイムゾーンは、デフォルトでデータベース・サーバーの OS タイムゾーンになる。アプリケーションが元々 UTC を使用していたのに Oracle がローカル・タイムゾーンに設定されていると、タイムスタンプがずれてしまう。セッション・タイムゾーンを明示的に設定すること。
 ```sql
 ALTER SESSION SET TIME_ZONE = 'UTC';
--- Or in connection string: jdbc:oracle:thin:@host:1521/db?oracle.jdbc.defaultTimeZone=UTC
+-- または接続文字列で指定: jdbc:oracle:thin:@host:1521/db?oracle.jdbc.defaultTimeZone=UTC
 ```
 
-**Pitfall 4 — Missing grants for the new Oracle schema.**
-Application users need appropriate privileges in Oracle. A common oversight is forgetting to grant access to sequences, synonyms, or procedures that were not in the original migration scope.
+**落とし穴 4 — 新しい Oracle スキーマに対する権限付与の不足。**
+アプリケーション・ユーザーには Oracle 上で適切な権限が必要。元の移行範囲に含まれていなかったシーケンス、シノニム、あるいはプロシージャへのアクセス権限を付与し忘れることがよくある。
 
-**Pitfall 5 — Performance regression on first production queries.**
-Oracle's optimizer builds statistics over time. The first executions of complex queries may use non-optimal plans because statistics are based on the initial data load, not the pattern of production queries. Monitor the top wait events in V$SESSION_WAIT immediately after cutover and address any slow queries proactively.
+**落とし穴 5 — 本番環境での最初のクエリによるパフォーマンス低下。**
+Oracle オプティマイザは時間をかけて統計情報を構築する。初期ロード直後のデータに基づく統計情報では、本番のクエリ・パターンに対して最適な実行計画にならない場合がある。切り替え直後は `V$SESSION_WAIT` の上位待機イベントを監視し、遅いクエリがあればプロアクティブに対応すること。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ファイル内の基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c, 23c, または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 複数バージョンをサポートする環境では、リリース更新（RU）によってデフォルト値や非推奨機能が異なる場合があるため、19c と 26ai の両方で動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Zero Downtime Migration documentation](https://docs.oracle.com/en/database/oracle/zero-downtime-migration/index.html)
 - [Oracle GoldenGate 19c documentation](https://docs.oracle.com/en/middleware/goldengate/core/19.1/index.html)
 - [Oracle Database 19c SQL Language Reference — ALTER TABLE (MODIFY GENERATED AS IDENTITY)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/ALTER-TABLE.html)
+DIFY GENERATED AS IDENTITY)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/ALTER-TABLE.html)

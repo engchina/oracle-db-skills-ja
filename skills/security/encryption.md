@@ -1,199 +1,199 @@
-# Oracle Database Encryption
+# Oracle Database の暗号化 (Encryption)
 
-## Overview
+## 概要
 
-Encryption in Oracle protects data from unauthorized access at the storage layer — meaning that even if an attacker steals your datafiles, backup tapes, or tablespace exports, they cannot read the data without the encryption keys. This is a distinct protection layer from access control (which prevents unauthorized queries) and auditing (which detects unauthorized access). Together, they form a defense-in-depth strategy.
+Oracle の暗号化は、ストレージ・レイヤーで不正アクセスからデータを保護する。つまり、攻撃者がデータファイル、バックアップ・テープ、または表領域のエクスポートを盗んだとしても、暗号化キーがなければデータを読み取ることはできない。これは、アクセス制御（不正なクエリを防止）や監査（不正なアクセスを検出）とは別の保護レイヤーである。これらが合わさることで、多層防御戦略が形成される。
 
-Oracle provides two primary encryption mechanisms:
+Oracle は主に 2 つの暗号化メカニズムを提供している。
 
-- **Transparent Data Encryption (TDE)**: Encrypts datafiles, tablespaces, and individual columns on disk. The encryption and decryption is transparent to applications — queries, DML, and DDL work exactly as before.
-- **DBMS_CRYPTO**: A PL/SQL API for encrypting specific values in application logic, useful for cases where the application needs to control the encryption beyond what TDE provides.
+-   **透過的データ暗号化 (TDE)**: ディスク上のデータファイル、表領域、および個々の列を暗号化する。暗号化と復号はアプリケーションに対して透過的であり、クエリ、DML、および DDL は以前とまったく同様に動作する。
+-   **DBMS_CRYPTO**: アプリケーション・ロジックで特定の値を暗号化するための PL/SQL API。TDE が提供する範囲を超えて、アプリケーションが暗号化を制御する必要がある場合に有用である。
 
-TDE requires the **Oracle Advanced Security Option**, which is a separately licensed extra-cost option for Oracle Database Enterprise Edition in on-premises deployments (including 19c). It is included without extra charge in certain Oracle Cloud database service tiers (BaseDB EE-HP, BaseDB EE-EP, ExaDB). Always verify current licensing with Oracle's official Licensing Information User Manual for your specific version and deployment type.
-
----
-
-## Transparent Data Encryption Architecture
-
-TDE uses a two-tier key hierarchy:
-
-```
-Oracle Wallet / Key Store
-  └── Master Encryption Key (MEK)
-        └── Table/Tablespace Encryption Key (DEK — Data Encryption Key)
-              └── Encrypted data blocks on disk
-```
-
-The **Master Encryption Key (MEK)** is stored in the Oracle Wallet (a password-protected PKCS#12 container or hardware HSM). The **Data Encryption Keys (DEKs)** are stored encrypted by the MEK inside the database itself. To decrypt data, the wallet must be open (the MEK loaded into memory). Once open, Oracle handles encryption and decryption transparently.
+TDE には **Oracle Advanced Security Option** が必要である。これは、オンプレミスの Oracle Database Enterprise Edition（19c を含む）では別途ライセンスが必要な有償オプションである。Oracle Cloud の特定のデータベース・サービス・ティア（BaseDB EE-HP、BaseDB EE-EP、ExaDB）では、追加料金なしで含まれている。使用する特定のバージョンやデプロイメント・タイプについては、常に最新の Oracle 公式ライセンス情報ユーザー・マニュアルを確認すること。
 
 ---
 
-## Oracle Wallet Setup and Management
+## 透過的データ暗号化 (TDE) のアーキテクチャ
 
-### Creating the Wallet
+TDE は 2 階層のキー階層を使用する。
+
+```
+Oracle ウォレット / キー・ストア
+  └── マスター暗号化キー (MEK)
+        └── 表/表領域暗号化キー (DEK — データの暗号化キー)
+              └── ディスク上の暗号化されたデータ・ブロック
+```
+
+**マスター暗号化キー (MEK)** は、Oracle ウォレット（パスワードで保護された PKCS#12 コンテナまたはハードウェア HSM）に保存される。**データ暗号化キー (DEK)** は、MEK によって暗号化された状態でデータベース内部に保存される。データを復号するには、ウォレットが開いている（MEK がメモリーにロードされている）必要がある。一度開くと、Oracle は暗号化と復号を透過的に処理する。
+
+---
+
+## Oracle ウォレットのセットアップと管理
+
+### ウォレットの作成
 
 ```sql
--- Step 1: Set the wallet location in sqlnet.ora (or init.ora for 12c+)
--- File: $ORACLE_BASE/admin/<db_name>/wallet/
+-- ステップ 1: sqlnet.ora (または 12c 以降の init.ora) でウォレットの場所を設定
+-- ファイル場所: $ORACLE_BASE/admin/<db_name>/wallet/
 
--- In sqlnet.ora:
+-- sqlnet.ora の場合:
 -- ENCRYPTION_WALLET_LOCATION =
 --   (SOURCE = (METHOD = FILE)
 --     (METHOD_DATA = (DIRECTORY = /opt/oracle/admin/ORCL/wallet)))
 
--- In 19c+, use the WALLET_ROOT initialization parameter (recommended):
--- ENCRYPTION_WALLET_LOCATION in sqlnet.ora is deprecated as of Oracle 19c.
+-- 19c 以降では、WALLET_ROOT 初期化パラメータの使用を推奨:
+-- sqlnet.ora の ENCRYPTION_WALLET_LOCATION は Oracle 19c で非推奨。
 ALTER SYSTEM SET wallet_root = '/opt/oracle/admin/ORCL/wallet' SCOPE = SPFILE;
--- Requires restart; when WALLET_ROOT is set it takes precedence over sqlnet.ora
--- ENCRYPTION_WALLET_LOCATION. Use TDE_CONFIGURATION alongside WALLET_ROOT.
+-- 再起動が必要。WALLET_ROOT が設定されている場合、sqlnet.ora の 
+-- ENCRYPTION_WALLET_LOCATION よりも優先される。WALLET_ROOT と併せて TDE_CONFIGURATION も使用する。
 
--- Set the TDE configuration (keystore type)
+-- TDE 構成 (キー・ストア・タイプ) を設定
 ALTER SYSTEM SET tde_configuration = 'KEYSTORE_CONFIGURATION=FILE' SCOPE = BOTH;
 ```
 
 ```sql
--- Step 2: Create the wallet (from SQL*Plus, connected as SYSDBA or with ADMINISTER KEY MANAGEMENT privilege)
+-- ステップ 2: ウォレットの作成 (SQL*Plus から、SYSDBA または ADMINISTER KEY MANAGEMENT 権限を持つユーザーで接続)
 ADMINISTER KEY MANAGEMENT CREATE KEYSTORE '/opt/oracle/admin/ORCL/wallet'
   IDENTIFIED BY "W@lletP@ssw0rd!";
--- Creates the ewallet.p12 file
+-- ewallet.p12 ファイルが作成される
 
--- Step 3: Open the wallet
+-- ステップ 3: ウォレットを開く
 ADMINISTER KEY MANAGEMENT SET KEYSTORE OPEN
   IDENTIFIED BY "W@lletP@ssw0rd!"
-  CONTAINER = ALL;  -- Open in all PDBs (for CDB); use CURRENT for specific PDB
+  CONTAINER = ALL;  -- すべての PDB（CDB の場合）で開く。特定の PDB の場合は CURRENT を使用
 
--- Step 4: Create (and activate) the Master Encryption Key
+-- ステップ 4: マスター暗号化キー (MEK) の作成（およびアクティブ化）
 ADMINISTER KEY MANAGEMENT SET KEY
   IDENTIFIED BY "W@lletP@ssw0rd!"
   WITH BACKUP USING 'pre_tde_backup'
   CONTAINER = ALL;
 ```
 
-### Auto-Login Wallet (for Unattended Restarts)
+### 自動ログイン・ウォレット (無人再起動用)
 
-A password-protected wallet requires manual opening after every database restart. An auto-login wallet opens automatically:
+パスワード保護されたウォレットは、データベースの再起動ごとに手動で開く必要がある。自動ログイン・ウォレットを使用すると、自動的に開くようになる。
 
 ```sql
--- Create an auto-login wallet from an existing password-protected wallet
+-- 既存のパスワード保護されたウォレットから自動ログイン・ウォレットを作成
 ADMINISTER KEY MANAGEMENT CREATE AUTO_LOGIN KEYSTORE
   FROM KEYSTORE '/opt/oracle/admin/ORCL/wallet'
   IDENTIFIED BY "W@lletP@ssw0rd!";
--- Creates cwallet.sso (the auto-login file)
+-- cwallet.sso（自動ログイン・ファイル）が作成される
 
--- Check wallet status
+-- ウォレットのステータス確認
 SELECT wrl_type, wrl_parameter, status, wallet_type, keystore_mode, con_id
 FROM v$encryption_wallet;
--- STATUS should be 'OPEN' and WALLET_TYPE should be 'AUTOLOGIN'
+-- STATUS が 'OPEN'、WALLET_TYPE が 'AUTOLOGIN' になっていること
 
--- For a local auto-login wallet (cannot be used on a different server):
+-- ローカル自動ログイン・ウォレットの場合（別のサーバーでは使用不可）:
 ADMINISTER KEY MANAGEMENT CREATE LOCAL AUTO_LOGIN KEYSTORE
   FROM KEYSTORE '/opt/oracle/admin/ORCL/wallet'
   IDENTIFIED BY "W@lletP@ssw0rd!";
 ```
 
-### Wallet Management Commands
+### ウォレット管理コマンド
 
 ```sql
--- Open the wallet (required after manual restart if not auto-login)
+-- ウォレットを開く（自動ログインでない場合、手動再起動後に必要）
 ADMINISTER KEY MANAGEMENT SET KEYSTORE OPEN
   IDENTIFIED BY "W@lletP@ssw0rd!";
 
--- Close the wallet (encrypt data in memory; all TDE operations stop)
+-- ウォレットを閉じる（メモリー内のデータが暗号化され、すべての TDE 操作が停止する）
 ADMINISTER KEY MANAGEMENT SET KEYSTORE CLOSE
   IDENTIFIED BY "W@lletP@ssw0rd!";
 
--- Backup the wallet
+-- ウォレットのバックアップ
 ADMINISTER KEY MANAGEMENT BACKUP KEYSTORE
   USING 'backup_tag_name'
   IDENTIFIED BY "W@lletP@ssw0rd!";
 
--- Check wallet and key status
+-- ウォレットとキーのステータス確認
 SELECT key_id, creation_time, activation_time, key_use, keystore_type,
        origin, backed_up, con_id
 FROM v$encryption_keys;
 
--- Check all keystore details
+-- すべてのキー・ストア詳細を確認
 SELECT * FROM v$encryption_wallet;
 ```
 
 ---
 
-## Tablespace Encryption
+## 表領域の暗号化
 
-Encrypting entire tablespaces is the most common and recommended TDE deployment. All objects created in an encrypted tablespace (tables, indexes, LOBs, undo data) are automatically encrypted.
+表領域全体の暗号化は、最も一般的で推奨される TDE の導入方法である。暗号化された表領域に作成されたすべてのオブジェクト（表、索引、LOB、UNDO データ）は自動的に暗号化される。
 
-### Creating an Encrypted Tablespace
+### 暗号化表領域の作成
 
 ```sql
--- Create a new encrypted tablespace (AES256 is the recommended algorithm)
+-- 新しい暗号化表領域を作成 (AES256 を推奨アルゴリズムとする)
 CREATE TABLESPACE sensitive_data
   DATAFILE '/opt/oracle/oradata/ORCL/sensitive_data01.dbf' SIZE 1G AUTOEXTEND ON
   ENCRYPTION USING AES256
   DEFAULT STORAGE (ENCRYPT);
 
--- AES128 is also available; 3DES168 is supported but not recommended for new deployments
+-- AES128 も利用可能。3DES168 もサポートされているが、新規導入には非推奨。
 
--- Verify encryption
+-- 暗号化の確認
 SELECT tablespace_name, encrypted
 FROM dba_tablespaces
 WHERE encrypted = 'YES';
 
--- Move a table to an encrypted tablespace
+-- 表を暗号化表領域に移動
 ALTER TABLE hr.employees MOVE TABLESPACE sensitive_data;
 
--- Rebuild indexes after table move (indexes do not move automatically)
+-- 表の移動後に索引を再構築（索引は自動的には移動しない）
 ALTER INDEX hr.emp_emp_id_pk REBUILD TABLESPACE sensitive_data;
 ALTER INDEX hr.emp_department_ix REBUILD TABLESPACE sensitive_data;
 
--- Move all indexes for a table to the encrypted tablespace
+-- 表のすべての索引を暗号化表領域に移動するためのコマンド生成
 SELECT 'ALTER INDEX ' || owner || '.' || index_name ||
        ' REBUILD TABLESPACE sensitive_data;' AS rebuild_cmd
 FROM dba_indexes
 WHERE table_owner = 'HR' AND table_name = 'EMPLOYEES';
 ```
 
-### Encrypting an Existing Tablespace (Online, 12c+)
+### 既存の表領域の暗号化 (オンライン、12c 以降)
 
 ```sql
--- Offline encryption (faster, requires downtime)
+-- オフライン暗号化 (高速だがダウンタイムが必要)
 ALTER TABLESPACE users OFFLINE;
 ALTER TABLESPACE users ENCRYPTION OFFLINE ENCRYPT;
 ALTER TABLESPACE users ONLINE;
 
--- Online encryption (no downtime, uses AES256 by default)
+-- オンライン暗号化 (ダウンタイムなし、デフォルトで AES256 を使用)
 ALTER TABLESPACE users ENCRYPTION ONLINE ENCRYPT;
 
--- Online encryption with specific algorithm
+-- 特定のアルゴリズムを指定したオンライン暗号化
 ALTER TABLESPACE users ENCRYPTION ONLINE USING AES256 ENCRYPT;
 
--- Check progress of online encryption
+-- オンライン暗号化の進捗確認
 SELECT tablespace_name, encryption_status
 FROM dba_tablespace_encryption_progress;
 
--- For tablespace with in-progress encryption
+-- 暗号化進行中の表領域の場合
 SELECT * FROM v$encrypted_tablespaces;
 ```
 
 ---
 
-## Column-Level Encryption
+## 列レベルの暗号化
 
-Column-level TDE encrypts individual columns rather than entire tablespaces. It is more granular but has more overhead and limitations (encrypted columns cannot be indexed with standard indexes, and the column values are stored encrypted even in the buffer cache until decrypted for processing).
+列レベル TDE は、表領域全体ではなく、個々の列を暗号化する。より詳細な制御が可能だが、オーバーヘッドや制限がある（暗号化された列には標準的な索引を作成できず、バッファ・キャッシュ内でも暗号化された状態で保存され、処理時に復号される）。
 
 ```sql
--- Add encryption to an existing column
+-- 既存の列に暗号化を追加
 ALTER TABLE hr.employees
   MODIFY (ssn ENCRYPT USING 'AES256' NO SALT);
--- SALT adds random data to prevent frequency analysis
--- NO SALT is needed if the column is used in a WHERE clause equality join
--- (salted values are different each encryption, so equality comparisons fail)
+-- SALT は、頻度分析を防ぐためにランダム・データを追加する
+-- 列が WHERE 句の等価結合で使用される場合は NO SALT が必要
+-- (SALT を使用すると値が毎回異なるため、等価比較が失敗する)
 
--- Encrypt a column with SALT (better security, cannot be queried with =)
+-- SALT を使用した列の暗号化 (より安全だが、= でクエリできない)
 ALTER TABLE patients.records
   MODIFY (credit_card_number ENCRYPT USING 'AES256');
--- SALT is the default; equivalent to: ENCRYPT USING 'AES256' SALT
+-- SALT がデフォルト。ENCRYPT USING 'AES256' SALT と同等。
 
--- Create a new table with an encrypted column
+-- 暗号化列を持つ新しい表を作成
 CREATE TABLE payroll.salary_data (
   employee_id   NUMBER(6)        NOT NULL,
   salary        NUMBER(8,2)      ENCRYPT USING 'AES256' NO SALT,
@@ -202,61 +202,61 @@ CREATE TABLE payroll.salary_data (
   CONSTRAINT sal_emp_fk FOREIGN KEY (employee_id) REFERENCES hr.employees(employee_id)
 );
 
--- Remove column encryption
+-- 列の暗号化を解除
 ALTER TABLE hr.employees MODIFY (ssn DECRYPT);
 
--- Check which columns are encrypted
+-- 暗号化されている列を確認
 SELECT owner, table_name, column_name, encryption_alg, salt
 FROM dba_encrypted_columns
 ORDER BY owner, table_name, column_name;
 ```
 
-### Encryption Algorithms Supported
+### サポートされている暗号化アルゴリズム
 
-| Algorithm | Key Length | Notes |
+| アルゴリズム | キー長 | 備考 |
 |---|---|---|
-| `AES128` | 128-bit | Acceptable; NIST approved |
-| `AES192` | 192-bit | Good choice |
-| `AES256` | 256-bit | Recommended; FIPS 140-2 compliant; default in 23ai |
-| `3DES168` | 168-bit | Legacy; not recommended for new deployments |
-| `ARIA128` | 128-bit | Korean standard; for regulatory compliance in KR |
-| `ARIA192` | 192-bit | Korean standard |
-| `ARIA256` | 256-bit | Korean standard |
-| `GOST256` | 256-bit | Russian standard — **deprecated in Oracle 23c; desupported and removed in Oracle 26ai**. Do not use for new deployments. |
+| `AES128` | 128-bit | 許容範囲。NIST 承認済み。 |
+| `AES192` | 192-bit | 良い選択肢。 |
+| `AES256` | 256-bit | 推奨。FIPS 140-2 準拠。23ai 以降のデフォルト。 |
+| `3DES168` | 168-bit | レガシー。新規導入には非推奨。 |
+| `ARIA128` | 128-bit | 韓国標準。韓国の規制対応用。 |
+| `ARIA192` | 192-bit | 韓国標準。 |
+| `ARIA256` | 256-bit | 韓国標準。 |
+| `GOST256` | 256-bit | ロシア標準 — **Oracle 23c で非推奨、Oracle 26ai でサポート廃止・削除**。新規導入には使用しないこと。 |
 
-> **Note on ARIA and GOST:** ARIA was added in Oracle 19c for offline tablespace encryption. GOST was also added in 19c but is deprecated in 23c and fully removed in Oracle 26ai. Use AES256 for all new deployments.
+> **ARIA および GOST に関する注記:** ARIA は Oracle 19c でオフライン表領域暗号化用に追加された。GOST も 19c で追加されたが、23c で非推奨となり 26ai で完全に削除された。新規導入にはすべて AES256 を使用すること。
 
 ---
 
-## Key Rotation
+## キーのローテーション
 
-Regular key rotation is a security best practice and a compliance requirement in many frameworks. Oracle TDE supports re-keying without taking the database offline.
+定期的なキー・ローテーションはセキュリティのベスト・プラクティスであり、多くのフレームワークで遵守が求められる要件である。Oracle TDE は、データベースをオフラインにすることなくキーの更新をサポートしている。
 
-### Rotating the Master Encryption Key
+### マスター暗号化キー (MEK) のローテーション
 
 ```sql
--- Create a new Master Encryption Key (old key is retained to decrypt data
--- encrypted with the old key; Oracle handles the transition automatically)
+-- 新しいマスター暗号化キーを作成 (古いキーは、古いキーで暗号化された
+-- データを復号するために保持される。Oracle は遷移を自動的に処理する)
 ADMINISTER KEY MANAGEMENT SET KEY
   IDENTIFIED BY "W@lletP@ssw0rd!"
   WITH BACKUP USING 'pre_rotation_backup';
 
--- Verify the new key is active
+-- 新しいキーがアクティブであることを確認
 SELECT key_id, creation_time, activation_time, key_use
 FROM v$encryption_keys
 ORDER BY creation_time DESC;
--- The most recently activated key is the current MEK
+-- 最も新しくアクティブ化されたキーが現在の MEK である
 
--- After rotation, re-encrypt tablespace DEKs with the new MEK (optional but recommended)
--- This ensures old MEK is no longer needed for any live data
+-- ローテーション後、表領域の DEK を新しい MEK で再暗号化（オプションだが推奨）
+-- これにより、稼働中のデータに対して古い MEK が不要になることが保証される
 ALTER TABLESPACE sensitive_data ENCRYPTION REKEY;
--- This is an online operation; it re-encrypts the tablespace DEK with the new MEK
+-- これはオンライン操作である。表領域の DEK を新しい MEK で再暗号化する。
 ```
 
-### Key Rotation Best Practices for CDB/PDB
+### CDB/PDB におけるキー・ローテーションのベスト・プラクティス
 
 ```sql
--- In a CDB, rotate the key for a specific PDB
+-- CDB 内の特定の PDB に対してキーをローテーション
 ALTER SESSION SET CONTAINER = pdb_finance;
 
 ADMINISTER KEY MANAGEMENT SET KEY
@@ -264,7 +264,7 @@ ADMINISTER KEY MANAGEMENT SET KEY
   WITH BACKUP USING 'pdb_finance_rotation'
   CONTAINER = CURRENT;
 
--- Rotate for all PDBs at once
+-- すべての PDB を一度にローテーション
 ADMINISTER KEY MANAGEMENT SET KEY
   IDENTIFIED BY "W@lletP@ssw0rd!"
   CONTAINER = ALL;
@@ -272,26 +272,26 @@ ADMINISTER KEY MANAGEMENT SET KEY
 
 ---
 
-## DBMS_CRYPTO for Application-Layer Encryption
+## アプリケーション層での暗号化のための DBMS_CRYPTO
 
-For cases where the application needs direct control over encryption (e.g., encrypting specific values before storing, or encrypting data that needs to be sent to an external system), use `DBMS_CRYPTO`:
+アプリケーションが暗号化を直接制御する必要がある場合（例: 保存前に特定の値を暗号化する、外部システムに送信する必要があるデータを暗号化するなど）、`DBMS_CRYPTO` を使用する。
 
 ```sql
--- Generate a random encryption key
+-- ランダムな暗号化キーを生成
 DECLARE
-  v_key RAW(32);  -- 256-bit key for AES256
+  v_key RAW(32);  -- AES256 用の 256 ビット・キー
 BEGIN
   v_key := DBMS_CRYPTO.RANDOMBYTES(32);
-  -- Store this key securely (in a key management system, not in the database)
+  -- このキーを安全に保管する（データベースではなく、キー管理システムなどに）
   DBMS_OUTPUT.PUT_LINE('Key: ' || RAWTOHEX(v_key));
 END;
 /
 
--- Encrypt a value
+-- 値の暗号化
 DECLARE
   v_data      RAW(2000);
-  v_key       RAW(32)   := HEXTORAW('YOUR_KEY_HEX_HERE');  -- 32 bytes = 256 bits
-  v_iv        RAW(16)   := DBMS_CRYPTO.RANDOMBYTES(16);  -- Initialization vector
+  v_key       RAW(32)   := HEXTORAW('YOUR_KEY_HEX_HERE');  -- 32 バイト = 256 ビット
+  v_iv        RAW(16)   := DBMS_CRYPTO.RANDOMBYTES(16);  -- 初期化ベクトル
   v_encrypted RAW(2000);
   v_plaintext VARCHAR2(200) := 'Sensitive data here';
 BEGIN
@@ -302,12 +302,12 @@ BEGIN
     key => v_key,
     iv  => v_iv
   );
-  -- Store v_encrypted and v_iv together (you need both to decrypt)
+  -- v_encrypted と v_iv を一緒に保存する（復号に両方が必要）
   DBMS_OUTPUT.PUT_LINE('Encrypted: ' || RAWTOHEX(v_encrypted));
 END;
 /
 
--- Decrypt a value
+-- 値の復号
 DECLARE
   v_key       RAW(32)   := HEXTORAW('YOUR_KEY_HEX_HERE');
   v_iv        RAW(16)   := HEXTORAW('YOUR_IV_HEX_HERE');
@@ -326,7 +326,7 @@ BEGIN
 END;
 /
 
--- Hash a value (one-way; for passwords and integrity checks)
+-- 値のハッシュ化（一方向。パスワードや整合性チェック用）
 DECLARE
   v_hash RAW(32);
 BEGIN
@@ -338,7 +338,7 @@ BEGIN
 END;
 /
 
--- MAC (Message Authentication Code) for integrity verification
+-- 整合性検証のための MAC (Message Authentication Code)
 DECLARE
   v_mac RAW(32);
   v_key RAW(32) := HEXTORAW('YOUR_KEY_HEX_HERE');
@@ -355,33 +355,33 @@ END;
 
 ---
 
-## Encrypted Backup
+## 暗号化バックアップ
 
-TDE-encrypted tablespaces are backed up as encrypted by RMAN automatically. For non-TDE databases or additional backup encryption:
+TDE で暗号化された表領域は、RMAN によって自動的に暗号化された状態でバックアップされる。TDE を使用していないデータベースや、追加のバックアップ暗号化が必要な場合:
 
 ```sql
--- Configure RMAN encryption for backups
+-- バックアップ用の RMAN 暗号化を構成
 RMAN> CONFIGURE ENCRYPTION FOR DATABASE ON;
 RMAN> CONFIGURE ENCRYPTION ALGORITHM 'AES256';
 
--- Encrypt backups with the TDE wallet (transparent)
+-- TDE ウォレットを使用したバックアップ暗号化（透過的）
 RMAN> BACKUP DATABASE;
 
--- Encrypt backups with a passphrase (independent of wallet)
+-- パスフレーズを使用したバックアップ暗号化（ウォレットとは独立）
 RMAN> SET ENCRYPTION ON IDENTIFIED BY "BackupP@ss!" ONLY;
 RMAN> BACKUP DATABASE;
 
--- Verify backup encryption
+-- バックアップ暗号化の確認
 RMAN> LIST BACKUP SUMMARY;
--- The ENCRYPTED column shows 'YES' for encrypted backups
+-- ENCRYPTED 列に 'YES' が表示される
 ```
 
 ---
 
-## Monitoring and Verification
+## 監視と検証
 
 ```sql
--- Verify all sensitive tablespaces are encrypted
+-- すべての機密表領域が暗号化されているか検証
 SELECT ts.tablespace_name,
        CASE WHEN ts.encrypted = 'YES' THEN 'ENCRYPTED' ELSE 'NOT ENCRYPTED' END AS status,
        ts.block_size,
@@ -392,7 +392,7 @@ WHERE ts.tablespace_name NOT IN ('SYSTEM', 'SYSAUX', 'TEMP', 'UNDOTBS1')
 GROUP BY ts.tablespace_name, ts.encrypted, ts.block_size
 ORDER BY ts.tablespace_name;
 
--- Check which tables are in unencrypted tablespaces
+-- 暗号化されていない表領域にある表を確認
 SELECT t.owner, t.table_name, t.tablespace_name
 FROM dba_tables t
 JOIN dba_tablespaces ts ON ts.tablespace_name = t.tablespace_name
@@ -400,7 +400,7 @@ WHERE ts.encrypted = 'NO'
   AND t.owner NOT IN ('SYS', 'SYSTEM', 'CTXSYS', 'MDSYS', 'ORDSYS', 'XDB')
 ORDER BY t.owner, t.table_name;
 
--- Audit TDE key management operations
+-- TDE キー管理操作の監査
 SELECT event_timestamp, dbusername, action_name, sql_text
 FROM unified_audit_trail
 WHERE action_name LIKE 'ADMINISTER KEY MANAGEMENT%'
@@ -409,71 +409,71 @@ ORDER BY event_timestamp DESC;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Encrypt tablespaces, not just columns**: Tablespace encryption is simpler to manage, has less performance overhead than column encryption, and protects all data including indexes, undo, and temp data.
+1.  **列だけでなく表領域を暗号化する**: 表領域全体の暗号化の方が管理が容易であり、列単位の暗号化よりもパフォーマンスのオーバーヘッドが少なく、索引、UNDO、一時データなども含むすべてのデータが保護される。
 
-2. **Use AES256**: It is the strongest algorithm Oracle supports for TDE, is FIPS 140-2 compliant, and the performance difference vs AES128 is negligible on modern hardware.
+2.  **AES256 を使用する**: Oracle が TDE でサポートする最強のアルゴリズムであり、FIPS 140-2 にも準拠している。現代のハードウェアでは AES128 とのパフォーマンス差は無視できる。
 
-3. **Use a local auto-login wallet in production only if the server itself is physically secured**: An auto-login wallet file (cwallet.sso) opens without a password. If the file is stolen along with the datafiles, the data can be decrypted.
+3.  **サーバー自体が物理的に保護されている場合にのみ、本番環境でローカル自動ログイン・ウォレットを使用する**: 自動ログイン・ウォレット・ファイル (cwallet.sso) はパスワードなしで開く。このファイルがデータファイルと共に盗まれた場合、データが復号されてしまう可能性がある。
 
-4. **Back up the wallet separately from the database**: If you lose your wallet and your datafiles are encrypted, your data is gone. Store wallet backups in a separate, secured location.
+4.  **ウォレットはデータベースとは別にバックアップする**: ウォレットを失い、データファイルが暗号化されている場合、データは二度と取り出せない。ウォレットのバックアップは別の安全な場所に保管すること。
 
-5. **Enable wallet backups before key rotation**: Always use `WITH BACKUP` when rotating keys. The backup preserves the old key so you can decrypt older data if needed.
+5.  **キー・ローテーションの前にウォレットのバックアップを有効にする**: キーをローテーションするときは、常に `WITH BACKUP` を使用すること。バックアップにより古いキーが保存されるため、必要に応じて古いデータを復号できる。
 
-6. **Audit wallet operations**: All `ADMINISTER KEY MANAGEMENT` commands should be audited. A DBA who rotates keys without authorization can make data inaccessible.
+6.  **ウォレット操作を監査する**: すべての `ADMINISTER KEY MANAGEMENT` コマンドを監査対象とすべきである。権限のない DBA がキーをローテーションすると、データにアクセスできなくなる可能性がある。
 
-7. **Test decrypt after encryption**: After enabling TDE on a tablespace, always run a test query to confirm data is readable. Confirm the wallet is the expected version.
+7.  **暗号化後に復号をテストする**: 表領域で TDE を有効にした後、必ずテスト・クエリを実行してデータが読み取れることを確認する。ウォレットが期待通りのバージョンであることを確認する。
 
-8. **Document your key management procedures**: In a disaster recovery scenario, the procedure to restore and open the wallet is time-critical. Written run-books must be tested and stored securely.
+8.  **キー管理手順を文書化する**: 災害復旧シナリオでは、ウォレットをリストアして開く手順が時間的に非常に重要となる。文書化された手順書（ランブック）をテストし、安全に保管しておくこと。
 
 ---
 
-## Common Mistakes and How to Avoid Them
+## よくある間違いとその回避方法
 
-### Mistake 1: Storing the Wallet in the Same Location as the Datafiles
+### 間違い 1: ウォレットをデータファイルと同じ場所に保管する
 
 ```bash
-# BAD: Wallet inside the database home or alongside the datafiles
+# 不適切: データベース・ホーム内やデータファイルと同じ場所にウォレットがある
 /opt/oracle/oradata/ORCL/wallet/
 
-# GOOD: Wallet on a separate filesystem, different from datafiles
+# 適切: データファイルとは別のファイルシステムにウォレットを置く
 /secure/keystore/ORCL/wallet/
-# Or: HSM (Hardware Security Module) for highest security
+# または、最高レベルのセキュリティを確保するために HSM (ハードウェア・セキュリティ・モジュール) を使用する
 ```
 
-### Mistake 2: Not Backing Up the Wallet Before Key Rotation
+### 間違い 2: キー・ローテーションの前にウォレットをバックアップしない
 
 ```sql
--- ALWAYS use WITH BACKUP when rotating
+-- ローテーション時は必ず WITH BACKUP を使用する
 ADMINISTER KEY MANAGEMENT SET KEY
   IDENTIFIED BY "W@lletP@ssw0rd!"
-  WITH BACKUP USING 'before_rotation_2026_01';  -- Tag the backup with date
+  WITH BACKUP USING 'before_rotation_2026_01';  -- バックアップに日付タグを付ける
 
--- Verify backup was created
+-- バックアップが作成されたことを確認
 SELECT key_id, backed_up, creation_time
 FROM v$encryption_keys
 ORDER BY creation_time DESC;
 ```
 
-### Mistake 3: Using Column Encryption on Indexed Columns
+### 間違い 3: 索引が貼られた列に列レベルの暗号化を使用する
 
-Column-level TDE with SALT prevents standard index use (since every encryption of the same value is different). With NO SALT, equality queries work but frequency analysis attacks become possible.
+SALT を使用した列レベル TDE では、同じ値でも暗号化結果が毎回異なるため、標準的な索引を使用できなくなる。NO SALT を使用すると等価クエリは機能するが、頻度分析攻撃が可能になってしまう。
 
 ```sql
--- For columns used in WHERE clauses: use NO SALT or prefer tablespace encryption
+-- WHERE 句で使用される列の場合: NO SALT を使用するか、表領域の暗号化を優先する
 ALTER TABLE employees MODIFY (emp_code ENCRYPT USING 'AES256' NO SALT);
 
--- For columns never queried directly (e.g., stored bank account): SALT is fine
-ALTER TABLE employees MODIFY (bank_account ENCRYPT USING 'AES256');  -- SALT is default
+-- 直接クエリされない列（例: 保存された銀行口座番号）の場合: SALT を使用しても問題ない
+ALTER TABLE employees MODIFY (bank_account ENCRYPT USING 'AES256');  -- SALT がデフォルト
 ```
 
-### Mistake 4: Forgetting That Exports Bypass TDE
+### 間違い 4: エクスポートが TDE をバイパスすることを忘れる
 
-Data Pump exports (`expdp`) decrypt data before export. The exported dump file is unencrypted unless you explicitly encrypt it:
+Data Pump のエクスポート (`expdp`) は、エクスポート前にデータを復号する。明示的に暗号化しない限り、エクスポートされたダンプ・ファイルは非暗号化状態になる。
 
 ```bash
-# Always use ENCRYPTION when exporting TDE-protected data
+# TDE で保護されたデータをエクスポートするときは常に ENCRYPTION を使用する
 expdp system/password FULL=Y \
   DUMPFILE=full_backup.dmp \
   ENCRYPTION=ALL \
@@ -483,50 +483,49 @@ expdp system/password FULL=Y \
 
 ---
 
-## Compliance Considerations
+## コンプライアンスの考慮事項
 
 ### PCI-DSS
-- Requirement 3.4: Render PAN unreadable anywhere it is stored using strong cryptography
-- TDE directly satisfies this requirement for stored cardholder data
-- PCI-DSS requires AES-128 minimum; AES-256 is recommended
-- Key management procedures must be documented (who can access keys, how often rotated)
-- Requirement 3.5: Protect keys used to secure cardholder data against disclosure and misuse
+-   要件 3.4: 強力な暗号技術を使用して、保存されている PAN（プライマリ・アカウント番号）を読み取り不能にする。
+-   TDE は、保存された会員データに対するこの要件を直接満たす。
+-   PCI-DSS では最低 AES-128 が必要。AES-256 が推奨される。
+-   キー管理手順（誰がキーにアクセスできるか、どのくらいの頻度でローテーションするか）を文書化する必要がある。
+-   要件 3.5: 会員データを保護するために使用されるキーを、開示や不正使用から保護する。
 
 ### HIPAA
-- 45 CFR 164.312(a)(2)(iv): Encryption and decryption of ePHI
-- 45 CFR 164.312(e)(2)(ii): Encrypt ePHI in transit
-- TDE satisfies the at-rest encryption addressable specification
-- NIST guidelines recommend AES-256 for healthcare data at rest
+-   45 CFR 164.312(a)(2)(iv): ePHI の暗号化および復号。
+-   45 CFR 164.312(e)(2)(ii): 転送中の ePHI の暗号化。
+-   TDE は、「保存時の暗号化」のアドレサブル仕様を満たす。
+-   NIST ガイドラインでは、保存されているヘルスケア・データに対して AES-256 を推奨している。
 
 ### GDPR
-- Article 32: Implement encryption of personal data as an appropriate technical measure
-- While GDPR does not mandate specific algorithms, encryption is a primary example of appropriate measures
-- Encrypted data that is breached may be exempt from breach notification if keys were not compromised
+-   第 32 条: 適切な技術的手段として、個人データの暗号化を実装する。
+-   GDPR は特定のアルゴリズムを義務付けていないが、暗号化は適切な手段の代表例である。
+-   暗号化されたデータが漏洩した場合でも、キーが侵害されていなければ、情報漏洩の通知が免除される場合がある。
 
 ### FIPS 140-2
-- For U.S. federal systems, FIPS 140-2 validated cryptographic modules are required
-- Oracle's AES256 implementation is FIPS 140-2 validated
-- Enable FIPS mode in Oracle Network:
-  ```
-  # In sqlnet.ora:
-  SQLNET.FIPS_140 = TRUE
-  ```
+-   米国連邦政府のシステムでは、FIPS 140-2 検証済みの暗号モジュールが必要である。
+-   Oracle の AES256 実装は FIPS 140-2 検証済みである。
+-   Oracle Network で FIPS モードを有効にする例:
+    ```
+    # sqlnet.ora の場合:
+    SQLNET.FIPS_140 = TRUE
+    ```
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+-   このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効である。
+-   21c、23c、または 23ai と記された機能は、Oracle Database 26ai 対応機能として扱う。バージョンが混在する環境では、19c 互換の代替案を保持すること。
+-   リリース・アップデートによってデフォルトや非推奨が異なる場合があるため、両方のバージョンをサポートする環境では、19c と 26ai の両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Database Advanced Security Guide 19c — Using Transparent Data Encryption](https://docs.oracle.com/en/database/oracle/oracle-database/19/asoag/using-transparent-data-encryption.html)
-- [Oracle Database Advanced Security Guide 19c — Changes in 19c (ARIA, GOST added)](https://docs.oracle.com/en/database/oracle/oracle-database/19/asoag/release-changes.html)
-- [Oracle Database Reference 19c — WALLET_ROOT Parameter](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/WALLET_ROOT.html)
-- [Oracle Database 19c Licensing Information User Manual](https://docs.oracle.com/en/database/oracle/oracle-database/19/dblic/Licensing-Information.html)
-- [Oracle PL/SQL Packages Reference 19c — DBMS_CRYPTO](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_CRYPTO.html)
-- [Oracle Database 19c New Features Guide](https://docs.oracle.com/en/database/oracle/oracle-database/19/newft/)
-- [Oracle Support Note: How to Convert From SQLNET.ENCRYPTION_WALLET_LOCATION to WALLET_ROOT (Doc ID 2642694.1)](https://support.oracle.com/knowledge/Oracle%20Database%20Products/2642694_1.html)
+-   [Oracle Database Advanced Security Guide 19c — Using Transparent Data Encryption](https://docs.oracle.com/en/database/oracle/oracle-database/19/asoag/using-transparent-data-encryption.html)
+-   [Oracle Database Advanced Security Guide 19c — Changes in 19c (ARIA, GOST added)](https://docs.oracle.com/en/database/oracle/oracle-database/19/asoag/release-changes.html)
+-   [Oracle Database Reference 19c — WALLET_ROOT Parameter](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/WALLET_ROOT.html)
+-   [Oracle Database 19c Licensing Information User Manual](https://docs.oracle.com/en/database/oracle/oracle-database/19/dblic/Licensing-Information.html)
+-   [Oracle PL/SQL Packages Reference 19c — DBMS_CRYPTO](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_CRYPTO.html)
+-   [Oracle Database 19c New Features Guide](https://docs.oracle.com/en/database/oracle/oracle-database/19/newft/)
+-   [Oracle Support Note: How to Convert From SQLNET.ENCRYPTION_WALLET_LOCATION to WALLET_ROOT (Doc ID 2642694.1)](https://support.oracle.com/knowledge/Oracle%20Database%20Products/2642694_1.html)

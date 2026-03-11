@@ -1,102 +1,102 @@
-# Edition-Based Redefinition (EBR) in Oracle DB
+# Oracle DB におけるエディショニングによる再定義 (EBR)
 
-## Overview
+## 概要
 
-Edition-Based Redefinition (EBR) is Oracle's mechanism for deploying application changes to a live database without any downtime — including changes to PL/SQL code, views, and synonyms. It allows multiple versions of these objects to coexist simultaneously in the database, each within its own named **edition**. Database sessions are associated with a specific edition, so old application instances and new application instances can run concurrently against the same database, each seeing their own version of the code.
+エディショニングによる再定義 (Edition-Based Redefinition: EBR) は、PL/SQL コード、ビュー、シノニムなどの変更を、ダウンタイムなしで本番稼働中のデータベースにデプロイするための Oracle の仕組みである。これにより、これらのオブジェクトの複数のバージョンを「**エディション (edition)**」と呼ばれる名前付きのコンテナ内でデータベース内に同時に共存させることができる。データベース・セッションは特定のエディションに関連付けられるため、古いアプリケーション・インスタンスと新しいアプリケーション・インスタンスが同じデータベースに対して同時に実行され、それぞれが自身のバージョンのコードを参照することができる。
 
-EBR was introduced in Oracle 11g Release 2 and is the canonical Oracle approach to hot-rollover (blue/green or rolling) deployments at the database tier. It is significantly more capable than simply replacing packages — it handles the entire application schema version lifecycle including backward-compatible view evolution and cross-edition data synchronization.
+EBR は Oracle 11g Release 2 で導入され、データベース層でのホット・ロールオーバー（ブルー/グリーン・デプロイメントやローリング・デプロイメント）を実現するための Oracle の標準的な手法である。単にパッケージを置き換えるよりもはるかに強力であり、後方互換性のあるビューの進化やエディション間でのデータ同期など、アプリケーション・スキーマのバージョン・ライフサイクル全体を適切に処理できる。
 
 ---
 
-## Core Concepts
+## コア・コンセプト
 
-### Editions
+### エディション (Editions)
 
-An edition is a named, schema-independent container for editionable objects. Editions form a tree rooted at the default edition (`ORA$BASE`). Child editions inherit all objects from their parent edition; changes made in a child edition override the parent's version for sessions running in that edition.
+エディションは、エディション化可能なオブジェクトを格納する、名前付きのスキーマから独立したコンテナである。エディションは、デフォルトのエディション (`ORA$BASE`) をルートとするツリー構造を形成する。子エディションは親エディションからすべてのオブジェクトを継承する。子エディションで行われた変更は、そのエディションで実行されているセッションにおいて親のバージョンを上書きする。
 
 ```
-ORA$BASE (root edition)
-  └── V1 (initial production)
-        └── V2 (in-flight deployment)
-              └── V3 (next deployment)
+ORA$BASE (ルート・エディション)
+  └── V1 (初期の本番環境)
+        └── V2 (デプロイ中の次期バージョン)
+              └── V3 (その次のデプロイ)
 ```
 
 ```sql
--- List all editions in the database
+-- データベース内のすべてのエディションを一覧表示
 SELECT EDITION_NAME, PARENT_EDITION_NAME, USABLE
 FROM   DBA_EDITIONS
 ORDER BY EDITION_NAME;
 
--- Current edition of the session
+-- セッションの現在のエディションを確認
 SELECT SYS_CONTEXT('USERENV', 'CURRENT_EDITION_NAME') FROM DUAL;
 
--- Default edition for the database
+-- データベースのデフォルトのエディションを確認
 SELECT PROPERTY_VALUE FROM DATABASE_PROPERTIES
 WHERE  PROPERTY_NAME = 'DEFAULT_EDITION';
 ```
 
-### Editionable Object Types
+### エディション化可能なオブジェクト・タイプ
 
-Not all database objects are editionable. Only the following object types can have edition-specific versions:
+すべてのデータベース・オブジェクトがエディション化できるわけではない。以下のオブジェクト・タイプのみが、エディション固有のバージョンを持つことができる。
 
-| Editionable | Not Editionable |
+| エディション化可能 | エディション化不可 |
 |---|---|
-| PROCEDURE | TABLE |
-| FUNCTION | INDEX |
-| PACKAGE (spec + body) | SEQUENCE |
-| TRIGGER | MATERIALIZED VIEW |
-| TYPE (spec + body) | GRANT |
-| VIEW | DATABASE LINK |
-| SYNONYM | |
-| LIBRARY | |
-| SQL Translation Profile | |
+| プロシージャ (PROCEDURE) | 表 (TABLE) |
+| 関数 (FUNCTION) | 索引 (INDEX) |
+| パッケージ (仕様部 + 本体) | シーケンス (SEQUENCE) |
+| トリガー (TRIGGER) | マテリアライズド・ビュー (MATERIALIZED VIEW) |
+| タイプ (仕様部 + 本体) | 権限 (GRANT) |
+| ビュー (VIEW) | データベース・リンク (DATABASE LINK) |
+| シノニム (SYNONYM) | |
+| ライブラリ (LIBRARY) | |
+| SQL 変換プロファイル | |
 
-Tables, indexes, and sequences are shared across all editions. This is fundamental to the design: EBR manages code versioning, not data versioning.
+表、索引、シーケンスはすべてのエディションで共有される。これは設計上の基本原則である。EBR は「コード」のバージョン管理を行うものであり、「データ」のバージョン管理を行うものではない。
 
-### Enabling Editions on a Schema
+### スキーマでのエディションの有効化
 
 ```sql
--- Editions must be enabled for each schema that will use EBR
--- Requires ALTER USER privilege
+-- EBR を使用する各スキーマに対してエディションを有効にする必要がある
+-- ALTER USER 権限が必要
 ALTER USER app_owner ENABLE EDITIONS;
 
--- Verify
+-- 確認
 SELECT USERNAME, EDITIONS_ENABLED
 FROM   DBA_USERS
 WHERE  USERNAME = 'APP_OWNER';
 ```
 
-### Creating and Using Editions
+### エディションの作成と使用
 
 ```sql
--- Create a new edition (requires CREATE EDITION system privilege)
+-- 新しいエディションを作成 (CREATE EDITION システム権限が必要)
 CREATE EDITION v2 AS CHILD OF v1;
 
--- Set the database default edition (new sessions use this edition)
+-- データベースのデフォルト・エディションを設定 (新しいセッションはこのエディションを使用する)
 ALTER DATABASE DEFAULT EDITION = v2;
 
--- Set the edition for a specific session
+-- 特定のセッションのエディションを設定
 ALTER SESSION SET EDITION = v2;
 
--- Grant USE on an edition to a user
+-- エディションの使用権限をユーザーに付与
 GRANT USE ON EDITION v2 TO app_user;
 ```
 
 ---
 
-## Editioning Views
+## エディショニング・ビュー (Editioning Views)
 
-Because tables are not editionable, EBR introduces the **editioning view** as the boundary between code (editionable) and data (non-editionable). Application code never queries a base table directly; it queries an editioning view. During a deployment, the editioning view can be redefined in the new edition to expose a different column layout while the base table contains data for both the old and new schema.
+表はエディション化できないため、EBR ではコード（エディション化可能）とデータ（エディション化不可）の境界として**エディショニング・ビュー**を導入している。アプリケーション・コードはベースとなる表を直接クエリするのではなく、このエディショニング・ビューをクエリする。デプロイ中、ベースとなる表に新旧両方のスキーマ用のデータが含まれている間、新しいエディションでエディショニング・ビューを再定義して、異なる列レイアウトを公開することができる。
 
-### Creating an Editioning View
+### エディショニング・ビューの作成
 
 ```sql
--- The base table contains all columns for current and transitional state
+-- ベース・表には、現在および移行状態のすべての列が含まれる
 CREATE TABLE CUSTOMERS_T (
     CUSTOMER_ID    NUMBER(18,0)     NOT NULL,
-    -- Old columns (present in V1)
+    -- 旧バージョンの列 (V1 で使用)
     FULL_NAME      VARCHAR2(200),
-    -- New columns (added for V2 deployment)
+    -- 新バージョンの列 (V2 デプロイ用に追加)
     FIRST_NAME     VARCHAR2(100),
     LAST_NAME      VARCHAR2(100),
     EMAIL          VARCHAR2(320)    NOT NULL,
@@ -105,8 +105,8 @@ CREATE TABLE CUSTOMERS_T (
     CONSTRAINT PK_CUSTOMERS_T PRIMARY KEY (CUSTOMER_ID)
 );
 
--- V1 editioning view: exposes the old column layout
--- (Run while connected to V1 edition)
+-- V1 用エディショニング・ビュー: 旧バージョンの列構成を公開
+-- (V1 エディションに接続して実行)
 CREATE OR REPLACE EDITIONING VIEW CUSTOMERS AS
 SELECT
     CUSTOMER_ID,
@@ -118,8 +118,8 @@ FROM CUSTOMERS_T;
 ```
 
 ```sql
--- V2 editioning view: exposes the new column layout
--- (Run while connected to V2 edition)
+-- V2 用エディショニング・ビュー: 新バージョンの列構成を公開
+-- (V2 エディションに接続して実行)
 ALTER SESSION SET EDITION = v2;
 
 CREATE OR REPLACE EDITIONING VIEW CUSTOMERS AS
@@ -133,20 +133,20 @@ SELECT
 FROM CUSTOMERS_T;
 ```
 
-Sessions in edition `v1` see the `FULL_NAME` layout. Sessions in edition `v2` see the `FIRST_NAME`, `LAST_NAME` layout. Both query the same physical `CUSTOMERS_T` table.
+エディション `v1` のセッションには `FULL_NAME` のレイアウトが見え、エディション `v2` のセッションには `FIRST_NAME`, `LAST_NAME` のレイアウトが見える。両方のセッションが同じ物理的な `CUSTOMERS_T` 表をクエリしている。
 
 ---
 
-## Crossedition Triggers
+## クロスエディション・トリガー (Crossedition Triggers)
 
-Since both editions write to the same base table, a mechanism is needed to keep data consistent across the column layouts. **Crossedition triggers** propagate writes from one edition's column layout to the other.
+両方のエディションが同じベース・表に書き込むため、異なる列レイアウト間でデータの整合性を保つ仕組みが必要である。**クロスエディション・トリガー**は、一方のエディションの列レイアウトへの書き込みをもう一方へ伝播させる。
 
-### Forward Crossedition Trigger
+### 順方向クロスエディション・トリガー (Forward Crossedition Trigger)
 
-A forward crossedition trigger fires on the old edition and propagates changes to the new columns, so that data written by old-edition sessions is visible to new-edition sessions.
+順方向クロスエディション・トリガーは旧エディションで発生し、変更を新しい列に伝播させる。これにより、旧エディションのセッションによって書き込まれたデータが、新エディションのセッションからも見えるようになる。
 
 ```sql
--- Connect as V1 edition, create the forward trigger
+-- V1 エディションとして接続し、順方向トリガーを作成
 ALTER SESSION SET EDITION = v1;
 
 CREATE OR REPLACE TRIGGER TRG_CUST_FORWARD
@@ -155,7 +155,7 @@ FOR EACH ROW
 FORWARD CROSSEDITION
 DISABLE
 BEGIN
-  -- When old code writes FULL_NAME, split it into FIRST_NAME / LAST_NAME
+  -- 旧バージョンのコードが FULL_NAME に書き込んだ際、FIRST_NAME と LAST_NAME に分割する
   IF :NEW.FULL_NAME IS NOT NULL THEN
     :NEW.FIRST_NAME := REGEXP_SUBSTR(:NEW.FULL_NAME, '^\S+');
     :NEW.LAST_NAME  := REGEXP_SUBSTR(:NEW.FULL_NAME, '\S+$');
@@ -163,16 +163,16 @@ BEGIN
 END;
 /
 
--- Enable the trigger once the V2 deployment is ready to start accepting traffic
+-- V2 デプロイメントがトラフィックを受け入れる準備ができたらトリガーを有効化
 ALTER TRIGGER TRG_CUST_FORWARD ENABLE;
 ```
 
-### Reverse Crossedition Trigger
+### 逆方向クロスエディション・トリガー (Reverse Crossedition Trigger)
 
-A reverse crossedition trigger fires on the new edition and propagates changes back to the old columns, keeping old-edition sessions consistent while they are still running.
+逆方向クロスエディション・トリガーは新エディションで発生し、変更を古い列に書き戻す。これにより、新エディションの稼働中も、並行して動いている旧エディションのセッションで整合性が保たれる。
 
 ```sql
--- Connect as V2 edition, create the reverse trigger
+-- V2 エディションとして接続し、逆方向トリガーを作成
 ALTER SESSION SET EDITION = v2;
 
 CREATE OR REPLACE TRIGGER TRG_CUST_REVERSE
@@ -181,7 +181,7 @@ FOR EACH ROW
 REVERSE CROSSEDITION
 DISABLE
 BEGIN
-  -- When new code writes FIRST_NAME and LAST_NAME, reconstruct FULL_NAME
+  -- 新バージョンのコードが FIRST_NAME と LAST_NAME に書き込んだ際、FULL_NAME を再構築する
   IF :NEW.FIRST_NAME IS NOT NULL OR :NEW.LAST_NAME IS NOT NULL THEN
     :NEW.FULL_NAME := TRIM(:NEW.FIRST_NAME || ' ' || :NEW.LAST_NAME);
   END IF;
@@ -193,31 +193,31 @@ ALTER TRIGGER TRG_CUST_REVERSE ENABLE;
 
 ---
 
-## Hot-Rollover Deployment Workflow
+## ホット・ロールオーバー・デプロイメントのワークフロー
 
-The full deployment process for a hot-rollover using EBR follows a well-defined sequence:
+EBR を使用した無停止デプロイメントのプロセスは、以下の手順に従う。
 
-### Phase 1: Prepare the New Edition
+### フェーズ 1: 新エディションの準備
 
 ```sql
--- 1. Create the new edition
+-- 1. 新しいエディションを作成
 CREATE EDITION v2 AS CHILD OF v1;
 
--- 2. Add new columns to the base table (additive, non-breaking)
+-- 2. ベース・表に新しい列を追加 (非破壊的な追加)
 ALTER TABLE CUSTOMERS_T ADD (
     FIRST_NAME VARCHAR2(100),
     LAST_NAME  VARCHAR2(100)
 );
 
--- 3. Switch to new edition and deploy new code
+-- 3. 新エディションに切り替えて新しいコードをデプロイ
 ALTER SESSION SET EDITION = v2;
 
--- 4. Create the new editioning view (V2 layout)
+-- 4. 新しいエディショニング・ビューを作成 (V2 レイアウト)
 CREATE OR REPLACE EDITIONING VIEW CUSTOMERS AS
 SELECT CUSTOMER_ID, FIRST_NAME, LAST_NAME, EMAIL, STATUS_CODE, CREATED_AT
 FROM   CUSTOMERS_T;
 
--- 5. Deploy updated PL/SQL packages in V2 edition
+-- 5. 更新された PL/SQL パッケージを V2 エディションにデプロイ
 CREATE OR REPLACE PACKAGE PKG_CUSTOMERS AS
   PROCEDURE create_customer(
     p_first_name IN VARCHAR2,
@@ -226,38 +226,24 @@ CREATE OR REPLACE PACKAGE PKG_CUSTOMERS AS
   );
 END PKG_CUSTOMERS;
 /
-
-CREATE OR REPLACE PACKAGE BODY PKG_CUSTOMERS AS
-  PROCEDURE create_customer(
-    p_first_name IN VARCHAR2,
-    p_last_name  IN VARCHAR2,
-    p_email      IN VARCHAR2
-  ) IS
-  BEGIN
-    INSERT INTO CUSTOMERS (CUSTOMER_ID, FIRST_NAME, LAST_NAME, EMAIL)
-    VALUES (SEQ_CUSTOMER_ID.NEXTVAL, p_first_name, p_last_name, p_email);
-    COMMIT;
-  END create_customer;
-END PKG_CUSTOMERS;
-/
 ```
 
-### Phase 2: Enable Crossedition Triggers
+### フェーズ 2: クロスエディション・トリガーの有効化
 
 ```sql
--- Enable forward crossedition trigger (in V1) to propagate old writes to new columns
+-- 旧エディション (V1) の書き込みを新エディションの列に伝播させる (順方向)
 ALTER SESSION SET EDITION = v1;
 ALTER TRIGGER TRG_CUST_FORWARD ENABLE;
 
--- Enable reverse crossedition trigger (in V2) to propagate new writes to old columns
+-- 新エディション (V2) の書き込みを旧エディションの列に伝播させる (逆方向)
 ALTER SESSION SET EDITION = v2;
 ALTER TRIGGER TRG_CUST_REVERSE ENABLE;
 ```
 
-### Phase 3: Backfill Existing Data
+### フェーズ 3: 既存データのバックフィル
 
 ```sql
--- Populate new columns for rows that were inserted before the triggers were enabled
+-- トリガーが有効化される前に挿入された行に対して、新しい列のデータを埋める
 ALTER SESSION SET EDITION = v2;
 
 UPDATE CUSTOMERS_T
@@ -271,82 +257,53 @@ WHERE
 COMMIT;
 ```
 
-### Phase 4: Switch Traffic to New Edition
+### フェーズ 4: トラフィックの切り替え
 
 ```sql
--- Set V2 as the default edition for new sessions
--- (Existing sessions in V1 continue uninterrupted)
+-- 新しいセッションのデフォルト・エディションとして V2 を設定
+-- (V1 の既存セッションは中断されることなく継続される)
 ALTER DATABASE DEFAULT EDITION = v2;
 ```
 
-At this point, new application instances connect using V2. Old application instances running in V1 continue working. Both sets of instances share the same data, with crossedition triggers keeping both column layouts synchronized.
+この時点で、新しいアプリケーション・インスタンスは V2 を使用して接続する。V1 で実行されている古いインスタンスも引き続き動作する。両方のインスタンスが同じデータを共有し、クロスエディション・トリガーが両方の列レイアウトを同期させる。
 
-### Phase 5: Retire the Old Edition
+### フェーズ 5: 旧エディションの廃棄
 
-Once all application instances using V1 have been shut down:
+V1 を使用しているすべてのアプリケーション・インスタンスが停止された後：
 
 ```sql
--- Disable crossedition triggers (no longer needed)
+-- クロスエディション・トリガーを無効化 (不要になったため)
 ALTER TRIGGER TRG_CUST_FORWARD DISABLE;
 ALTER TRIGGER TRG_CUST_REVERSE DISABLE;
 
--- Optionally drop them
-DROP TRIGGER TRG_CUST_FORWARD;
-DROP TRIGGER TRG_CUST_REVERSE;
-
--- Drop the old columns (now that V1 is retired)
+-- 旧バージョンの列を削除 (V1 が廃棄されたため)
 ALTER TABLE CUSTOMERS_T DROP COLUMN FULL_NAME;
 
--- Drop the old edition (cannot drop an edition that has sessions or is the default)
+-- 旧エディションを削除 (セッションが残っているエディションやデフォルトのエディションは削除できない)
 DROP EDITION v1 CASCADE;
--- CASCADE drops all editioned objects that existed only in v1
 ```
 
 ---
 
-## Managing Editions in Practice
+## 運用上の EBR 管理
 
-### Listing Objects Per Edition
+### エディションごとのオブジェクトの確認
 
 ```sql
--- Which edition does each object belong to?
+-- 各オブジェクトがどのエディションに属しているか
 SELECT OBJECT_NAME, OBJECT_TYPE, EDITION_NAME, STATUS
-FROM   USER_OBJECTS_AE  -- AE = All Editions
+FROM   USER_OBJECTS_AE  -- AE = All Editions (すべてのエディション)
 WHERE  OBJECT_TYPE IN ('PACKAGE', 'PACKAGE BODY', 'VIEW', 'PROCEDURE', 'FUNCTION')
 ORDER BY OBJECT_NAME, EDITION_NAME;
 ```
 
-### Comparing Object State Across Editions
-
-```sql
--- Find objects that differ between editions
-SELECT a.OBJECT_NAME, a.OBJECT_TYPE,
-       a.EDITION_NAME AS EDITION_A,
-       b.EDITION_NAME AS EDITION_B,
-       a.LAST_DDL_TIME AS MODIFIED_IN_A,
-       b.LAST_DDL_TIME AS MODIFIED_IN_B
-FROM   USER_OBJECTS_AE a
-JOIN   USER_OBJECTS_AE b
-  ON   a.OBJECT_NAME = b.OBJECT_NAME
-  AND  a.OBJECT_TYPE = b.OBJECT_TYPE
-  AND  a.EDITION_NAME != b.EDITION_NAME
-WHERE  a.EDITION_NAME = 'V1'
-  AND  b.EDITION_NAME = 'V2'
-  AND  a.LAST_DDL_TIME != b.LAST_DDL_TIME;
-```
-
-### Setting Edition in Connection Strings
+### 接続文字列でのエディションの指定
 
 ```shell
-# JDBC connection string with edition
+# JDBC 接続文字列での指定
 jdbc:oracle:thin:@//host:1521/service?oracle.jdbc.editionName=V2
 
-# SQL*Plus
-sqlplus app_user/password@//host:1521/service
-ALTER SESSION SET EDITION = v2;
-
-# OCI (Python cx_Oracle / oracledb)
-import oracledb
+# Python (oracledb) での指定
 conn = oracledb.connect(
     user="app_user",
     password=password,
@@ -357,65 +314,52 @@ conn = oracledb.connect(
 
 ---
 
-## Use Cases and Limitations
+## ユースケースと制限事項
 
-### Ideal Use Cases
+### 最適なユースケース
 
-- **Rolling deployments** — Deploy new application version to a subset of app servers while old version continues on the remainder, both connected to the same database.
-- **PL/SQL-heavy applications** — EBR shines when the database contains significant business logic in packages; the ability to version packages independently is its primary advantage.
-- **Complex column renames or type changes** — The editioning view + crossedition trigger pattern handles renames cleanly without application downtime.
-- **Automated testing** — Deploy test versions of packages in a dedicated test edition without affecting production sessions.
+- **ローリング・デプロイメント** — 旧バージョンを実行しつつ新しいバージョンをデプロイし、双方を同じデータベースに接続させる。
+- **PL/SQL を駆使したアプリケーション** — パッケージ内にビジネス・ロジックが多く含まれる場合、パッケージを独立してバージョン管理できる EBR のメリットが最大化される。
+- **複雑な列名の変更や型変更** — エディショニング・ビュー ＋ クロスエディション・トリガーのパターンにより、アプリケーションを停止させることなく名前変更が可能になる。
 
-### Limitations
+### 制限事項
 
-- **Tables, indexes, and sequences are not editionable.** Structural changes still require careful forward-compatible design (expand/contract).
-- **Cannot use EBR for partitioning or storage changes.** Those require DBMS_REDEFINITION or offline DDL.
-- **DDL complexity increases significantly.** Every object must be created in the correct edition. Missed edition context during deployments causes objects to land in the wrong edition, which can be difficult to debug.
-- **Connection pool management becomes critical.** Connection pools must be configured to specify the correct edition. Pools created without an edition specification default to the database default edition, which may not be the intended edition during a partial rollover.
-- **Cannot drop an edition while it has active sessions or objects that exist only in it.** Plan cleanup procedures carefully.
-- **Not all Oracle features support editioned objects as dependencies.** For example, materialized views cannot reference editioned views.
+- **表、索引、シーケンスはエディション化できない。** 構造的な変更には、依然として後方互換性のある設計（拡張/縮小）が必要になる。
+- **デプロイメントの複雑さが増す。** すべてのオブジェクトを正しいエディションで作成する必要がある。デプロイ中にエディション・コンテキストを忘れると、意図しないエディションにオブジェクトが作成され、トラブルシューティングが困難になる。
+- **コネクション・プール管理が重要。** コネクション・プールは正しいエディションを指定するように構成される必要がある。指定がない場合、データベースのデフォルト・エディションが使用される。
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Model editions as a linear chain, not a tree.** While Oracle supports branching edition trees, linear chains (v1 → v2 → v3) are far easier to reason about and operate.
-- **Always set edition context explicitly in deployment scripts.** Never rely on the session default. Begin every deployment script with `ALTER SESSION SET EDITION = target_edition;` and verify with `SELECT SYS_CONTEXT('USERENV', 'CURRENT_EDITION_NAME') FROM DUAL;`.
-- **Keep the number of active editions small (2–3 maximum).** Maintaining more than one previous edition exponentially increases the complexity of crossedition triggers and deployment verification.
-- **Script edition creation and cleanup as part of the pipeline.** Do not rely on manual DBA steps. Create, deploy, switch, and schedule retirement as automated pipeline stages.
-- **Test edition switching in staging with realistic connection pool behavior.** Bugs caused by connection pools using the wrong edition are subtle and reproduce only under load.
-- **Document the current edition state in a deployment runbook.** Operators need to know which edition is current, which is retiring, and which is in staging at all times.
+- **エディションは線形チェーンとしてモデル化する。** Oracle は分岐するエディション・ツリーをサポートしているが、線形のチェーン (v1 → v2 → v3) の方が理解しやすく、運用も容易である。
+- **デプロイ・スクリプト内では常に明示的にエディション・コンテキストを設定する。** セッションのデフォルトに頼ってはいけない。スクリプトの冒頭で `ALTER SESSION SET EDITION = target_edition;` を実行し、確実に想定通りのエディションであることを確認する。
+- **アクティブなエディションの数は少なく保つ（最大 2 ～ 3）。** 複数の古いエディションを保持し続けると、クロスエディション・トリガーの複雑さと検証コストが指数関数的に増大する。
+- **エディションの作成とクリーンアップをパイプラインで自動化する。** DBA による手動の手順に頼らないようにする。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-**Mistake: Creating objects without setting the edition context first.**
-If a DBA runs `CREATE OR REPLACE VIEW CUSTOMERS AS ...` without first issuing `ALTER SESSION SET EDITION = v2`, the view is created in the current session edition, which may be the wrong one. Always verify edition context before any DDL in an EBR deployment.
+**間違い: オブジェクト作成前にエディション・コンテキストを設定し忘れる。**
+`ALTER SESSION SET EDITION = v2` を発行せずに `CREATE OR REPLACE VIEW` を実行すると、現在のセッションのエディション（古い方かもしれない）にオブジェクトが作成されてしまう。
 
-**Mistake: Forgetting that triggers on the base table fire in ALL editions.**
-Regular (non-crossedition) triggers on the base table are not editioned at the trigger level — they fire regardless of the session edition. Only crossedition triggers have edition-specific semantics. Audit triggers, logging triggers, and constraint enforcement triggers on base tables will see all DML from all editions.
+**間違い: ベース・表に対する通常のトリガーが「すべての」エディションで発生することを忘れる。**
+通常の（クロスエディションではない）トリガーは、セッションのエディションに関係なく発生する。監査トリガーや不整合チェック・トリガーは、すべてのエディションからの DML を捕捉する。
 
-**Mistake: Dropping columns before retiring all old-edition sessions.**
-Dropping the `FULL_NAME` column while V1 sessions are still active will break those sessions immediately. Always verify that no active sessions are using the old edition before performing column drops.
-
-**Mistake: Using editioning views for non-relational data access.**
-EBR is designed for relational, SQL-based object models. XML DB, Spatial, and other non-relational feature areas have limited or no EBR support.
-
-**Mistake: Conflating EBR with a general-purpose schema versioning tool.**
-EBR manages concurrent code versions. It does not replace schema migration tools like Liquibase or Flyway. The typical production pattern uses both: Flyway/Liquibase for base table DDL changes (additive only, forward-compatible), and EBR for PL/SQL and view versioning during hot rollovers.
+**間違い: 旧エディションのセッションが残っている状態で列を削除する。**
+V1 セッションがまだアクティブな間に `FULL_NAME` 列を削除すると、それらのセッションは即座にエラーで停止する。列削除の前に、古いエディションを使用しているセッションがないことを必ず確認すること。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c/23c 世代以降の機能は、Oracle Database 26ai 対応機能として扱う。
+- 19c と 26ai が混在する環境では、両方のバージョンで構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Database Development Guide 19c — Using Edition-Based Redefinition](https://docs.oracle.com/en/database/oracle/oracle-database/19/adfns/editions.html) — EBR introduced in 11gR2; editionable types (SYNONYM, VIEW, PROCEDURE, FUNCTION, PACKAGE, TRIGGER, TYPE, LIBRARY, SQL Translation Profile); crossedition triggers; editioning views
-- [Oracle Database SQL Language Reference 19c — CREATE EDITION](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-EDITION.html) — edition creation and hierarchy
-- [Oracle Database Reference 19c — DBA_EDITIONS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/DBA_EDITIONS.html) — edition catalog view
+- [Oracle Database Development Guide 19c — Using Edition-Based Redefinition](https://docs.oracle.com/en/database/oracle/oracle-database/19/adfns/editions.html)
+- [Oracle Database SQL Language Reference 19c — CREATE EDITION](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-EDITION.html)
+- [Oracle Database Reference 19c — DBA_EDITIONS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/DBA_EDITIONS.html)

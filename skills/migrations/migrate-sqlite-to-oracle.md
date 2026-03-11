@@ -1,63 +1,63 @@
-# Migrating SQLite to Oracle
+# SQLite から Oracle への移行
 
-## Overview
+## 概要
 
-SQLite is a serverless, embedded database engine that stores the entire database in a single file. It is designed for simplicity, portability, and low-resource environments — embedded in mobile apps, IoT devices, desktop software, and test environments. Oracle Database is a full enterprise RDBMS with a client-server architecture, complex memory management, and a rich feature set suited for concurrent multi-user workloads at scale.
+SQLite は、データベース全体を単一のファイルに保存する、サーバーレスの組み込み型データベース・エンジンである。シンプルさ、移植性、および低リソース環境向けに設計されており、モバイル・アプリ、IoT デバイス、デスクトップ・ソフトウェア、およびテスト環境に組み込まれている。一方、Oracle Database は、クライアント/サーバー・アーキテクチャ、複雑なメモリー管理、および大規模な同時マルチユーザー・ワークロードに適した豊富な機能を備えた、フル機能のエンタープライズ RDBMS である。
 
-Migrating from SQLite to Oracle typically represents a step up in scale, concurrency requirements, or operational maturity. The challenges include SQLite's unique type affinity system (rather than strict types), SQLite-specific PRAGMA statements with no Oracle equivalents, and the conceptual shift from a single-file embedded database to a multi-process enterprise server.
+SQLite から Oracle への移行は、通常、規模の拡大、同時実行要件の増加、または運用上の成熟度の向上を意味する。課題としては、SQLite 独自の型アフィニティ（Type Affinity）システム（厳格な型ではない）、Oracle に同等のものがない SQLite 固有の PRAGMA ステートメント、および単一ファイルの組み込みデータベースからマルチプロセス・エンタープライズ・サーバーへの概念的な転換が挙げられる。
 
 ---
 
-## SQLite Type Affinity vs Oracle Strict Types
+## SQLite の型アフィニティ vs Oracle の厳格な型
 
-SQLite uses a concept called **type affinity** rather than strict data types. A column's declared type is a hint, not an enforcement. Any column can store any value of any type. Oracle enforces strict typing.
+SQLite は、厳格なデータ型ではなく、**型アフィニティ（Type Affinity）** という概念を使用する。列の宣言された型は「ヒント」であり、強制ではない。どの列にも任意の型の任意の値を格納できる。これに対し、Oracle は厳格な型指定を強制する。
 
-### SQLite Type Affinity Rules
+### SQLite の型アフィニティ・ルール
 
-SQLite assigns affinity based on the declared type name:
-- Any type containing the word `INT` → INTEGER affinity
-- Any type containing `CHAR`, `CLOB`, or `TEXT` → TEXT affinity
-- Type `BLOB` or no type → BLOB affinity (stores any type)
-- Any type containing `REAL`, `FLOA`, or `DOUB` → REAL affinity
-- Everything else → NUMERIC affinity
+SQLite は、宣言された型名に基づいてアフィニティを割り当てる：
+- `INT` という単語を含む型 → INTEGER アフィニティ
+- `CHAR`, `CLOB`, または `TEXT` を含む型 → TEXT アフィニティ
+- `BLOB` 型または型指定なし → BLOB アフィニティ (任意の型を格納)
+- `REAL`, `FLOA`, または `DOUB` を含む型 → REAL アフィニティ
+- その他すべて → NUMERIC アフィニティ
 
-This means SQLite allows this without error:
+これは、SQLite ではエラーなしに以下が可能であることを意味する：
 ```sql
--- SQLite: this actually works (type affinity is a suggestion)
+-- SQLite: これは実際に動作する (型アフィニティは推奨事項に過ぎない)
 CREATE TABLE demo (
     id   INTEGER PRIMARY KEY,
     val  INTEGER
 );
-INSERT INTO demo (id, val) VALUES (1, 'not an integer');  -- Stored as TEXT
-INSERT INTO demo (id, val) VALUES (2, 3.14);              -- Stored as REAL
+INSERT INTO demo (id, val) VALUES (1, 'not an integer');  -- TEXT として格納される
+INSERT INTO demo (id, val) VALUES (2, 3.14);              -- REAL として格納される
 ```
 
-Oracle would reject these inserts with a type mismatch error.
+Oracle では、これらのインサートは型不一致エラーで拒否される。
 
-### Type Mapping Table
+### 型マッピング表
 
-| SQLite Declared Type | Oracle Type | Notes |
+| SQLite 宣言型 | Oracle 型 | 備考 |
 |---|---|---|
-| `INTEGER` | `NUMBER(10)` | SQLite INTEGER is up to 8 bytes; use NUMBER(19) for BIGINT range |
-| `INTEGER PRIMARY KEY` | `NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY` | SQLite ROWID alias |
-| `REAL` | `BINARY_DOUBLE` | 64-bit IEEE 754 float |
-| `TEXT` | `VARCHAR2(4000)` or `CLOB` | Depends on expected length |
-| `BLOB` | `BLOB` | Binary data |
-| `NUMERIC` | `NUMBER` | Catches anything else |
-| `BOOLEAN` | `NUMBER(1)` with CHECK (0,1) | SQLite stores TRUE/FALSE as 1/0 |
-| `DATE` | `DATE` | SQLite stores dates as TEXT or INTEGER |
-| `DATETIME` | `TIMESTAMP` | SQLite stores as TEXT `YYYY-MM-DD HH:MM:SS` |
-| `FLOAT` | `BINARY_FLOAT` or `BINARY_DOUBLE` | |
+| `INTEGER` | `NUMBER(10)` | SQLite の INTEGER は最大 8 バイト。BIGINT 範囲には NUMBER(19) を使用 |
+| `INTEGER PRIMARY KEY` | `NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY` | SQLite の ROWID エイリアス |
+| `REAL` | `BINARY_DOUBLE` | 64 ビット IEEE 754 浮動小数点 |
+| `TEXT` | `VARCHAR2(4000)` または `CLOB` | 期待される長さに依存 |
+| `BLOB` | `BLOB` | バイナリ・データ |
+| `NUMERIC` | `NUMBER` | その他すべてをキャッチ |
+| `BOOLEAN` | CHECK (0,1) 付きの `NUMBER(1)` | SQLite は TRUE/FALSE を 1/0 として格納 |
+| `DATE` | `DATE` | SQLite は日付を TEXT または INTEGER として格納 |
+| `DATETIME` | `TIMESTAMP` | SQLite は TEXT `YYYY-MM-DD HH:MM:SS` として格納 |
+| `FLOAT` | `BINARY_FLOAT` または `BINARY_DOUBLE` | |
 | `DOUBLE` | `BINARY_DOUBLE` | |
-| `VARCHAR(n)` | `VARCHAR2(n)` | SQLite ignores the n; Oracle enforces it |
-| `CHAR(n)` | `CHAR(n)` | SQLite ignores n; Oracle enforces it |
+| `VARCHAR(n)` | `VARCHAR2(n)` | SQLite は n を無視。Oracle は強制 |
+| `CHAR(n)` | `CHAR(n)` | SQLite は n を無視。Oracle は強制 |
 | `NCHAR(n)` | `NCHAR(n)` | |
-| `DECIMAL(p,s)` | `NUMBER(p,s)` | SQLite stores as float or integer |
+| `DECIMAL(p,s)` | `NUMBER(p,s)` | SQLite は浮動小数点または整数として格納 |
 
-### Schema Translation Example
+### スキーマ変換の例
 
 ```sql
--- SQLite schema (from .schema command)
+-- SQLite スキーマ (.schema コマンドによる出力)
 CREATE TABLE products (
     product_id   INTEGER  PRIMARY KEY AUTOINCREMENT,
     product_name TEXT     NOT NULL,
@@ -70,7 +70,7 @@ CREATE TABLE products (
     category_id  INTEGER  REFERENCES categories(category_id)
 );
 
--- Oracle equivalent
+-- Oracle での同等実装
 CREATE TABLE products (
     product_id   NUMBER       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     product_name VARCHAR2(500)  NOT NULL,
@@ -89,65 +89,65 @@ CREATE TABLE products (
 
 ---
 
-## SQLite Date Storage Patterns
+## SQLite の日付格納パターン
 
-SQLite has no native DATE type. Applications store dates in three ways:
-1. **TEXT** in ISO 8601 format: `'2024-01-15 14:30:00'`
-2. **INTEGER** as Unix epoch seconds: `1705330200`
-3. **REAL** as Julian day numbers: `2460325.1041667`
+SQLite にはネイティブの DATE 型がない。アプリケーションは通常、以下の 3 つの方法で日付を格納する。
+1. **TEXT** (ISO 8601 形式) : `'2024-01-15 14:30:00'`
+2. **INTEGER** (Unix エポック秒) : `1705330200`
+3. **REAL** (ユリウス日番号) : `2460325.1041667`
 
-Each requires a different Oracle loading strategy:
+それぞれ、Oracle へのロード戦略が異なる。
 
 ```sql
--- SQLite date stored as TEXT: '2024-01-15 14:30:00'
--- Oracle SQL*Loader mapping:
+-- TEXT として格納された SQLite の日付: '2024-01-15 14:30:00'
+-- Oracle SQL*Loader マッピング:
 created_at TIMESTAMP "YYYY-MM-DD HH24:MI:SS"
 
--- SQLite date stored as INTEGER Unix timestamp
--- Oracle conversion:
+-- INTEGER (Unix タイムスタンプ) として格納された SQLite の日付
+-- Oracle での変換：
 SELECT DATE '1970-01-01' + created_at_unix / 86400 AS created_at FROM staging;
--- Or for TIMESTAMP precision:
+-- または TIMESTAMP 精度の場合：
 SELECT TIMESTAMP '1970-01-01 00:00:00' +
        NUMTODSINTERVAL(created_at_unix, 'SECOND') AS created_at
 FROM staging;
 
--- SQLite date stored as Julian day REAL
--- Oracle conversion (Julian day to date):
+-- REAL (ユリウス日) として格納された SQLite の日付
+-- Oracle での変換 (ユリウス日から日付へ) :
 SELECT TO_DATE('4713-01-01', 'YYYY-MM-DD', 'NLS_CALENDAR=JULIAN') +
-       (julian_day - 0.5) AS created_at  -- approximate
+       (julian_day - 0.5) AS created_at  -- 近似値
 FROM staging;
--- Simpler: use Oracle's TO_DATE with Julian format
+-- より簡単な方法：Oracle の TO_DATE とユリウス形式を使用
 SELECT TO_DATE(ROUND(julian_day), 'J') AS created_at FROM staging;
 ```
 
 ---
 
-## SQLite Pragmas — No Oracle Equivalent
+## SQLite PRAGMA — Oracle に同等機能なし
 
-SQLite uses PRAGMA statements for database configuration and metadata queries. None of these exist in Oracle. Here is what each one does and the Oracle approach.
+SQLite は、データベース構成やメタデータ・クエリに PRAGMA ステートメントを使用する。Oracle にはこれらは存在しない。以下に、それぞれの目的と Oracle でのアプローチを示す。
 
-| SQLite PRAGMA | Purpose | Oracle Approach |
+| SQLite PRAGMA | 目的 | Oracle でのアプローチ |
 |---|---|---|
-| `PRAGMA journal_mode = WAL` | Write-Ahead Logging | Oracle uses redo logs; no user setting needed |
-| `PRAGMA foreign_keys = ON` | Enable FK enforcement | Oracle always enforces FKs unless disabled |
-| `PRAGMA synchronous = NORMAL` | Disk sync control | Oracle uses `FAST_START_MTTR_TARGET` and `LOG_BUFFER` |
-| `PRAGMA cache_size = 10000` | Page cache size | Oracle uses `DB_CACHE_SIZE` (SGA parameter) |
-| `PRAGMA page_size = 4096` | DB page size | Oracle uses `DB_BLOCK_SIZE` (set at creation) |
-| `PRAGMA auto_vacuum = FULL` | Automatic space reclaim | Oracle uses `ALTER TABLE ... SHRINK SPACE` |
-| `PRAGMA integrity_check` | Data integrity check | Oracle `DBMS_REPAIR`, `ANALYZE TABLE ... VALIDATE STRUCTURE` |
-| `PRAGMA table_info(tbl)` | Column metadata | `SELECT * FROM user_tab_columns WHERE table_name = 'TBL'` |
-| `PRAGMA index_list(tbl)` | List indexes | `SELECT * FROM user_indexes WHERE table_name = 'TBL'` |
-| `PRAGMA foreign_key_list(tbl)` | List FK constraints | `SELECT * FROM user_constraints WHERE table_name = 'TBL'` |
-| `PRAGMA compile_options` | Build-time options | N/A |
-| `PRAGMA database_list` | List attached DBs | `SELECT * FROM v$database` |
-| `PRAGMA user_version` | Application schema version | Create your own schema version table |
+| `PRAGMA journal_mode = WAL` | Write-Ahead Logging | Oracle は REDO ログを使用。ユーザー設定は不要 |
+| `PRAGMA foreign_keys = ON` | FK 強制の有効化 | Oracle は常に FK を強制（無効化しない限り） |
+| `PRAGMA synchronous = NORMAL` | ディスク同期制御 | `FAST_START_MTTR_TARGET` や `LOG_BUFFER` を使用 |
+| `PRAGMA cache_size = 10000` | ページ・キャッシュ・サイズ | `DB_CACHE_SIZE` (SGA パラメータ) を使用 |
+| `PRAGMA page_size = 4096` | DB ページ・サイズ | `DB_BLOCK_SIZE` (作成時に設定) を使用 |
+| `PRAGMA auto_vacuum = FULL` | 自動領域回収 | `ALTER TABLE ... SHRINK SPACE` を使用 |
+| `PRAGMA integrity_check` | データ整合性チェック | `DBMS_REPAIR`, `ANALYZE TABLE ... VALIDATE STRUCTURE` |
+| `PRAGMA table_info(tbl)` | 列メタデータ | `SELECT * FROM user_tab_columns WHERE table_name = 'TBL'` |
+| `PRAGMA index_list(tbl)` | 索引一覧 | `SELECT * FROM user_indexes WHERE table_name = 'TBL'` |
+| `PRAGMA foreign_key_list(tbl)` | FK 制約一覧 | `SELECT * FROM user_constraints WHERE table_name = 'TBL'` |
+| `PRAGMA compile_options` | ビルド時オプション | 該当なし |
+| `PRAGMA database_list` | アタッチされた DB 一覧 | `SELECT * FROM v$database` |
+| `PRAGMA user_version` | アプリ・スキーマ・バージョン | 独自のスキーマ・バージョン表を作成する |
 
-### Application Schema Versioning
+### アプリケーション・スキーマのバージョン管理
 
-SQLite applications often use `PRAGMA user_version` to track schema migrations. In Oracle, implement a dedicated version table:
+SQLite アプリケーションは、スキーマ移行の追跡に `PRAGMA user_version` をよく使用する。Oracle では、専用のバージョン表を実装すること。
 
 ```sql
--- Oracle equivalent of PRAGMA user_version
+-- PRAGMA user_version に相当する Oracle での実装例
 CREATE TABLE schema_version (
     version_number NUMBER(10)  NOT NULL,
     applied_at     TIMESTAMP   DEFAULT SYSTIMESTAMP,
@@ -157,53 +157,53 @@ CREATE TABLE schema_version (
 INSERT INTO schema_version (version_number, description) VALUES (1, 'Initial schema');
 COMMIT;
 
--- Query current version
+-- 現在のバージョンを照会
 SELECT MAX(version_number) FROM schema_version;
 ```
 
 ---
 
-## SQLite SQL Dialect → Oracle SQL
+## SQLite SQL 方言 → Oracle SQL
 
 ### AUTOINCREMENT vs ROWID
 
-SQLite's `INTEGER PRIMARY KEY` is an alias for the internal ROWID. `AUTOINCREMENT` adds a monotonically-increasing guarantee:
+SQLite の `INTEGER PRIMARY KEY` は内部 ROWID のエイリアスである。`AUTOINCREMENT` を付けると、ID が単調増加することが保証される。
 
 ```sql
 -- SQLite
 CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT);
--- vs
-CREATE TABLE t (id INTEGER PRIMARY KEY);  -- can reuse deleted row IDs
+-- または
+CREATE TABLE t (id INTEGER PRIMARY KEY);  -- 削除された行の ID が再利用される可能性がある
 
--- Oracle: always use GENERATED ALWAYS AS IDENTITY for strict increment
+-- Oracle: 厳密なインクリメントには常に GENERATED ALWAYS AS IDENTITY を使用する
 CREATE TABLE t (id NUMBER GENERATED ALWAYS AS IDENTITY (ORDER) PRIMARY KEY);
 ```
 
-### String Functions
+### 文字列関数
 
-| SQLite Function | Oracle Equivalent |
+| SQLite 関数 | Oracle 同等物 |
 |---|---|
-| `LENGTH(s)` | `LENGTH(s)` — same |
-| `UPPER(s)` | `UPPER(s)` — same |
-| `LOWER(s)` | `LOWER(s)` — same |
-| `TRIM(s)` | `TRIM(s)` — same |
-| `LTRIM(s)` | `LTRIM(s)` — same |
-| `RTRIM(s)` | `RTRIM(s)` — same |
-| `SUBSTR(s, pos, len)` | `SUBSTR(s, pos, len)` — same |
-| `INSTR(s, sub)` | `INSTR(s, sub)` — same |
-| `REPLACE(s, old, new)` | `REPLACE(s, old, new)` — same |
+| `LENGTH(s)` | `LENGTH(s)` — 同様 |
+| `UPPER(s)` | `UPPER(s)` — 同様 |
+| `LOWER(s)` | `LOWER(s)` — 同様 |
+| `TRIM(s)` | `TRIM(s)` — 同様 |
+| `LTRIM(s)` | `LTRIM(s)` — 同様 |
+| `RTRIM(s)` | `RTRIM(s)` — 同様 |
+| `SUBSTR(s, pos, len)` | `SUBSTR(s, pos, len)` — 同様 |
+| `INSTR(s, sub)` | `INSTR(s, sub)` — 同様 |
+| `REPLACE(s, old, new)` | `REPLACE(s, old, new)` — 同様 |
 | `PRINTF('%05d', n)` | `TO_CHAR(n, '00000')` |
-| `FORMAT(fmt, args)` (SQLite 3.38+) | `TO_CHAR` / `LPAD` / etc. |
+| `FORMAT(fmt, args)` (SQLite 3.38 以降) | `TO_CHAR` / `LPAD` 等 |
 | `HEX(blob)` | `RAWTOHEX(blob)` |
-| `QUOTE(s)` | No equivalent; use parameterized queries |
-| `SOUNDEX(s)` | `SOUNDEX(s)` — available in Oracle |
-| `LIKE(pattern, s)` | `s LIKE pattern` (reverse args) |
-| `GLOB(pattern, s)` | No equivalent; use `REGEXP_LIKE` with translated pattern |
+| `QUOTE(s)` | 同等の関数なし。パラメータ化クエリを使用 |
+| `SOUNDEX(s)` | `SOUNDEX(s)` — Oracle でも利用可能 |
+| `LIKE(pattern, s)` | `s LIKE pattern` (引数が逆) |
+| `GLOB(pattern, s)` | 同等の関数なし。パターンを変換して `REGEXP_LIKE` を使用 |
 
-### Date and Time Functions
+### 日付と時刻関数
 
 ```sql
--- SQLite date functions
+-- SQLite 日付関数
 SELECT DATE('now');
 SELECT DATE('now', '+30 days');
 SELECT DATETIME('now', 'localtime');
@@ -212,10 +212,10 @@ SELECT JULIANDAY('now');
 SELECT UNIXEPOCH('now');
 SELECT UNIXEPOCH(datetime_col);
 
--- Oracle equivalents
+-- Oracle での同等操作
 SELECT TRUNC(SYSDATE) FROM DUAL;
 SELECT TRUNC(SYSDATE) + 30 FROM DUAL;
-SELECT SYSDATE FROM DUAL;  -- already in local time
+SELECT SYSDATE FROM DUAL;  -- すでにローカル・タイム
 SELECT TO_CHAR(date_col, 'YYYY-MM') FROM dual;
 SELECT TO_NUMBER(TO_CHAR(SYSDATE, 'J')) FROM DUAL;
 SELECT (SYSDATE - DATE '1970-01-01') * 86400 FROM DUAL;
@@ -228,12 +228,12 @@ SELECT (date_col - DATE '1970-01-01') * 86400 FROM dual;
 -- SQLite
 SELECT * FROM products ORDER BY name LIMIT 10;
 SELECT * FROM products ORDER BY name LIMIT 10 OFFSET 20;
-SELECT * FROM products ORDER BY name LIMIT -1 OFFSET 5;  -- SQLite: -1 means no limit
+SELECT * FROM products ORDER BY name LIMIT -1 OFFSET 5;  -- SQLite: -1 は制限なしを意味する
 
--- Oracle 12c+
+-- Oracle 12c 以降
 SELECT * FROM products ORDER BY name FETCH FIRST 10 ROWS ONLY;
 SELECT * FROM products ORDER BY name OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY;
-SELECT * FROM products ORDER BY name OFFSET 5 ROWS;  -- no upper limit
+SELECT * FROM products ORDER BY name OFFSET 5 ROWS;  -- 上限なし
 ```
 
 ### UPSERT (INSERT OR REPLACE / ON CONFLICT)
@@ -245,7 +245,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('theme', 'dark');
 INSERT INTO settings (key, value) VALUES ('theme', 'dark')
     ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
--- Oracle (MERGE statement)
+-- Oracle (MERGE ステートメント)
 MERGE INTO settings tgt
 USING (SELECT 'theme' AS key, 'dark' AS value FROM DUAL) src
 ON (tgt.key = src.key)
@@ -255,43 +255,25 @@ WHEN NOT MATCHED THEN
     INSERT (key, value) VALUES (src.key, src.value);
 ```
 
-### Window Functions
+### ウィンドウ関数
 
-SQLite added window function support in version 3.25 (2018). Oracle has had window functions for much longer. The syntax is largely compatible:
+SQLite はバージョン 3.25 (2018 年) でウィンドウ関数をサポートした。Oracle はより以前からサポートしており、構文はほぼ互換性がある。
 
 ```sql
--- SQLite (3.25+)
-SELECT name, salary,
-       RANK() OVER (PARTITION BY dept ORDER BY salary DESC) AS dept_rank,
-       SUM(salary) OVER (ORDER BY hire_date ROWS UNBOUNDED PRECEDING) AS running_salary
-FROM employees;
-
--- Oracle (identical syntax)
+-- SQLite (3.25 以降) および Oracle (同一構文)
 SELECT name, salary,
        RANK() OVER (PARTITION BY dept ORDER BY salary DESC) AS dept_rank,
        SUM(salary) OVER (ORDER BY hire_date ROWS UNBOUNDED PRECEDING) AS running_salary
 FROM employees;
 ```
 
-### Common Table Expressions (CTEs)
+### 共通表式 (CTE)
 
-Both SQLite (3.8.3+) and Oracle support recursive and non-recursive CTEs with compatible syntax:
+SQLite (3.8.3 以降) と Oracle は共に、互換性のある構文で再帰的および非再帰的 CTE をサポートしている。
 
 ```sql
--- SQLite recursive CTE (org hierarchy)
-WITH RECURSIVE org_tree AS (
-    SELECT emp_id, name, manager_id, 0 AS level
-    FROM employees
-    WHERE manager_id IS NULL
-    UNION ALL
-    SELECT e.emp_id, e.name, e.manager_id, t.level + 1
-    FROM employees e
-    JOIN org_tree t ON e.manager_id = t.emp_id
-)
-SELECT * FROM org_tree ORDER BY level, name;
-
--- Oracle equivalent (CONNECT BY is another option, but CTE works too)
-WITH org_tree (emp_id, name, manager_id, level) AS (
+-- SQLite 再帰的 CTE (組織階層) および Oracle 同等実装
+WITH RECURSIVE org_tree (emp_id, name, manager_id, level) AS (
     SELECT emp_id, name, manager_id, 0 AS level
     FROM employees
     WHERE manager_id IS NULL
@@ -305,29 +287,27 @@ SELECT * FROM org_tree ORDER BY level, name;
 
 ---
 
-## Data Extraction from SQLite
+## SQLite からのデータ抽出
 
-### Method 1 — SQLite .dump (SQL INSERT format)
+### 方法 1 — SQLite .dump (SQL INSERT 形式)
 
 ```bash
-# Export all data as INSERT statements
+# すべてのデータを INSERT ステートメントとしてエクスポート
 sqlite3 myapp.db .dump > dump.sql
 
-# Export specific table
+# 特定のテーブルをエクスポート
 sqlite3 myapp.db ".dump products" > products_dump.sql
 
-# Export as CSV
-sqlite3 -separator ',' myapp.db "SELECT * FROM products;" > products.csv
-# With headers:
+# CSV としてエクスポート
 sqlite3 -header -csv myapp.db "SELECT * FROM products;" > products.csv
 ```
 
-The `.dump` output contains SQLite-specific syntax and must be manually translated (CREATE TABLE statements, AUTOINCREMENT, etc.) before loading into Oracle.
+`.dump` の出力には SQLite 固有の構文が含まれるため、Oracle にロードする前に手動での変換（CREATE TABLE ステートメント、AUTOINCREMENT 等）が必要である。
 
-### Method 2 — CSV Export and SQL*Loader
+### 方法 2 — CSV エクスポートと SQL*Loader
 
 ```bash
-# Export with headers as CSV
+# ヘッダー付き CSV としてエクスポート
 sqlite3 -header -csv myapp.db \
   "SELECT product_id, product_name, price, quantity, is_active,
           strftime('%Y-%m-%d %H:%M:%S', created_at) AS created_at
@@ -335,7 +315,7 @@ sqlite3 -header -csv myapp.db \
 ```
 
 ```
--- SQL*Loader control file
+-- SQL*Loader コントロール・ファイル
 OPTIONS (DIRECT=TRUE, SKIP=1)
 LOAD DATA
 INFILE 'products.csv'
@@ -353,25 +333,25 @@ TRAILING NULLCOLS
 )
 ```
 
-### Method 3 — Python ETL Script
+### 方法 3 — Python ETL スクリプト
 
-For databases with complex SQLite-specific data or type coercions, a Python script gives maximum control:
+複雑なデータや型変換が必要な場合は、Python スクリプトを使用するのが最も制御しやすい。
 
 ```python
 import sqlite3
-import oracledb  # python-oracledb (successor to cx_Oracle; install with: pip install oracledb)
+import oracledb  # python-oracledb を使用
 from datetime import datetime
 
-# Connect to source
+# ソースに接続
 src_conn = sqlite3.connect('myapp.db')
 src_conn.row_factory = sqlite3.Row
 src_cur = src_conn.cursor()
 
-# Connect to target (thin mode — no Oracle Client libs required)
+# ターゲットに接続 (Thin モード)
 tgt_conn = oracledb.connect(user='user', password='pass', dsn='localhost:1521/ORCL')
 tgt_cur = tgt_conn.cursor()
 
-# Migrate products
+# データの移行
 src_cur.execute("SELECT * FROM products")
 rows = src_cur.fetchall()
 
@@ -397,52 +377,42 @@ tgt_conn.commit()
 
 src_conn.close()
 tgt_conn.close()
-print(f"Migrated {len(batch)} products")
 ```
 
 ---
 
-## Scaling Considerations: Embedded to Enterprise
+## 拡張に関する考慮事項：組み込みからエンタープライズへ
 
-SQLite is optimized for single-writer, embedded use. Moving to Oracle requires rethinking several design assumptions:
+SQLite はシングル・ライター、組み込み用途に最適化されている。Oracle への移行では、いくつかの設計前提を再考する必要がある。
 
-### Connection Management
+### 接続管理
 
 ```
 SQLite:                          Oracle:
-- Single process, zero config    - Client-server, listener required
-- File-based locking             - Multi-version concurrency control
-- No connection pooling needed   - Use connection pooling (DRCP, UCP, c3p0)
-- One writer at a time           - Thousands of concurrent writers
+- 単一プロセス、構成不要       - クライアント/サーバー、リスナー必須
+- ファイル・ベースのロック       - マルチバージョン一貫性制御 (MVCC)
+- 接続プール不要              - 接続プール (DRCP, UCP 等) を使用
+- 一度に 1 つのライター         - 数千の同時ライター
 ```
 
-### Transaction Boundaries
+### トランザクション・バウンダリ
 
-SQLite in WAL mode allows one writer and multiple readers. Oracle's MVCC allows unlimited concurrent readers and writers. Applications that were designed for SQLite's serialized writes may not correctly handle Oracle's concurrent write scenarios — review all transaction isolation assumptions.
+SQLite の WAL モードでは 1 つのライターと複数のリーダーが可能。Oracle の MVCC では、無制限の同時リーダーとライターが可能。SQLite のシリアル化された書き込み向けに設計されたアプリケーションは、Oracle の同時書き込みシナリオを正しく処理できない可能性があるため、トランザクションの分離に関する前提条件を確認すること。
 
-### File References and LOB Handling
+### ファイル参照と LOB 処理
 
-SQLite databases are often used in apps that store file paths (image paths, document paths) rather than file content, because SQLite BLOB performance is limited. Oracle's BLOB and SecureFiles provide much better large object performance, so the migration is a good opportunity to evaluate whether file content should be inlined:
+SQLite BLOB のパフォーマンスは限定的であるため、ファイル・コンテンツ自体ではなくファイル・パスを保存することが多い。Oracle の BLOB および SecureFiles は非常に高いパフォーマンスを提供するため、移行時にコンテンツをデータベース内に取り込むことを検討する良い機会となる。
 
 ```sql
--- SQLite pattern (file path stored)
+-- SQLite パターン (ファイル・パスを格納)
 CREATE TABLE documents (
     id       INTEGER PRIMARY KEY,
-    filename TEXT,
     filepath TEXT   -- '/var/app/uploads/doc123.pdf'
 );
 
--- Oracle option 1: keep file paths (simpler migration)
+-- Oracle 案 2: コンテンツをインライン化 (エンタープライズ向け)
 CREATE TABLE documents (
     id       NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    filename VARCHAR2(500),
-    filepath VARCHAR2(1000)
-);
-
--- Oracle option 2: inline content (better for enterprise)
-CREATE TABLE documents (
-    id       NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    filename VARCHAR2(500),
     content  BLOB
 ) LOB (content) STORE AS SECUREFILE (
     DEDUPLICATE
@@ -452,70 +422,50 @@ CREATE TABLE documents (
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Audit SQLite for duck-typed columns.** Before migrating, query each column's actual stored types using SQLite's `typeof()` function to discover what data actually lives in each column:
+1. **ダック・タイピング（Duck-typed）された列を監査する。** 移行前に、SQLite の `typeof()` 関数を使用して各列に実際に保存されている型を調査すること。ある列に INTEGER と TEXT が混在している可能性がある。
 
-```sql
--- Find all distinct types stored in the 'val' column of 'data' table
-SELECT typeof(val), COUNT(*) FROM data GROUP BY typeof(val);
-```
+2. **初日から Oracle で制約を適用する。** SQLite の制約適用はオプションである。この移行を機に、NOT NULL, CHECK, FK 制約を適切に追加すること。
 
-2. **Enforce constraints in Oracle from day one.** SQLite has optional constraint enforcement. Use this migration as an opportunity to add NOT NULL, CHECK, and FK constraints that should have been there all along.
+3. **VARCHAR2 列のサイズを適切に設定する。** SQLite の TEXT は事実上無制限である。Oracle の VARCHAR2 のサイズを宣言する前に、実際の最大長を調査すること。
 
-3. **Size VARCHAR2 columns appropriately.** SQLite TEXT is unlimited. Survey actual max lengths before declaring Oracle VARCHAR2 sizes:
+4. **INSERT OR REPLACE から MERGE への変換をテストする。** SQLite の `INSERT OR REPLACE` は、衝突時に行を一度削除してから挿入する（他の列のデータが消える可能性がある）。対して Oracle の `MERGE` はその場で更新する。
 
-```sql
--- SQLite: check max length of each TEXT column
-SELECT MAX(LENGTH(product_name)) AS max_len FROM products;
-```
-
-4. **Test INSERT OR REPLACE → MERGE conversion.** SQLite's INSERT OR REPLACE semantics differ from Oracle MERGE in important ways: INSERT OR REPLACE with a UNIQUE constraint violation deletes the conflicting row first (losing data in other columns), then inserts. Oracle MERGE updates in place. Verify application behavior.
-
-5. **Replace SQLite aggregate functions.** SQLite has `group_concat()` — replace with Oracle `LISTAGG`.
+5. **SQLite の集計関数を置き換える。** SQLite の `group_concat()` は、Oracle の `LISTAGG` に置き換える。
 
 ---
 
-## Common Migration Pitfalls
+## よくある移行の落とし穴
 
-**Pitfall 1 — SQLite BOOLEAN is actually INTEGER:**
-Queries that test `WHERE is_active = TRUE` (SQLite stores this as integer 1) work in SQLite due to type flexibility but will fail in Oracle where `TRUE` has no meaning outside of PL/SQL. Replace with `WHERE is_active = 1`.
+**落とし穴 1 — SQLite の BOOLEAN は実際には INTEGER である：**
+`WHERE is_active = TRUE` (1 として格納) は SQLite では動作するが、Oracle では `TRUE` に PL/SQL 以外で意味がないため失敗する。`WHERE is_active = 1` を使用すること。
 
-**Pitfall 2 — NULL arithmetic:**
-Both SQLite and Oracle propagate NULL through arithmetic (NULL + 1 = NULL), but SQLite's `COALESCE` behavior for type coercion may differ from Oracle in edge cases. Test all null-handling paths.
+**落とし穴 2 — NULL 算術：**
+SQLite と Oracle は共に NULL を算術演算で伝播させる（NULL + 1 = NULL）が、型強制における `COALESCE` の挙動が端的なケースで異なる場合がある。
 
-**Pitfall 3 — Case sensitivity in LIKE patterns:**
-SQLite `LIKE` is case-insensitive for ASCII characters. Oracle `LIKE` is case-sensitive. Review all LIKE patterns.
+**落とし穴 3 — LIKE パターンの大文字小文字の区別：**
+SQLite の `LIKE` は ASCII 文字に対して大文字小文字を区別しない。Oracle の `LIKE` は区別する。
 
-**Pitfall 4 — INTEGER PRIMARY KEY without AUTOINCREMENT reuses IDs:**
-SQLite's `INTEGER PRIMARY KEY` without `AUTOINCREMENT` will reuse the ID of the maximum deleted row if a new row is inserted and the max ID is less than the deleted max. Oracle's identity column never reuses IDs with `NOCYCLE`.
+**落とし穴 4 — AUTOINCREMENT なしの PRIMARY KEY による ID 再利用：**
+SQLite で `AUTOINCREMENT` なしの `INTEGER PRIMARY KEY` を使用している場合、削除された最大 ID が再利用されることがある。Oracle のアイデンティティ列は通常再利用されない。
 
-**Pitfall 5 — GLOB pattern syntax:**
-SQLite has a GLOB operator that uses Unix-style wildcards (`*` for any, `?` for one). Oracle has no GLOB; translate to `REGEXP_LIKE` or `LIKE`:
-```sql
--- SQLite GLOB
-WHERE filename GLOB '*.pdf'
-
--- Oracle
-WHERE filename LIKE '%.pdf'
--- Or with regex for exact match:
-WHERE REGEXP_LIKE(filename, '\.pdf$', 'i')
-```
+**落とし穴 5 — GLOB パターンの構文：**
+SQLite の `GLOB` 演算子は Unix スタイルのワイルドカードを使用する。Oracle には `GLOB` はないため、`REGEXP_LIKE` や `LIKE` に変換する必要がある。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ファイル内の基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c, 23c, または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 複数バージョンをサポートする環境では、リリース更新（RU）によってデフォルト値や非推奨機能が異なる場合があるため、19c と 26ai の両方で動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c SQL Language Reference — Data Types](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/Data-Types.html)
 - [Oracle Database 19c SQL Language Reference — CREATE TABLE](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-TABLE.html)
 - [Oracle Database 19c SQL Language Reference — Row Limiting (FETCH FIRST)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/SELECT.html)
 - [Oracle Database 19c SQL Language Reference — MERGE](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/MERGE.html)
 - [Oracle Database 19c Utilities — SQL*Loader](https://docs.oracle.com/en/database/oracle/oracle-database/19/sutil/oracle-sql-loader.html)
-- [python-oracledb documentation](https://python-oracledb.readthedocs.io/en/latest/)
+- [python-oracledb ドキュメント](https://python-oracledb.readthedocs.io/en/latest/)

@@ -1,71 +1,68 @@
-# Online Operations in Oracle DB
+# Oracle DB におけるオンライン操作
 
-## Overview
+## 概要
 
-In production Oracle environments, DDL changes have historically required downtime: locking tables, blocking DML, and preventing reads during structural modifications. Oracle provides a suite of online operation features that allow the database to continue serving application traffic while structural changes take place in the background. Understanding these features — and their limitations — is essential for zero-downtime deployments.
+本番環境の Oracle データベースにおいて、従来の DDL 変更（構造変更）は、表のロック、DML のブロック、および読取りの制限など、何らかのダウンタイムを必要としていた。Oracle は、バックグラウンドで構造変更を行いながら、アプリケーションのトラフィックを継続して処理できる一連のオンライン操作機能を提供している。これらの機能を理解し、その制限（制約）を知ることは、ゼロ・ダウンタイムでのデプロイメントを実現するために不可欠である。
 
-The key mechanisms are:
+主なメカニズムは以下の通りである：
 
-- **DBMS_REDEFINITION** — online restructuring of tables with complex changes (column reordering, type changes, partitioning)
-- **Online index operations** — creating or rebuilding indexes without blocking DML
-- **ALTER TABLE ... ONLINE** — adding columns, modifying constraints with reduced locking
-- **Online segment shrink** — reclaiming space without taking tables offline
+- **DBMS_REDEFINITION** — 複雑な変更（列の入れ替え、型の変更、パーティション化など）を伴う、表のオンライン再定義。
+- **索引のオンライン操作** — DML をブロックせずに索引を作成または再構築する。
+- **ALTER TABLE ... ONLINE** — ロックを軽減した状態で列の追加や制約の変更を行う。
+- **オンライン・セグメント縮小** — 表をオフラインにすることなく領域を回収する。
 
-These are not universally applicable — each has prerequisites, limitations, and edge cases. This guide explains when and how to use each, with practical examples.
+これらはすべての場合に適用できるわけではなく、それぞれに前提条件、制限事項、および特有の挙動がある。このガイドでは、実用的な例を交えながら、それぞれの使用時期と使用方法について説明する。
 
 ---
 
-## DBMS_REDEFINITION
+## DBMS_REDEFINITION (オンライン再定義)
 
-### What It Does
+### 概要
 
-`DBMS_REDEFINITION` allows you to restructure a table while it remains fully available for DML. The process works by:
+`DBMS_REDEFINITION` パッケージを使用すると、テーブルに対する DML 操作を完全に継続したまま、表の構造を再定義できる。プロセスは以下の手順で進む：
 
-1. Creating an interim table with the new structure.
-2. Starting synchronization — Oracle tracks DML applied to the original table in a materialized view log.
-3. Copying existing rows to the interim table in the background.
-4. Periodically synchronizing incremental changes.
-5. Finishing the redefinition — Oracle swaps the table names atomically and drops the original.
+1. 新しい構造を持つ**中間表 (interim table)** を作成する。
+2. 同期を開始する。Oracle は、マテリアライズド・ビュー・ログを使用して、元の表に適用された DML を追跡する。
+3. バックグラウンドで、既存の行を中間表にコピーする。
+4. 途中で発生した増分変更を定期的に同期する。
+5. 再定義を完了する。Oracle はアトミック（不可分）に表名を入れ替え、元の表を削除する。
 
-Applications see no interruption. The final swap takes a brief exclusive lock (typically milliseconds), but no extended downtime.
+アプリケーションからは中断が見えない。最後の入れ替え時に一瞬だけ排他ロックが発生する（通常は数ミリ秒）が、長時間のダウンタイムは発生しない。
 
-### When to Use DBMS_REDEFINITION
+### DBMS_REDEFINITION を使用すべきケース
 
-Use it when you need to:
+以下のような変更が必要な場合に使用する：
 
-- Change column data types (e.g., `VARCHAR2(100)` to `VARCHAR2(500)`, or `DATE` to `TIMESTAMP`)
-- Reorder columns (for compression efficiency or application compatibility)
-- Convert a heap-organized table to a partitioned table
-- Add or remove compression
-- Move a table to a different tablespace online
-- Significantly change the logical structure that `ALTER TABLE` cannot handle
+- 列のデータ型の変更（例：`VARCHAR2(100)` から `VARCHAR2(500)`、または `DATE` から `TIMESTAMP`）
+- 列の順序の変更（圧縮効率の向上やアプリケーションの互換性のため）
+- 通常の表（ヒープ構成表）からパーティション表への変換
+- 圧縮の追加または削除
+- オンラインでの別の表領域への移動
+- 通常の `ALTER TABLE` では処理できない大幅な論理構造の変更
 
-### Prerequisites
+### 前提条件の確認
 
 ```sql
--- The table must have a primary key (or a unique key you specify as the key_column_list)
--- The schema owner needs EXECUTE on DBMS_REDEFINITION
--- The process requires roughly 1x the table size in additional storage during the operation
+-- 表に主キー（または代替の一意キー）が必要
+-- 执行権限 (EXECUTE on DBMS_REDEFINITION) が必要
+-- 操作中、表のサイズの約 1 倍の追加ストレージ容量が必要
 
--- Verify the table can be redefined
+-- 再定義が可能かどうかを確認
 BEGIN
   DBMS_REDEFINITION.CAN_REDEF_TABLE(
     uname        => 'APP_OWNER',
     tname        => 'ORDERS',
-    options_flag => DBMS_REDEFINITION.CONS_USE_PK  -- or CONS_USE_ROWID
+    options_flag => DBMS_REDEFINITION.CONS_USE_PK  -- または CONS_USE_ROWID
   );
 END;
 /
--- If no exception is raised, the table is eligible
+-- 例外が発生しなければ、再定義可能
 ```
 
-### Full Example: Converting Heap Table to Range-Partitioned
+### 実行例：通常の表をレンジ・パーティション表に変換する
 
 ```sql
--- Step 1: Create the interim table with the new structure
--- The column names and types must be compatible with the original
--- Additional columns in the interim table will start as NULL
-
+-- 手順 1: 新しい構造で中間表を作成
 CREATE TABLE ORDERS_NEW (
     ORDER_ID     NUMBER(18,0)  NOT NULL,
     CUSTOMER_ID  NUMBER(18,0)  NOT NULL,
@@ -81,11 +78,9 @@ INTERVAL (NUMTOYMINTERVAL(1, 'MONTH'))
   PARTITION P_BEFORE_2024 VALUES LESS THAN (DATE '2024-01-01')
     TABLESPACE DATA_TS
 );
-```
 
-```sql
--- Step 2: Start the redefinition
--- This creates the materialized view log on ORDERS and begins the copy
+-- 手順 2: 再定義の開始
+-- 元の表に MV ログが作成され、コピーが開始される
 BEGIN
   DBMS_REDEFINITION.START_REDEF_TABLE(
     uname        => 'APP_OWNER',
@@ -98,25 +93,15 @@ BEGIN
   );
 END;
 /
-```
 
-```sql
--- Step 3: Synchronize incrementally (run one or more times during the copy)
--- This applies DML that occurred since the last sync, reducing final cutover time
+-- 手順 3: 増分同期 (コピー中に 1 回以上実行)
+-- 前回の同期以降に発生した DML を適用し、最終切り替え時間を短縮する
 BEGIN
-  DBMS_REDEFINITION.SYNC_INTERIM_TABLE(
-    uname      => 'APP_OWNER',
-    orig_table => 'ORDERS',
-    int_table  => 'ORDERS_NEW'
-  );
+  DBMS_REDEFINITION.SYNC_INTERIM_TABLE('APP_OWNER', 'ORDERS', 'ORDERS_NEW');
 END;
 /
-```
 
-```sql
--- Step 4: Copy dependent objects to the interim table
--- Constraints, indexes, triggers, grants on the interim table become
--- the constraints/indexes/triggers/grants of the final table after swap
+-- 手順 4: 依存オブジェクト（制約、索引、トリガーなど）をコピー
 DECLARE
   v_num_errors PLS_INTEGER;
 BEGIN
@@ -131,92 +116,37 @@ BEGIN
     ignore_errors    => FALSE,
     num_errors       => v_num_errors
   );
-  IF v_num_errors > 0 THEN
-    RAISE_APPLICATION_ERROR(-20001, 'COPY_TABLE_DEPENDENTS had errors: ' || v_num_errors);
-  END IF;
 END;
 /
-```
 
-```sql
--- Step 5: Final synchronization and atomic swap
--- The original ORDERS table is renamed to ORDERS_OLD (or dropped)
--- ORDERS_NEW becomes ORDERS
+-- 手順 5: 最終同期とアトミックな入れ替え
 BEGIN
-  DBMS_REDEFINITION.FINISH_REDEF_TABLE(
-    uname        => 'APP_OWNER',
-    orig_table   => 'ORDERS',
-    int_table    => 'ORDERS_NEW'
-  );
-END;
-/
-```
-
-```sql
--- Step 6: Cleanup
--- After verifying the new table is correct, drop the old interim
--- (Oracle renamed ORDERS_NEW to ORDERS and ORDERS to ORDERS_NEW)
-DROP TABLE ORDERS_NEW PURGE;
-```
-
-### Error Recovery
-
-If the redefinition needs to be aborted at any point:
-
-```sql
-BEGIN
-  DBMS_REDEFINITION.ABORT_REDEF_TABLE(
-    uname      => 'APP_OWNER',
-    orig_table => 'ORDERS',
-    int_table  => 'ORDERS_NEW'
-  );
+  DBMS_REDEFINITION.FINISH_REDEF_TABLE('APP_OWNER', 'ORDERS', 'ORDERS_NEW');
 END;
 /
 
--- Then drop the interim table
+-- 手順 6: 後片付け
+-- 新しい表が正しいことを確認後、古い中間表を削除
 DROP TABLE ORDERS_NEW PURGE;
-```
-
-### Monitoring Progress
-
-```sql
--- Monitor the background copy via MV log and long operations
-SELECT
-    SID,
-    SERIAL#,
-    OPNAME,
-    SOFAR,
-    TOTALWORK,
-    ROUND(SOFAR / NULLIF(TOTALWORK, 0) * 100, 1) AS PCT_COMPLETE,
-    TIME_REMAINING                                AS SECS_REMAINING
-FROM
-    V$SESSION_LONGOPS
-WHERE
-    OPNAME LIKE '%redefinition%'
-    OR OPNAME LIKE '%Table Redefinition%';
 ```
 
 ---
 
-## Online Index Rebuild
+## 索引のオンライン操作
 
-### Why Rebuild Indexes?
+### 索引のオンライン再構築 (REBUILD ONLINE)
 
-Indexes accumulate structural inefficiency over time: deleted entries leave empty leaf blocks, heavy DML on monotonically increasing keys creates right-side imbalance (index blowout), and data movement during updates causes clustering factor degradation. Rebuilding corrects these issues without taking the table offline.
-
-### REBUILD ONLINE vs REBUILD
+索引は時間の経過とともに、構造的な非効率性（削除によるリーフ・ブロックの断片化、キーの偏りによる高さの増大など）が蓄積される。オンライン再構築により、アプリケーションを停止させずにこれらを修正できる。
 
 ```sql
--- Offline rebuild: table DML is blocked during rebuild
+-- オフライン再構築: 完了までテーブルへの DML がブロックされる
 ALTER INDEX IDX_ORDERS_CUSTOMER REBUILD;
 
--- Online rebuild: DML continues, uses a journal table to track changes
--- Takes longer, more I/O, but does not block application
+-- オンライン再構築: DML を継続可能。ジャーナル表を使用して変更を追跡する
+-- オフラインより時間がかかり I/O 負荷も高いが、アプリケーションを停止させない
 ALTER INDEX IDX_ORDERS_CUSTOMER REBUILD ONLINE;
-```
 
-```sql
--- Rebuild with specific storage options
+-- 並列実行の例
 ALTER INDEX IDX_ORDERS_CUSTOMER
 REBUILD ONLINE
 TABLESPACE IDX_TS
@@ -224,266 +154,137 @@ PARALLEL 4
 COMPUTE STATISTICS;
 ```
 
-```sql
--- Rebuild a partition of a partitioned index
-ALTER INDEX IDX_ORDERS_DATE
-REBUILD PARTITION P_2024_Q1 ONLINE;
-```
+### 索引のオンライン作成 (CREATE INDEX ONLINE)
 
-### Monitoring Index Health Before Deciding to Rebuild
+大規模な本番環境の表に新しい索引を追加する場合の標準的な手法である。
 
 ```sql
--- Analyze index structure
-ANALYZE INDEX IDX_ORDERS_CUSTOMER VALIDATE STRUCTURE;
-
-SELECT
-    NAME,
-    HEIGHT,
-    BLOCKS,
-    LF_ROWS,
-    LF_BLKS,
-    LF_ROWS_LEN,
-    DEL_LF_ROWS,
-    DEL_LF_ROWS_LEN,
-    ROUND(DEL_LF_ROWS / NULLIF(LF_ROWS, 0) * 100, 2) AS PCT_DELETED
-FROM
-    INDEX_STATS;
--- If PCT_DELETED > 20% or HEIGHT > 4 for a B-tree, consider rebuilding
-```
-
-```sql
--- Coalesce (cheaper than rebuild — merges leaf blocks without sorting)
--- Does not reduce height, does not move to new tablespace
-ALTER INDEX IDX_ORDERS_CUSTOMER COALESCE;
-```
-
----
-
-## Online Index Creation
-
-Creating an index online allows DML to continue on the table during index build. This is the standard approach for adding new indexes to large production tables.
-
-```sql
--- Standard online index creation
 CREATE INDEX IDX_ORDERS_STATUS
     ON ORDERS (STATUS_CODE, ORDER_DATE)
     ONLINE
     TABLESPACE IDX_TS
     PARALLEL 4
-    COMPUTE STATISTICS
-    NOLOGGING;   -- Reduces redo generation; requires full backup after creation
+    NOLOGGING;  -- REDO 生成を抑える（作成後にバックアップが必要）
 
--- After creation, reset to logging for ongoing maintenance
+-- 作成完了後、ロギングを有効に戻す
 ALTER INDEX IDX_ORDERS_STATUS LOGGING;
 ```
 
-```sql
--- Unique index online creation
-CREATE UNIQUE INDEX IDX_ORDERS_REF_NUM
-    ON ORDERS (REFERENCE_NUMBER)
-    ONLINE
-    TABLESPACE IDX_TS;
-```
-
-```sql
--- Function-based index online
-CREATE INDEX IDX_CUST_EMAIL_UPPER
-    ON CUSTOMERS (UPPER(EMAIL))
-    ONLINE
-    TABLESPACE IDX_TS;
-```
-
-### Online Index Limitations
-
-- **Bitmap indexes cannot be created or rebuilt online.** Bitmap indexes are not suitable for OLTP tables with concurrent DML anyway (they lock at the bitmap segment level).
-- **Index on IOT (Index-Organized Table)** secondary indexes cannot always be rebuilt online.
-- **Unusable partitioned index partitions** must be rebuilt offline if the partition is `UNUSABLE`.
-- Online operations consume more undo and temporary space than offline equivalents.
+**索引のオンライン操作の制限:**
+- **ビットマップ索引はオンラインで作成・再構築できない。**（そもそもビットマップ索引は DML が頻発する表には向かない）
+- オンライン操作は、オフラインの場合よりも多くの Undo 領域と一時（Temporary）領域を消費する。
 
 ---
 
 ## ALTER TABLE ... ONLINE
 
-Oracle 12c introduced `ONLINE` clause support for several `ALTER TABLE` operations, reducing lock contention.
+Oracle 12c 以降、いくつかの `ALTER TABLE` 操作で `ONLINE` 句がサポートされ、ロック競合が大幅に軽減された。
 
-### Adding Columns
+### 列の追加
 
 ```sql
--- Pre-12c: Adding a NOT NULL column with DEFAULT required a full table scan
--- and a row-by-row update, causing extended locks
-
--- 12c+: Adding NOT NULL with DEFAULT is metadata-only — instantaneous
+-- 12c以降: デフォルト値を持つ NOT NULL 列の追加はメタデータのみの変更となり、瞬時に完了する
 ALTER TABLE ORDERS
 ADD (LAST_MODIFIED TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL);
--- Oracle stores the default in the data dictionary; existing rows get the
--- default value at read time without a physical update
 
--- Explicitly mark the operation as online (no-op in 12c+ for this case, but explicit)
+-- 明示的にオンライン操作を指定 (12c以降ではデフォルトでロックが最小化されるが、明示も可能)
 ALTER TABLE ORDERS ADD (AUDIT_USER VARCHAR2(100)) ONLINE;
 ```
 
-### Modifying Column Definitions
+### 列を未使用 (UNUSED) に設定
+
+列を即座に削除する（すべての行を書き換える）のではなく、まず「未使用」としてマークする。アプリケーションからは即座に見えなくなり、物理的な領域回収は後回しにできる。
 
 ```sql
--- Increase VARCHAR2 column width (always safe, no data conversion)
-ALTER TABLE CUSTOMERS MODIFY (EMAIL VARCHAR2(320)) ONLINE;
-
--- Add a DEFAULT to an existing nullable column
-ALTER TABLE ORDERS MODIFY (NOTES VARCHAR2(4000) DEFAULT 'N/A') ONLINE;
-```
-
-### Setting Columns Unused
-
-Rather than immediately dropping a column (which rewrites all rows), mark it unused first. The column becomes invisible to the application immediately, and the physical space is reclaimed later.
-
-```sql
--- Step 1: Make the column invisible to the application (instant)
+-- 手順 1: アプリケーションから見えなくする (一瞬で完了)
 ALTER TABLE ORDERS SET UNUSED COLUMN LEGACY_REF_NUM;
 
--- Step 2: Reclaim space during a maintenance window or low-traffic period
+-- 手順 2: 負荷の低い時間帯などに領域を回収
 ALTER TABLE ORDERS DROP UNUSED COLUMNS;
-
--- Check for unused columns
-SELECT TABLE_NAME, COUNT(*) AS UNUSED_COLS
-FROM   USER_UNUSED_COL_TABS
-GROUP BY TABLE_NAME;
-```
-
-### Online Constraint Operations
-
-```sql
--- Enable a disabled constraint without validating existing rows (fast, no lock)
-ALTER TABLE ORDERS
-ENABLE NOVALIDATE CONSTRAINT FK_ORDERS_CUSTOMER;
-
--- After verifying data quality, enable with full validation
--- (Does not prevent DML during the validation scan)
-ALTER TABLE ORDERS
-ENABLE VALIDATE CONSTRAINT FK_ORDERS_CUSTOMER;
-
--- Add a check constraint that is not validated (future rows only)
-ALTER TABLE ORDERS
-ADD CONSTRAINT CHK_STATUS CHECK (STATUS_CODE IN ('PENDING','PROCESSING','SHIPPED','CLOSED'))
-ENABLE NOVALIDATE;
 ```
 
 ---
 
-## Online Segment Shrink
+## オンライン・セグメント縮小 (SHRINK SPACE)
 
-Shrink reclaims space within a table segment caused by row deletions without moving the table or requiring downtime.
+行の削除によって発生した表内の空き領域を回収する。表を移動させたりオフラインにしたりする必要はない。
 
 ```sql
--- Step 1: Enable row movement (rows may change ROWID during shrink)
+-- 手順 1: 行移動を有効化 (縮小中に行の ROWID が変わる可能性があるため)
 ALTER TABLE ORDERS ENABLE ROW MOVEMENT;
 
--- Step 2: Compact rows (moves rows, frees space inside blocks; no HWM change yet)
+-- 手順 2: 行のコンパクション (HWM はまだ動かさない)
 ALTER TABLE ORDERS SHRINK SPACE COMPACT;
--- At this point DML is not blocked; rows are shifted within the segment
 
--- Step 3: Adjust High Water Mark (brief exclusive lock, very fast)
+-- 手順 3: ハイ・ウォーター・マーク (HWM) の調整 (短い排他ロックが発生)
 ALTER TABLE ORDERS SHRINK SPACE;
 
--- Alternative: do both steps at once (compact + HWM adjustment)
-ALTER TABLE ORDERS SHRINK SPACE CASCADE;
--- CASCADE also shrinks all dependent indexes
-
--- After shrinking, disable row movement to re-lock ROWIDs
-ALTER TABLE ORDERS DISABLE ROW MOVEMENT;
-```
-
-```sql
--- Monitor fragmentation before deciding to shrink
-SELECT
-    SEGMENT_NAME,
-    BLOCKS,
-    EMPTY_BLOCKS,
-    NUM_ROWS,
-    AVG_ROW_LEN,
-    ROUND((BLOCKS * 8192) / 1024 / 1024, 2)          AS TOTAL_MB,
-    ROUND((NUM_ROWS * AVG_ROW_LEN) / 1024 / 1024, 2)  AS DATA_MB
-FROM
-    USER_TABLES
-WHERE
-    SEGMENT_NAME = 'ORDERS';
+-- 一括実行 (推奨)
+ALTER TABLE ORDERS SHRINK SPACE CASCADE;  -- 依存する索引も縮小
 ```
 
 ---
 
-## Minimizing Downtime: Strategy Summary
+## ダウンタイムを最小化する戦略のまとめ
 
-### Additive Changes (Zero Downtime)
+### 追加的な変更 (Zero Downtime)
 
-These changes are always safe to apply while the application is running:
+これらはアプリケーションの稼働中に適用しても安全である：
 
-- Adding nullable columns (`ALTER TABLE ADD`)
-- Adding NOT NULL columns with a DEFAULT value (12c+)
-- Creating new indexes (`CREATE INDEX ... ONLINE`)
-- Creating new tables, sequences, synonyms
-- Adding new constraints with `ENABLE NOVALIDATE`
-- Creating or replacing views, packages, procedures (if semantically compatible)
+- null 許可の列の追加
+- デフォルト値を持つ NOT NULL 列の追加 (12c+)
+- 新しい索引の作成 (`CREATE INDEX ... ONLINE`)
+- 新しい表、シーケンス、シノニムの作成
+- 制約の追加 (`ENABLE NOVALIDATE` を使用)
+- ビュー、パッケージ、プロシージャの作成または置換（意味的に互換性がある場合）
 
-### Destructive or Risky Changes (Require Planning)
+### 破壊的またはリスクのある変更 (計画が必要)
 
-These changes require careful ordering or phased deployment:
+これらは順序立てたデプロイメント（Expand/Contract パターンなど）が必要となる：
 
-| Change | Risk | Mitigation |
+| 変更内容 | リスク | 対応策 |
 |---|---|---|
-| Dropping a column | Application may still reference it | Set UNUSED first; drop in next release |
-| Renaming a column | Immediate application breakage | Add new column, migrate data, switch app, drop old |
-| Changing column type | May block or fail on large tables | Use DBMS_REDEFINITION |
-| Dropping/truncating a table | Immediate loss | Rename first; drop after application is updated |
-| Converting heap to partitioned | Cannot do with ALTER TABLE | Use DBMS_REDEFINITION |
-
-### The Expand/Contract Pattern
-
-The safest approach for any non-additive change in a zero-downtime system is the expand/contract (or parallel change) pattern:
-
-1. **Expand** — Add the new structure (new column, new table, new index) alongside the old. Write to both.
-2. **Migrate** — Backfill existing data to the new structure. Verify consistency.
-3. **Contract** — Remove the old structure after all application versions using it have been retired.
+| 列の削除 | アプリケーションがまだ参照している可能性 | まず UNUSED に設定し、次期リリースで削除 |
+| 列名の変更 | アプリケーションが即座にエラーになる | 新列追加、データ移行、アプリ切替、旧列削除 |
+| 列型の変更 | 大規模表では長時間ロックや失敗の恐れ | DBMS_REDEFINITION を使用 |
+| 通常表からパーティション化 | `ALTER TABLE` では不可 | DBMS_REDEFINITION を使用 |
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Always run `DBMS_REDEFINITION.CAN_REDEF_TABLE` before attempting redefinition.** A failure mid-operation on a large table leaves more mess than never starting.
-- **Monitor `V$SESSION_LONGOPS`** during online operations. These operations can run for hours on large tables; visibility into progress is critical.
-- **Plan temporary space.** Online index builds and DBMS_REDEFINITION require additional storage: ~1x the original index size for online rebuild, ~1x the table size for full redefinition.
-- **Rebuild with `PARALLEL` during low-traffic windows.** Even though online operations do not block DML, high-parallelism rebuilds consume significant I/O bandwidth. Reset `NOPARALLEL` after completion.
-- **Use `NOLOGGING` for initial index builds, then `LOGGING` for maintenance.** `NOLOGGING` dramatically reduces redo generation but requires a backup immediately after.
-- **Test online operations in non-production first.** Edge cases (LOB columns, domain indexes, spatial indexes) can prevent online operations from succeeding.
-
----
-
-## Common Mistakes
-
-**Mistake: Assuming online means instantaneous.**
-Online operations complete without blocking application DML, but they still consume significant time, I/O, and temp space. A 500 GB table redefinition may take hours. Plan accordingly and monitor progress.
-
-**Mistake: Forgetting to synchronize before FINISH_REDEF_TABLE.**
-The final swap includes a synchronization step, but calling `SYNC_INTERIM_TABLE` multiple times beforehand reduces the time of the exclusive lock during cutover. Run several manual syncs in the hours before the planned cutover.
-
-**Mistake: Using REBUILD ONLINE on bitmap indexes.**
-Oracle will raise `ORA-08106`. Bitmap indexes cannot be created or rebuilt online. They must be rebuilt offline during a maintenance window.
-
-**Mistake: Not disabling ROW MOVEMENT after a shrink.**
-Leaving `ROW MOVEMENT ENABLED` permanently means ROWIDs are not stable. Any application or tool that caches ROWIDs for fast lookup will retrieve incorrect rows after a shrink.
-
-**Mistake: Relying on SET UNUSED for data security.**
-`SET UNUSED COLUMN` makes the column invisible to normal SQL but does not physically remove the data. The column data still exists in the data files. For sensitive data (PII, credentials), use a proper DELETE or UPDATE to nullify the column values before marking it unused.
+- **再定義の前に必ず `DBMS_REDEFINITION.CAN_REDEF_TABLE` を実行する。** 大規模な表の操作の途中で失敗すると、修復が非常に困難になる。
+- **`V$SESSION_LONGOPS` を監視する。** オンライン操作は数時間かかることもある。進捗の可視化は運用上不可欠である。
+- **一時領域を十分に確保する。** オンライン操作は、元のオブジェクトと同等程度の追加ストレージ容量（中間表や索引作成用）を必要とする。
+- **並列度 (PARALLEL) の活用。** 負荷の低い時間帯に高い並列度で実行し、完了後は `NOPARALLEL` に戻す。
+- **事前に非本番環境でテストする。** LOB 列や特定の索引タイプなど、オンライン操作に制約がある場合がある。
 
 ---
 
+## よくある間違い
 
-## Oracle Version Notes (19c vs 26ai)
+**間違い: 「オンライン」＝「一瞬で終わる」と思い込む。**
+オンライン操作は DML をブロックしないだけであり、完了までには時間、I/O 負荷、一時領域を消費する。500 GB の表の再定義には数時間かかることを想定しておくべきである。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+**間違い: `FINISH_REDEF_TABLE` の前に同期を行わない。**
+最終的な入れ替え時にも同期は行われるが、事前に `SYNC_INTERIM_TABLE` を手動で数回実行しておくことで、最終切り替え時の排他ロック時間を最短にできる。
 
-## Sources
+**間違い: 縮小 (Shrink) 後に `ROW MOVEMENT` を有効なままにする。**
+ROWID をキャッシュして高速検索を行うアプリケーションがある場合、縮小後に ROWID が変わっているため、誤ったデータを取得する可能性がある。縮小後は `DISABLE ROW MOVEMENT` に戻す。
 
-- [DBMS_REDEFINITION (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_REDEFINITION.html) — START_REDEF_TABLE, FINISH_REDEF_TABLE, ABORT_REDEF_TABLE, SYNC_INTERIM_TABLE, COPY_TABLE_DEPENDENTS, CAN_REDEF_TABLE parameters and constants
-- [Oracle Database Administrator's Guide 19c — Online Operations](https://docs.oracle.com/en/database/oracle/oracle-database/19/admin/managing-tables.html) — ALTER TABLE ONLINE, shrink, unused columns
-- [Oracle Database SQL Language Reference 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/) — CREATE INDEX ONLINE, REBUILD ONLINE, ALTER TABLE SET UNUSED
+**間違い: データの完全削除に `SET UNUSED` を頼る。**
+`SET UNUSED` は SQL から見えなくするだけで、データ・ファイル上にはまだデータが残っている。機密データの削除が目的の場合は、UPDATE で null クリアしてから実行すること。
+
+---
+
+## Oracle バージョンに関する注意 (19c vs 26ai)
+
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c/23c 世代以降の機能は、Oracle Database 26ai 対応機能として扱う。
+
+## ソース
+
+- [DBMS_REDEFINITION (19c)](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_REDEFINITION.html)
+- [Oracle Database Administrator's Guide 19c — Online Operations](https://docs.oracle.com/en/database/oracle/oracle-database/19/admin/managing-tables.html)
+- [Oracle Database SQL Language Reference 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/)
+- [Oracle ALTER TABLE SHRINK SPACE — Online Segment Shrink](https://oracle-base.com/articles/misc/alter-table-shrink-space-online)

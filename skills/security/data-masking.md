@@ -1,40 +1,40 @@
-# Oracle Data Masking and Redaction
+# Oracle データのマスキングとリダクション (Data Masking and Redaction)
 
-## Overview
+## 概要
 
-Data masking and redaction are complementary security controls that protect sensitive data from unauthorized disclosure. They serve different purposes:
+データのマスキングとリダクションは、機密データが不正に開示されるのを防ぐための、補完的なセキュリティ制御である。これらはそれぞれ異なる目的で使用される。
 
-- **Oracle Data Redaction** (`DBMS_REDACT`) masks data dynamically at query time, in-memory, before it leaves the database engine. The data on disk is unchanged. This protects against unauthorized SQL access and application-layer exposure.
-- **Oracle Data Safe / Advanced Masking** permanently transforms data in non-production copies. Once masked, the original values are gone. This protects sensitive data in development, test, and UAT environments.
+-   **Oracle Data Redaction** (`DBMS_REDACT`): クエリ実行時に、データベース・エンジンからデータが出る前に、インメモリーで動的にデータをマスクする。ディスク上のデータは変更されない。これにより、不正な SQL アクセスやアプリケーション層での露出を防ぐ。
+-   **Oracle Data Safe / Advanced Masking**: 非本番環境のコピーにおいて、データを恒久的に変換する。一度マスクされると、元の値は失われる。これにより、開発、テスト、および UAT（ユーザー受け入れテスト）環境における機密データを保護する。
 
-Both features address a fundamental problem: organizations routinely need to expose sensitive data (PII, PCI, PHI) to developers, testers, analysts, and third-party applications — but those audiences should never see real values.
+どちらの機能も、「開発者、テスター、アナリスト、およびサードパーティ・アプリケーションに対して機密データ（PII、PCI、PHI）を公開する必要があるが、実際の値は見せてはならない」という根本的な課題に対応する。
 
-Oracle Data Redaction requires **Oracle Database Enterprise Edition 12c+** (included with Advanced Security Option in 12c, included in EE in 19c+). Oracle Data Safe is a cloud service (free tier available in OCI).
+Oracle Data Redaction には **Oracle Database Enterprise Edition 12c 以降**が必要である（12c では Advanced Security Option に含まれ、19c 以降では EE に含まれる）。Oracle Data Safe はクラウド・サービスである（OCI で無料枠が利用可能）。
 
 ---
 
 ## Oracle Data Redaction (DBMS_REDACT)
 
-Data Redaction transparently modifies query results for users who do not have the `EXEMPT REDACTION POLICY` privilege. The modification happens after the query executes but before results are returned to the client — so indexes, queries, and DML are unaffected.
+Data Redaction は、`EXEMPT REDACTION POLICY` 権限を持たないユーザーに対して、クエリ結果を透過的に変更する。変更はクエリの実行後、結果がクライアントに返される前に行われるため、索引、クエリ、および DML には影響を与えない。
 
-### Redaction Types
+### リダクション・タイプ
 
-| Type | Constant | Description |
+| タイプ | 定数 | 説明 |
 |---|---|---|
-| Full | `DBMS_REDACT.FULL` | Replaces entire value with a type-appropriate default (0 for numbers, spaces for strings, epoch for dates) |
-| Partial | `DBMS_REDACT.PARTIAL` | Masks a portion of the value; preserves format |
-| Regular Expression | `DBMS_REDACT.REGEXP` | Replaces patterns matching a regex |
-| Random | `DBMS_REDACT.RANDOM` | Returns a random value each time; different on every query |
-| None | `DBMS_REDACT.NONE` | Policy exists but no redaction occurs (used to suspend a policy) |
+| 完全 (Full) | `DBMS_REDACT.FULL` | 値全体を、データ型に応じたデフォルト値に置き換える（数値は 0、文字列は空白、日付はエポック） |
+| 部分 (Partial) | `DBMS_REDACT.PARTIAL` | 値の一部をマスクし、形式を維持する |
+| 正規表現 (Regular Expression) | `DBMS_REDACT.REGEXP` | 正規表現に一致するパターンを置き換える |
+| ランダム (Random) | `DBMS_REDACT.RANDOM` | クエリごとに異なるランダムな値を返す |
+| なし (None) | `DBMS_REDACT.NONE` | ポリシーは存在するがリダクションは行われない（ポリシーの一時停止に使用） |
 
 ---
 
-## Full Redaction
+## 完全リダクション (Full Redaction)
 
-Full redaction replaces the entire value with a default: `0` for numbers, a single space `' '` for characters, and `01-JAN-01` for dates.
+完全リダクションは、値全体をデフォルト値に置き換える。数値は `0`、文字列は単一の空白 `' '`、日付は `01-JAN-01` になる。
 
 ```sql
--- Redact an entire column
+-- 列全体をリダクション
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema       => 'HR',
@@ -42,17 +42,17 @@ BEGIN
     column_name         => 'SALARY',
     policy_name         => 'REDACT_SALARY_FULL',
     function_type       => DBMS_REDACT.FULL,
-    expression          => '1=1'   -- Always apply; use SYS_CONTEXT for conditional
+    expression          => '1=1'   -- 常に適用。条件付きの場合は SYS_CONTEXT を使用
   );
 END;
 /
 
--- Result for users without EXEMPT REDACTION POLICY:
+-- EXEMPT REDACTION POLICY 権限を持たないユーザーの結果:
 -- SELECT salary FROM hr.employees WHERE employee_id = 100;
 -- SALARY
 -- 0
 
--- Redact a date column
+-- 日付列をリダクション
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema       => 'PATIENTS',
@@ -68,12 +68,12 @@ END;
 
 ---
 
-## Partial Redaction
+## 部分リダクション (Partial Redaction)
 
-Partial redaction preserves the format and some characters of the original value, masking only the sensitive portion. This is ideal for credit card numbers, SSNs, and phone numbers.
+部分リダクションは、元の値の形式と一部の文字を維持し、機密部分のみをマスクする。これは、クレジットカード番号、社会保障番号 (SSN)、電話番号などに最適である。
 
 ```sql
--- Credit card: show only last 4 digits (XXXX-XXXX-XXXX-1234)
+-- クレジットカード: 下 4 桁のみを表示 (XXXX-XXXX-XXXX-1234)
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema       => 'PAYMENTS',
@@ -82,14 +82,14 @@ BEGIN
     policy_name         => 'REDACT_CC_PARTIAL',
     function_type       => DBMS_REDACT.PARTIAL,
     function_parameters => 'VVVVFVVVVFVVVVFLLL,VVVV-VVVV-VVVV-LLLL,*,1,12',
-    -- Format: input_format, output_format, mask_char, start_pos, end_pos
+    -- 形式: 入力形式, 出力形式, マスク文字, 開始位置, 終了位置
     expression          => '1=1'
   );
 END;
 /
--- Result: ****-****-****-1234
+-- 結果: ****-****-****-1234
 
--- Social Security Number: show only last 4 digits
+-- 社会保障番号 (SSN): 下 4 桁のみを表示
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema       => 'HR',
@@ -98,14 +98,14 @@ BEGIN
     policy_name         => 'REDACT_SSN',
     function_type       => DBMS_REDACT.PARTIAL,
     function_parameters => 'VVVFVVFVVVV,VVV-VV-VVVV,*,1,6',
-    -- Mask characters 1-6, show characters 7-11 (last 4)
+    -- 1文字目から6文字目までをマスクし、7文字目から11文字目（下4桁）を表示
     expression          => '1=1'
   );
 END;
 /
--- Result: ***-**-1234
+-- 結果: ***-**-1234
 
--- Email: mask local part, show domain
+-- メールアドレス: ローカル部分をマスクし、ドメインを表示
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema       => 'CUSTOMERS',
@@ -118,9 +118,9 @@ BEGIN
   );
 END;
 /
--- Result: johnXXXXXXXXXXXX@example.com (roughly)
+-- 結果: johnXXXXXXXXXXXX@example.com (おおよそのイメージ)
 
--- Phone number: mask middle digits
+-- 電話番号: 中間の数字をマスク
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema       => 'HR',
@@ -133,28 +133,28 @@ BEGIN
   );
 END;
 /
--- Result: 515-***-1234
+-- 結果: 515-***-1234
 ```
 
-### Partial Redaction Format Parameter Explained
+### 部分リダクションの形式パラメータの説明
 
-The `function_parameters` string for `PARTIAL` redaction uses a 5-part format:
+`PARTIAL` リダクションの `function_parameters` 文字列は、5 つの要素で構成される。
 ```
-'input_format, output_format, mask_char, start_position, end_position'
+'入力形式, 出力形式, マスク文字, 開始位置, 終了位置'
 ```
-- `V` in format = variable position (data-dependent character)
-- `F` in format = fixed separator character
-- `L` in format = literal keep character (not masked)
-- `start_position` and `end_position` are 1-based positions to mask
+-   形式内の `V`: 可変位置（データ依存の文字）
+-   形式内の `F`: 固定区切り文字
+-   形式内の `L`: そのまま保持するリテラル文字（マスクされない）
+-   `開始位置` と `終了位置`: マスクする範囲（1 から始まる位置）
 
 ---
 
-## Regular Expression Redaction
+## 正規表現リダクション (Regular Expression Redaction)
 
-Regex redaction is the most flexible option, using `REGEXP_REPLACE`-style pattern matching to selectively mask data.
+正規表現リダクションは最も柔軟なオプションであり、`REGEXP_REPLACE` スタイルのパターマッチングを使用してデータを動的にマスクする。
 
 ```sql
--- Redact all email addresses in a free-text notes column
+-- フリーテキストのメモ列に含まれるすべてのメールアドレスをリダクション
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema       => 'SUPPORT',
@@ -164,15 +164,15 @@ BEGIN
     function_type       => DBMS_REDACT.REGEXP,
     regexp_pattern      => '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
     regexp_replace_string => '***@***.***',
-    regexp_position     => 1,      -- Start position in string
-    regexp_occurrence   => 0,      -- 0 = all occurrences
-    regexp_match_parameter => 'i', -- Case-insensitive
+    regexp_position     => 1,      -- 文字列内の開始位置
+    regexp_occurrence   => 0,      -- 0 = かなべての一致箇所
+    regexp_match_parameter => 'i', -- 大文字小文字を区別しない
     expression          => '1=1'
   );
 END;
 /
 
--- Redact US SSN patterns (###-##-####)
+-- 米国の SSN パターン (###-##-####) をリダクション
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema         => 'HR',
@@ -188,7 +188,7 @@ BEGIN
 END;
 /
 
--- Redact IP addresses in log tables
+-- ログ表内の IP アドレスをリダクション
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema         => 'APP',
@@ -207,12 +207,12 @@ END;
 
 ---
 
-## Random Redaction
+## ランダム・リダクション (Random Redaction)
 
-Random redaction returns a randomly generated value on each query. The data type is preserved. This is useful when showing realistic-looking but fabricated data is acceptable.
+ランダム・リダクションは、クエリごとにランダムに生成された値を返す。データ型は維持される。これは、本物らしく見えるが捏造されたデータを見せても構わない場合に有用である。
 
 ```sql
--- Random salary values (different on every SELECT)
+-- ランダムな給料値（SELECT ごとに異なる）
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema   => 'HR',
@@ -224,18 +224,18 @@ BEGIN
   );
 END;
 /
--- Each SELECT returns a different random numeric value
+-- SELECT を実行するたびに、異なるランダムな数値が返される
 ```
 
 ---
 
-## Conditional Redaction (Selective Application)
+## 条件付きリダクション (選択的適用)
 
-The `expression` parameter is a SQL condition evaluated per row (and per session). When it evaluates to TRUE, redaction is applied. This is the mechanism for role-based or context-based redaction.
+`expression` パラメータは、行単位（およびセッション単位）で評価される SQL 条件である。これが TRUE と評価された場合にのみ、リダクションが適用される。これがロールベースまたはコンテキストベースのリダクションを実現するメカニズムである。
 
 ```sql
--- Redact salary ONLY when the session user is NOT in the HR role
--- Application context must be set up first (see row-level-security.md)
+-- セッション・ユーザーが HR ロールを持っていない場合のみ給料をリダクション
+-- アプリケーション・コンテキストを事前にセットアップする必要がある (row-level-security.md を参照)
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema       => 'HR',
@@ -243,13 +243,13 @@ BEGIN
     column_name         => 'SALARY',
     policy_name         => 'CONDITIONAL_SALARY_REDACT',
     function_type       => DBMS_REDACT.FULL,
-    -- Apply redaction when user is NOT in HR/PAYROLL role
+    -- ユーザーが HR_MGR または PAYROLL ロールでない場合にリダクションを適用
     expression          => 'SYS_CONTEXT(''hr_ctx'', ''user_role'') NOT IN (''HR_MGR'', ''PAYROLL'')'
   );
 END;
 /
 
--- Redact based on database session user (simpler approach using USERENV)
+-- データベース・セッション・ユーザーに基づくリダクション（USERENV を使用した簡単なアプローチ）
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema       => 'PAYMENTS',
@@ -258,7 +258,7 @@ BEGIN
     policy_name         => 'CC_REDACT_BY_USER',
     function_type       => DBMS_REDACT.PARTIAL,
     function_parameters => 'VVVVFVVVVFVVVVFLLL,VVVV-VVVV-VVVV-LLLL,*,1,12',
-    -- Apply to everyone except the payment_processor service account
+    -- payment_processor サービス・アカウント以外の全員に適用
     expression          => 'SYS_CONTEXT(''USERENV'', ''SESSION_USER'') != ''PAYMENT_PROCESSOR'''
   );
 END;
@@ -267,10 +267,10 @@ END;
 
 ---
 
-## Managing Redaction Policies
+## リダクション・ポリシーの管理
 
 ```sql
--- Add an additional column to an existing policy
+-- 既存のポリシーに列を追加
 BEGIN
   DBMS_REDACT.ALTER_POLICY(
     object_schema   => 'HR',
@@ -283,7 +283,7 @@ BEGIN
 END;
 /
 
--- Modify the redaction type for an existing column
+-- 既存の列のリダクション・タイプを変更
 BEGIN
   DBMS_REDACT.ALTER_POLICY(
     object_schema       => 'HR',
@@ -297,7 +297,7 @@ BEGIN
 END;
 /
 
--- Remove a specific column from a policy
+-- ポリシーから特定の列を削除
 BEGIN
   DBMS_REDACT.ALTER_POLICY(
     object_schema   => 'HR',
@@ -309,8 +309,8 @@ BEGIN
 END;
 /
 
--- Disable a policy (suspend redaction)
--- DBMS_REDACT.DISABLE_POLICY is a standalone procedure, NOT an ALTER_POLICY action constant
+-- ポリシーを無効化（リダクションを一時停止）
+-- DBMS_REDACT.DISABLE_POLICY は独立したプロシージャであり、ALTER_POLICY のアクション定数ではない
 BEGIN
   DBMS_REDACT.DISABLE_POLICY(
     object_schema   => 'HR',
@@ -320,8 +320,7 @@ BEGIN
 END;
 /
 
--- Re-enable a policy
--- DBMS_REDACT.ENABLE_POLICY is a standalone procedure, NOT an ALTER_POLICY action constant
+-- ポリシーを再度有効化
 BEGIN
   DBMS_REDACT.ENABLE_POLICY(
     object_schema   => 'HR',
@@ -331,7 +330,7 @@ BEGIN
 END;
 /
 
--- Drop a policy entirely
+-- ポリシーを完全に削除
 BEGIN
   DBMS_REDACT.DROP_POLICY(
     object_schema   => 'HR',
@@ -342,23 +341,23 @@ END;
 /
 ```
 
-### Querying Redaction Policies
+### リダクション・ポリシーのクエリ
 
 ```sql
--- All redaction policies and their columns
+-- すべてのリダクション・ポリシーとその対象列
 SELECT object_schema, object_name, policy_name, column_name,
        function_type, function_parameters, regexp_pattern,
        expression, enable
 FROM redaction_policies
 ORDER BY object_schema, object_name, policy_name;
 
--- Alternative view (older)
+-- 別のビュー（旧式）
 SELECT object_schema, object_name, policy_name, column_name,
        function_type, expression, policy_enable
 FROM dba_redaction_policies
 ORDER BY object_schema, object_name;
 
--- Find all redacted columns in a specific schema
+-- 特定のスキーマ内のリダクション対象列をすべて検索
 SELECT object_name, column_name, function_type, expression
 FROM redaction_policies
 WHERE object_schema = 'HR'
@@ -367,27 +366,27 @@ ORDER BY object_name, column_name;
 
 ---
 
-## Permanent Data Masking for Non-Production Environments
+## 非本番環境向けの恒久的なデータ・マスキング
 
-For non-production copies, data must be permanently transformed before delivery to developers, testers, or third parties. Oracle provides several approaches.
+非本番環境のコピーでは、開発者、テスター、またはサードパーティーに提供する前に、データを恒久的に変換する必要がある。Oracle はいくつかの方法を提供している。
 
-### Oracle Data Safe (Cloud)
+### Oracle Data Safe (クラウド)
 
-Oracle Data Safe is a free cloud service for OCI-hosted databases and an add-on for on-premises databases. It provides:
-- Sensitive data discovery (automatically finds PII, PCI, PHI)
-- Data masking with 50+ built-in masking formats
-- Activity auditing
-- Security assessments
+Oracle Data Safe は、OCI でホストされているデータベース向けの無料クラウド・サービスであり、オンプレミスのデータベース向けのアドオンでもある。以下の機能を提供する。
+- 機密情報の発見（PII、PCI、PHI を自動的に検索）
+- 50 以上の定義済みマスキング形式を使用したデータ・マスキング
+- アクティビティ監査
+- セキュリティ・アセスメント
 
-### Manual Permanent Masking Techniques
+### 手動による恒久的なマスキング・テクニック
 
-When Oracle Data Safe is not available, permanent masking can be implemented in SQL during a refresh cycle:
+Oracle Data Safe が利用できない場合、リフレッシュ・サイクル中に SQL で恒久的なマスキングを実装できる。
 
 ```sql
--- Step 1: Identify sensitive columns
--- Step 2: Create masked copies in non-production
+-- ステップ 1: 機密列を特定する
+-- ステップ 2: 非本番環境でマスクされたコピーを作成する
 
--- Shuffle values (preserves distribution, breaks re-identification)
+-- 値をシャッフルする（分布は維持するが、再識別を阻止する）
 UPDATE hr.employees e1
 SET salary = (
   SELECT e2.salary
@@ -397,13 +396,13 @@ SET salary = (
 );
 COMMIT;
 
--- Replace names with randomly generated names from a lookup table
+-- 名前をルックアップ表からのランダムな名前に置き換える
 UPDATE hr.employees
 SET first_name = (SELECT name FROM name_lookup ORDER BY DBMS_RANDOM.VALUE FETCH FIRST 1 ROWS ONLY),
     last_name  = (SELECT surname FROM surname_lookup ORDER BY DBMS_RANDOM.VALUE FETCH FIRST 1 ROWS ONLY);
 COMMIT;
 
--- Hash email addresses (consistent: same input always produces same output)
+-- メールアドレスをハッシュ化する（一貫性を持たせる: 同じ入力からは常に同じ出力が生成される）
 UPDATE customers
 SET email = LOWER(RAWTOHEX(DBMS_CRYPTO.HASH(
   UTL_RAW.CAST_TO_RAW(LOWER(email)),
@@ -411,29 +410,29 @@ SET email = LOWER(RAWTOHEX(DBMS_CRYPTO.HASH(
 ))) || '@masked.example.com';
 COMMIT;
 
--- Randomize dates within a range (preserves relative ordering)
+-- 範囲内で日付をランダム化する（相対的な順序を維持する）
 UPDATE patients
 SET date_of_birth = date_of_birth + TRUNC(DBMS_RANDOM.VALUE(-365, 365));
 COMMIT;
 
--- Null out highly sensitive fields entirely
+-- 非常に機密性の高いフィールドを完全に NULL にする
 UPDATE hr.employees
 SET national_id     = NULL,
     passport_number = NULL,
     biometric_data  = NULL;
 COMMIT;
 
--- Replace credit card numbers with consistent format-preserving values
+-- クレジットカード番号を一貫性のある形式維持した値に置き換える
 UPDATE payments
 SET credit_card_number = '4111' || LPAD(TRUNC(DBMS_RANDOM.VALUE(0, 999999999999)), 12, '0');
 COMMIT;
 ```
 
-### Subset-and-Mask Pipeline for Non-Production Refresh
+### 非本番リフレッシュ向けのサブセット化およびマスキング・パイプライン
 
 ```sql
--- 1. Export only a subset of production data (no masking needed for non-PII tables)
--- 2. For sensitive tables, use INSERT...SELECT with masking inline:
+-- 1. 本番データの一部のみをエクスポート（PII を含まない表にはマスキング不要）
+-- 2. 機密表の場合は、INSERT...SELECT を使用してインラインでマスキングを行う:
 INSERT INTO nonprod.employees (
   employee_id, first_name, last_name, email, phone_number,
   hire_date, job_id, salary, department_id
@@ -444,8 +443,8 @@ SELECT
   'Last'  || employee_id                              AS last_name,
   'user'  || employee_id || '@test.example.com'       AS email,
   '555-' || LPAD(employee_id, 3, '0') || '-0000'     AS phone_number,
-  hire_date,   -- Non-sensitive; keep as-is
-  job_id,      -- Non-sensitive; keep as-is
+  hire_date,   -- 非機密。そのまま保持
+  job_id,      -- 非機密。そのまま保持
   ROUND(DBMS_RANDOM.VALUE(30000, 150000))             AS salary,
   department_id
 FROM prod.employees;
@@ -454,12 +453,12 @@ COMMIT;
 
 ---
 
-## Sensitive Column Discovery
+## 機密列の発見
 
-Before masking, you need to know which columns hold sensitive data. Oracle Data Safe automates this, but you can do a pattern-based search manually:
+マスキングを行う前に、どの列に機密データが含まれているかを知る必要がある。Oracle Data Safe はこれを自動化するが、手動でパターンベースの検索を行うこともできる。
 
 ```sql
--- Search for likely sensitive column names across all tables
+-- すべての表を対象に、機密データと思われる列名を検索
 SELECT owner, table_name, column_name, data_type
 FROM dba_tab_columns
 WHERE REGEXP_LIKE(column_name,
@@ -477,51 +476,51 @@ ORDER BY owner, table_name, column_name;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Redact at the lowest level possible**: Apply policies to base tables, not views. Views over redacted tables inherit the redaction automatically.
+1.  **可能な限り低いレベルでリダクションを行う**: ポリシーはビューではなくベース表に適用する。リダクション対象の表に基づくビューは、自動的にリダクションを継承する。
 
-2. **Use conditional expressions for role-based redaction**: A policy with `expression => '1=1'` always redacts. Use `SYS_CONTEXT` expressions to allow privileged roles to see real data.
+2.  **ロールベースのリダクションには条件式を使用する**: `expression => '1=1'` のポリシーは常にリダクションを行う。`SYS_CONTEXT` 式を使用して、特権ロールが実際のデータを見られるようにする。
 
-3. **Do not rely on redaction as the only control**: Redaction is a defense-in-depth measure. Users with direct export tools (Data Pump, SQL*Plus SPOOL) or backup access can bypass it. Combine with privilege management and auditing.
+3.  **リダクションのみに頼らない**: リダクションは多層防御の一環である。直接エクスポート・ツール（Data Pump、SQL*Plus SPOOL）やバックアップへのアクセス権を持つユーザーは、リダクションを回避できる可能性がある。権限管理および監査と組み合わせること。
 
-4. **Never use real production data in non-production**: Even with redaction in place on production, non-production copies should use permanently masked data. There are too many ways for sensitive data to leak through logs, error messages, and debugging tools.
+4.  **本番環境の実際のデータを非本番環境で使用しない**: 本番環境でリダクションが行われていても、非本番環境のコピーには恒久的にマスクされたデータを使用すべきである。ログ、エラー・メッセージ、デバッグ・ツールなどを通じて機密データが漏洩する経路は多すぎる。
 
-5. **Audit access to redacted columns**: Enable fine-grained auditing (see `auditing.md`) on tables with redaction policies so you can detect unusual access patterns.
+5.  **リダクションされた列へのアクセスを監査する**: リダクション・ポリシーがある表に対してファイングレイン監査（`auditing.md` を参照）を有効にし、異常なアクセス・パターンを検出できるようにする。
 
-6. **Document your masking strategy**: For compliance, you must be able to demonstrate that specific columns in specific tables are masked and explain the masking technique used.
+6.  **マスキング戦略を文書化する**: コンプライアンスのために、特定の表の特定の列がマスクされていることを示し、使用されているマスキング・テクニックを説明できる必要がある。
 
-7. **Test redaction with a non-privileged account**: Always verify your policies work correctly by connecting as a user who should see masked data and confirming the masking behavior.
+7.  **特権のないアカウントでリダクションをテストする**: マスクされたデータを見るべきユーザーとして接続し、マスキングの動作が正しいことを常に確認する。
 
 ---
 
-## Common Mistakes and How to Avoid Them
+## よくある間違いとその回避方法
 
-### Mistake 1: Assuming Export Tools Respect Redaction
+### 間違い 1: エクスポート・ツールがリダクションを尊重すると想定する
 
-Data Pump (`expdp`), SQL*Plus `COPY`, database links, and GoldenGate all can bypass Data Redaction because they run with DBA-level privileges or use direct path access.
+Data Pump (`expdp`)、SQL*Plus `COPY`、データベース・リンク、および GoldenGate はすべて、DBA レベルの権限で実行されるか、直接パス・アクセスを使用するため、Data Redaction をバイパスできる。
 
 ```sql
--- Check who has EXEMPT REDACTION POLICY (can see all data unmasked)
+-- EXEMPT REDACTION POLICY を持っている（すべてのデータを非マスクで見ることができる）ユーザーを確認
 SELECT grantee, privilege
 FROM dba_sys_privs
 WHERE privilege = 'EXEMPT REDACTION POLICY'
 ORDER BY grantee;
 
--- Users with EXP_FULL_DATABASE or DBA role also bypass redaction
--- via Data Pump — protect exports with encryption (see encryption.md)
+-- EXP_FULL_DATABASE または DBA ロールを持つユーザーも、Data Pump 経由でリダクションをバイパスする。
+-- エクスポート結果は暗号化で保護すること（encryption.md を参照）
 ```
 
-### Mistake 2: Redaction Does Not Prevent Inference
+### 間違い 2: リダクションは推論を防げない
 
-If a column is fully redacted but an index on it allows binary search, a determined attacker can use bisection to infer the real value. Combine redaction with access controls.
+列が完全にリダクションされていても、その列の索引を使用したバイナリ検索が可能な場合、攻撃者は二分探索を使用して実際の値を推論できる。リダクションをアクセス制御と組み合わせること。
 
-### Mistake 3: Not Testing the expression Parameter
+### 間違い 3: expression パラメータをテストしていない
 
-An incorrectly written expression can result in the policy never applying (everyone sees real data) or always applying (privileged users also see masked data):
+式が正しく書かれていないと、ポリシーが適用されなかったり（全員が本物のデータを見ることができる）、常に適用されたり（特権ユーザーもマスクされたデータしか見られない）することがある。
 
 ```sql
--- Test your expression logic directly
+-- 式のロジックを直接テストする
 SELECT
   CASE
     WHEN SYS_CONTEXT('hr_ctx', 'user_role') NOT IN ('HR_MGR', 'PAYROLL')
@@ -533,16 +532,16 @@ FROM dual;
 
 ---
 
-## Compliance Considerations
+## コンプライアンスの考慮事項
 
 ### PCI-DSS
-- Requirement 3.3: Mask PAN (primary account number) when displayed. At minimum, only the first 6 and last 4 digits may be shown.
-- Requirement 3.4: Render PAN unreadable anywhere it is stored.
-- Data Redaction directly satisfies display masking (Requirement 3.3).
-- Requirement 3.4 requires encryption (see `encryption.md`) for storage masking.
+-   要件 3.3: 表示されるときに PAN（プライマリ・アカウント番号）をマスクする。最低限、最初の 6 桁と最後の 4 桁のみを表示できる。
+-   要件 3.4: PAN が保存される場所はどこでも読み取り不能にする。
+-   Data Redaction は表示時のマスキング（要件 3.3）を直接満たす。
+-   要件 3.4 には、ストレージ保護のための暗号化（`encryption.md` を参照）が必要である。
 
 ```sql
--- PCI-compliant credit card display masking
+-- PCI 準拠のクレジットカード表示マスキング
 BEGIN
   DBMS_REDACT.ADD_POLICY(
     object_schema       => 'PAYMENTS',
@@ -550,7 +549,7 @@ BEGIN
     column_name         => 'PAN',
     policy_name         => 'PCI_PAN_MASK',
     function_type       => DBMS_REDACT.PARTIAL,
-    -- Show first 6 and last 4, mask middle 6
+    -- 最初 6 桁と下 4 桁を表示し、真ん中 6 桁をマスク
     function_parameters => 'VVVVVVFVVVVVVVFVVVV,VVVVVVFVVVVVVVFVVVV,*,7,12',
     expression          => 'SYS_CONTEXT(''USERENV'',''SESSION_USER'') != ''PCI_PROCESSOR'''
   );
@@ -559,27 +558,26 @@ END;
 ```
 
 ### HIPAA
-- The Safe Harbor de-identification standard requires 18 specific identifiers to be removed or masked (name, address, dates, phone, SSN, medical record numbers, etc.).
-- Data Redaction satisfies this for query-time access control.
-- For data shared externally, permanent masking is required.
+-   Safe Harbor 脱識別標準では、18 個の特定の識別子（名前、住所、日付、電話番号、SSN、医療記録番号など）を削除またはマスクする必要がある。
+-   Data Redaction は、クエリ時のアクセス制御としてこれを満たす。
+-   外部に共有されるデータについては、恒久的なマスキングが必要である。
 
 ### GDPR
-- Personal data must not be more available than necessary for its stated purpose.
-- Data Redaction helps enforce purpose limitation at the database layer.
-- For the right to erasure, permanent deletion or permanent masking is required — not dynamic redaction.
+-   個人データは、その規定された目的のために必要な範囲を超えて利用可能であってはならない。
+-   Data Redaction は、データベース層での目的制限の実施に役立つ。
+-   消去権については、動的なリダクションではなく、恒久的な削除または恒久的なマスキングが必要である。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+-   このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効である。
+-   21c、23c、または 23ai と記された機能は、Oracle Database 26ai 対応機能として扱う。バージョンが混在する環境では、19c 互換の代替案を保持すること。
+-   リリース・アップデートによってデフォルトや非推奨が異なる場合があるため、両方のバージョンをサポートする環境では、19c と 26ai の両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle PL/SQL Packages Reference 19c — DBMS_REDACT](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_REDACT.html)
-- [Oracle Database Advanced Security Guide 19c — Configuring Oracle Data Redaction Policies](https://docs.oracle.com/en/database/oracle/oracle-database/19/asoag/configuring-oracle-data-redaction-policies.html)
-- [Oracle Database Reference 19c — REDACTION_POLICIES](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/REDACTION_POLICIES.html)
-- [Oracle Data Safe Documentation](https://docs.oracle.com/en/cloud/paas/data-safe/index.html)
+-   [Oracle PL/SQL Packages Reference 19c — DBMS_REDACT](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_REDACT.html)
+-   [Oracle Database Advanced Security Guide 19c — Configuring Oracle Data Redaction Policies](https://docs.oracle.com/en/database/oracle/oracle-database/19/asoag/configuring-oracle-data-redaction-policies.html)
+-   [Oracle Database Reference 19c — REDACTION_POLICIES](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/REDACTION_POLICIES.html)
+-   [Oracle Data Safe Documentation](https://docs.oracle.com/en/cloud/paas/data-safe/index.html)

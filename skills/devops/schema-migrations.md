@@ -1,18 +1,18 @@
-# Schema Migrations for Oracle DB
+# Oracle DBのスキーマ・マイグレーション
 
-## Overview
+## 概要
 
-Schema migrations are the mechanism by which database structure evolves alongside application code. In a CI/CD pipeline, every DDL change — table creation, column additions, index definitions, constraint changes — must be tracked, versioned, and deployable in a repeatable, auditable way. Ad hoc DDL executed directly against production databases is one of the leading causes of environment drift, deployment failures, and outages.
+スキーマ・マイグレーションは、アプリケーション・コードとともにデータベース構造を進化させるための仕組みである。CI/CD パイプラインにおいて、表の作成、列の追加、索引の定義、制約の変更といったすべての DDL 変更は、追跡、バージョン管理され、反復可能かつ監査可能な方法でデプロイされなければならない。本番データベースに対して直接実行されるアドホックな DDL は、環境の乖離 (環境ドリフト)、デプロイの失敗、および停止を引き起こす主な原因の 1 つである。
 
-Oracle's character set, data type richness, and procedural extensions (PL/SQL, sequences, triggers, packages) introduce migration-specific challenges that MySQL-centric tools paper over. This guide covers Liquibase and Flyway configured specifically for Oracle, migration strategies, and the DDL lifecycle in modern CI/CD pipelines.
+Oracle の文字セット、豊富なデータ型、および手続き型拡張（PL/SQL、シーケンス、トリガー、パッケージ）は、MySQL 中心の手法では見落とされがちなマイグレーション特有の課題をもたらす。このガイドでは、Oracle 用に構成された Liquibase と Flyway、マイグレーション戦略、および最新の CI/CD パイプラインにおける DDL ライフサイクルについて説明する。
 
 ---
 
-## Liquibase with Oracle
+## Oracle での Liquibase
 
-### Core Concepts
+### コア・コンセプト
 
-Liquibase tracks migrations through a **changelog** — a master file that references individual **changesets**. Each changeset is identified by an `id` + `author` + `file` triple, recorded in the `DATABASECHANGELOG` table that Liquibase creates on first run. A `DATABASECHANGELOGLOCK` table prevents concurrent runs.
+Liquibase は**チェンジログ (changelog)** を通じてマイグレーションを追跡する。これは個別の**チェンジセット (changeset)** を参照するマスター・ファイルである。各チェンジセットは `id` + `author` + `file` の 3 つの組み合わせで識別され、Liquibase が初回実行時に作成する `DATABASECHANGELOG` 表に記録される。また、`DATABASECHANGELOGLOCK` 表によって同時実行が防止される。
 
 ```
 DATABASECHANGELOG
@@ -32,9 +32,9 @@ DATABASECHANGELOG
   DEPLOYMENT_ID VARCHAR2(10)
 ```
 
-### Project Structure
+### プロジェクト構造
 
-A well-organized Liquibase project separates concerns by object type:
+適切に整理された Liquibase プロジェクトでは、オブジェクト・タイプごとに責務を分ける：
 
 ```
 db/
@@ -51,7 +51,7 @@ db/
     001-reference-data.xml
 ```
 
-### liquibase.properties (Oracle)
+### liquibase.properties (Oracle 設定例)
 
 ```properties
 # liquibase.properties
@@ -65,7 +65,7 @@ defaultSchemaName=APP_OWNER
 liquibaseCatalogName=APP_OWNER
 ```
 
-For Oracle Wallets (recommended for CI/CD):
+Oracle Wallet を使用する場合（CI/CD で推奨）：
 
 ```properties
 url=jdbc:oracle:thin:@mydb_high?TNS_ADMIN=/opt/wallet
@@ -73,7 +73,7 @@ username=${DB_USER}
 password=${DB_PASSWORD}
 ```
 
-### Changeset Anatomy
+### チェンジセットの例
 
 ```xml
 <!-- db/changelog-root.xml -->
@@ -103,7 +103,7 @@ password=${DB_PASSWORD}
   <changeSet id="002" author="jane.smith" labels="customer,status" context="!test">
     <comment>Add STATUS column to CUSTOMERS with lookup table</comment>
 
-    <!-- Oracle-specific: use NUMBER(1) not BOOLEAN -->
+    <!-- Oracle固有: BOOLEAN ではなく NUMBER(1) を使用 -->
     <addColumn tableName="CUSTOMERS">
       <column name="STATUS_CODE" type="VARCHAR2(10)" defaultValue="ACTIVE">
         <constraints nullable="false"/>
@@ -152,32 +152,32 @@ password=${DB_PASSWORD}
 </databaseChangeLog>
 ```
 
-### Oracle-Specific Data Types in Liquibase
+### Liquibase における Oracle 固有のデータ型
 
-Liquibase's generic types do not map cleanly to Oracle. Always use Oracle-native types explicitly:
+Liquibase の汎用的なデータ型は Oracle にうまくマップされない場合がある。常に明示的な Oracle ネイティブ型を使用すること：
 
-| Generic Liquibase | Oracle Reality | Use Instead |
+| 汎用型 (Liquibase) | Oracle での実態 | 代わりに使用すべき型 |
 |---|---|---|
-| `BOOLEAN` | Does not exist in Oracle | `NUMBER(1,0)` with CHECK (col IN (0,1)) |
-| `BIGINT` | Maps to `NUMBER(19,0)` | `NUMBER(18,0)` or `NUMBER(19,0)` explicitly |
-| `DATETIME` | Maps to `DATE` (loses sub-second) | `TIMESTAMP` or `TIMESTAMP WITH TIME ZONE` |
-| `TEXT` | Maps to `CLOB` | `VARCHAR2(4000)` or `CLOB` depending on need |
-| `INT` | Maps to `NUMBER(10,0)` | `NUMBER(10,0)` explicitly |
+| `BOOLEAN` | Oracle には存在しない | `NUMBER(1,0)` + CHECK (col IN (0,1)) |
+| `BIGINT` | `NUMBER(19,0)` にマップされる | `NUMBER(18,0)` または `NUMBER(19,0)` を明示 |
+| `DATETIME` | `DATE` にマップされる (秒未満が欠落) | `TIMESTAMP` または `TIMESTAMP WITH TIME ZONE` |
+| `TEXT` | `CLOB` にマップされる | 必要に応じて `VARCHAR2(4000)` または `CLOB` |
+| `INT` | `NUMBER(10,0)` にマップされる | `NUMBER(10,0)` を明示 |
 
 ```xml
-<!-- Prefer explicit Oracle types -->
+<!-- 明示的な Oracle 型の使用を推奨 -->
 <column name="PRICE"      type="NUMBER(12,4)"/>
 <column name="CREATED_AT" type="TIMESTAMP WITH LOCAL TIME ZONE"/>
 <column name="NOTES"      type="CLOB"/>
 <column name="IS_ENABLED" type="NUMBER(1,0)"/>
 ```
 
-### Sequences and Triggers with Liquibase
+### Liquibase でのシーケンスとトリガー
 
-Pre-Oracle 12c, identity columns did not exist. Even post-12c, many codebases use sequence+trigger patterns.
+Oracle 12c 未満ではアイデンティティ列が存在しなかったため、多くのコードベースでシーケンス＋トリガーのパターンが使用されている。
 
 ```xml
-<!-- Oracle 12c+ identity column -->
+<!-- Oracle 12c+ アイデンティティ列 -->
 <changeSet id="010" author="dev">
   <createTable tableName="ORDERS">
     <column name="ORDER_ID" type="NUMBER(18,0)" autoIncrement="true"
@@ -188,7 +188,7 @@ Pre-Oracle 12c, identity columns did not exist. Even post-12c, many codebases us
   </createTable>
 </changeSet>
 
-<!-- Pre-12c: explicit sequence + trigger -->
+<!-- 12c 未満: 明示的なシーケンス + トリガー -->
 <changeSet id="010b" author="dev" dbms="oracle">
   <createSequence sequenceName="SEQ_ORDERS"
                   startValue="1"
@@ -199,7 +199,7 @@ Pre-Oracle 12c, identity columns did not exist. Even post-12c, many codebases us
                   ordered="false"
                   cacheSize="20"/>
 
-  <!-- Use sqlFile for complex PL/SQL -->
+  <!-- 複雑な PL/SQL には sqlFile を使用 -->
   <sqlFile path="triggers/trg_orders_bi.sql"
            relativeToChangelogFile="false"
            splitStatements="false"
@@ -225,41 +225,41 @@ END;
 /
 ```
 
-### Running Liquibase
+### Liquibase の実行コマンド
 
 ```shell
-# Preview changes without executing (generates SQL to stdout)
+# 実行せずに変更内容をプレビュー (SQL を標準出力に生成)
 liquibase updateSQL
 
-# Apply pending changesets
+# 保留中のチェンジセットを適用
 liquibase update
 
-# Apply only changesets tagged up to a specific point
+# 特定のタグまでのチェンジセットのみを適用
 liquibase updateToTag v2.3.0
 
-# Tag the current state
+# 現在の状態にタグを付ける
 liquibase tag v2.3.0
 
-# Roll back to a tag
+# タグまでロールバック
 liquibase rollback v2.3.0
 
-# Roll back a specific count of changesets
+# 指定した数のチェンジセットをロールバック
 liquibase rollbackCount 3
 
-# Check current status
+# 現在のステータスを確認
 liquibase status --verbose
 
-# Validate changelog syntax
+# チェンジログの構文を検証
 liquibase validate
 ```
 
 ---
 
-## Flyway with Oracle
+## Oracle での Flyway
 
-### Key Differences from Liquibase
+### Liquibase との主な違い
 
-Flyway uses a simpler, file-name-driven versioning scheme. Migration files are named `V{version}__{description}.sql` for versioned migrations and `R__{description}.sql` for repeatable migrations. There is no XML DSL — everything is raw SQL or Java callbacks.
+Flyway は、よりシンプルなファイル名主導のバージョン管理スキーマを使用する。マイグレーション・ファイルは、バージョン管理されたマイグレーションには `V{version}__{description}.sql`、繰り返し可能なマイグレーションには `R__{description}.sql` という名前を付ける。XML DSL はなく、すべて生の SQL または Java コールバックである。
 
 ```
 db/migration/
@@ -267,11 +267,11 @@ db/migration/
   V2__add_customer_status.sql
   V2.1__customer_status_fk.sql
   V3__orders_table.sql
-  R__vw_active_customers.sql        -- repeatable
-  R__pkg_order_processing.sql       -- repeatable (PL/SQL package)
+  R__vw_active_customers.sql        -- 繰り返し可能 (ビュー)
+  R__pkg_order_processing.sql       -- 繰り返し可能 (PL/SQL パッケージ)
 ```
 
-### flyway.toml (Oracle)
+### flyway.toml (Oracle 設定例)
 
 ```toml
 [environments.default]
@@ -285,14 +285,14 @@ locations = ["filesystem:db/migration"]
 defaultSchema = "APP_OWNER"
 validateOnMigrate = true
 outOfOrder = false
-# Required for PL/SQL blocks that end with /
+# / で終わる PL/SQL ブロックに必要
 sqlMigrationSuffixes = [".sql"]
 placeholderReplacement = false
 ```
 
-### Oracle PL/SQL in Flyway
+### Flyway での Oracle PL/SQL
 
-Flyway's default statement delimiter is `;`. PL/SQL blocks require `/` as the terminator. Configure this per-migration using the special comment annotation:
+Flyway のデフォルトの文区切り文字は `;` である。PL/SQL ブロックには終端文字として `/` が必要である。特別なコメント・アノテーションを使用して、マイグレーションごとにこれを構成する：
 
 ```sql
 -- V4__create_order_package.sql
@@ -337,13 +337,13 @@ END PKG_ORDERS;
 /
 ```
 
-### Repeatable Migrations
+### 繰り返し可能なマイグレーション (Repeatable Migrations)
 
-Repeatable migrations re-run whenever their checksum changes. They are ideal for views, packages, synonyms, and grants — objects you want to fully replace rather than alter incrementally.
+繰り返し可能なマイグレーションは、チェックサムが変更されるたびに再実行される。これらは、増分変更（ALTER）ではなく、完全に入れ替えたいオブジェクト（ビュー、パッケージ、シノニム、権限付与など）に最適である。
 
 ```sql
 -- R__vw_active_customers.sql
--- This re-runs any time the file content changes
+-- ファイルの内容が変更されるたびに再実行される
 
 CREATE OR REPLACE VIEW VW_ACTIVE_CUSTOMERS AS
 SELECT
@@ -362,61 +362,45 @@ WHERE
     c.STATUS_CODE != 'CLOSED';
 ```
 
-```sql
--- R__pkg_order_processing.sql
--- flyway:delimiter=/
-
-CREATE OR REPLACE PACKAGE BODY PKG_ORDER_PROCESSING AS
-  -- Full package body here; re-deployed on any change
-END PKG_ORDER_PROCESSING;
-/
-```
-
-### Running Flyway
+### Flyway の実行コマンド
 
 ```shell
-# Check migration status
+# マイグレーション状況を確認
 flyway info
 
-# Apply pending migrations
+# 保留中のマイグレーションを適用
 flyway migrate
 
-# Validate checksums (detects manual edits to applied migrations)
+# チェックサムを検証 (適用済みマイグレーションへの手動編集を検知)
 flyway validate
 
-# Repair checksum mismatches (use carefully — only for broken environments)
+# チェックサムの不一致を修復 (壊れた環境のみで慎重に使用)
 flyway repair
 
-# Undo last versioned migration (requires Flyway Teams)
+# 最後のバージョン管理されたマイグレーションを元に戻す (Flyway Teams が必要)
 flyway undo
 
-# Clean schema (NEVER in production — drops all objects)
+# スキーマをクリーンアップ (本番では絶対に使用しない — すべてのオブジェクトを削除)
 flyway clean
 ```
 
 ---
 
-## Versioned vs Repeatable Migrations
+## バージョン管理 vs 繰り返し可能なマイグレーション
 
-| Aspect | Versioned (V prefix) | Repeatable (R prefix) |
+| 項目 | バージョン管理 (V プレフィックス) | 繰り返し可能 (R プレフィックス) |
 |---|---|---|
-| Execution | Once, in version order | On every checksum change |
-| Rollback | Requires explicit undo migration | Simply revert file content |
-| Use cases | Table/column DDL, data backfills | Views, packages, synonyms, grants |
-| Ordering | Sequential, enforced | Runs after all versioned migrations |
-| Collision | Two same-version files = error | Re-runs are idempotent |
-
-### Guidelines
-
-- DDL that modifies existing tables (ALTER TABLE) must be versioned — it cannot be repeated idempotently.
-- Views, materialized view definitions, packages, procedures, and functions should be repeatable. This eliminates the common trap of having a `V12__fix_view.sql` that duplicates most of `V8__create_view.sql`.
-- Reference data inserts should be versioned or use `MERGE` within repeatable migrations to achieve idempotency.
+| 実行 | 1回のみ、バージョン順 | チェックサムの変更のたびに実行 |
+| ロールバック | 明示的な undo マイグレーションが必要 | ファイルの内容を戻すだけ |
+| ユースケース | 表/列の DDL、データ移行 | ビュー、パッケージ、シノニム、権限 |
+| 順序 | 連続性、強制される | すべてのバージョン指定の後に実行 |
+| 衝突 | 同じバージョンのファイルが2つあるとエラー | 再実行は等価 (idempotent) であるべき |
 
 ---
 
-## Managing DDL in CI/CD Pipelines
+## CI/CD パイプラインにおける DDL 管理
 
-### Pipeline Design
+### パイプライン設計例
 
 ```yaml
 # .github/workflows/db-deploy.yml
@@ -433,7 +417,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Validate Liquibase Changelog
         run: |
           liquibase \
@@ -448,20 +431,13 @@ jobs:
     environment: dev
     steps:
       - uses: actions/checkout@v4
-
-      - name: Generate migration SQL (artifact for review)
+      - name: Generate migration SQL (review artifact)
         run: |
           liquibase \
             --url="${{ secrets.DB_DEV_URL }}" \
             --username="${{ secrets.DB_USER }}" \
             --password="${{ secrets.DB_PASSWORD }}" \
             updateSQL > migration-dev.sql
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: migration-sql-dev
-          path: migration-dev.sql
-
       - name: Apply migrations to DEV
         run: |
           liquibase \
@@ -476,7 +452,6 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
-
       - name: Apply migrations to PROD
         run: |
           liquibase \
@@ -486,12 +461,12 @@ jobs:
             update
 ```
 
-### Locking and Concurrency
+### ロックと並行性
 
-Both Liquibase and Flyway use a lock table to prevent concurrent migration runs. In CI/CD environments with multiple parallel jobs or failed deployments, stale locks are common:
+Liquibase も Flyway も、マイグレーションの同時実行を防ぐためにロック表を使用する。デプロイが失敗した場合などに古いロックが残ることがある：
 
 ```sql
--- Liquibase: check and release a stale lock
+-- Liquibase: 古いロックを確認して解放する
 SELECT * FROM DATABASECHANGELOGLOCK;
 
 UPDATE DATABASECHANGELOGLOCK
@@ -503,136 +478,69 @@ WHERE  ID = 1;
 COMMIT;
 ```
 
-```shell
-# Flyway: release stale lock
-flyway repair
-```
-
-### Environment-Specific Configuration
-
-Never embed credentials in changelogs. Use environment variables or vault references:
-
-```shell
-# Shell pattern using environment variables
-export LIQUIBASE_COMMAND_URL="jdbc:oracle:thin:@//${DB_HOST}:${DB_PORT}/${DB_SERVICE}"
-export LIQUIBASE_COMMAND_USERNAME="${DB_USER}"
-export LIQUIBASE_COMMAND_PASSWORD="${DB_PASSWORD}"
-liquibase update
-```
-
 ---
 
-## Handling Sequences in Migrations
+## マイグレーションでのシーケンス管理
 
-Sequences require special care because their current value is stateful — unlike structural DDL, a sequence's `LAST_NUMBER` cannot simply be rolled back.
+シーケンスは構成 DDL とは異なり、現在の値という「状態」を持つため、ロールバック時に注意が必要である。
 
 ```sql
--- Creating a sequence with Oracle best practices
+-- Oracle のベストプラクティスに従ったシーケンス作成
 CREATE SEQUENCE SEQ_INVOICE_ID
     START WITH     1
     INCREMENT BY   1
     MINVALUE       1
     MAXVALUE       9999999999999999999
     NOCYCLE
-    CACHE          100    -- Cache 100 values in memory; balance performance vs gap size
-    NOORDER;              -- ORDER only needed for RAC when strict ordering is required
+    CACHE          100    -- パフォーマンスと欠番のバランスを考慮して 100 をキャッシュ
+    NOORDER;              -- RAC で厳密な順序が必要な場合以外は NOORDER
 ```
 
-```xml
-<!-- Liquibase: sequence creation with rollback -->
-<changeSet id="020" author="dev" dbms="oracle">
-  <createSequence
-      sequenceName="SEQ_INVOICE_ID"
-      startValue="1"
-      incrementBy="1"
-      cacheSize="100"
-      cycle="false"
-      ordered="false"/>
-  <rollback>
-    <dropSequence sequenceName="SEQ_INVOICE_ID"/>
-  </rollback>
-</changeSet>
-```
-
-### Resetting Sequences in Non-Production
-
-A common need is resetting sequences after data refreshes in lower environments:
+### シーケンスのリセット (開発環境など)
 
 ```sql
--- Reset sequence to 1 (Oracle 18c+)
+-- 18c 以降であれば RESTART が可能
 ALTER SEQUENCE SEQ_INVOICE_ID RESTART START WITH 1;
-
--- Pre-18c workaround: drop and recreate
-DECLARE
-  v_current NUMBER;
-  v_stmt    VARCHAR2(200);
-BEGIN
-  SELECT LAST_NUMBER INTO v_current
-  FROM   USER_SEQUENCES
-  WHERE  SEQUENCE_NAME = 'SEQ_INVOICE_ID';
-
-  -- Step down by current value to effectively reset
-  v_stmt := 'ALTER SEQUENCE SEQ_INVOICE_ID INCREMENT BY -' || v_current || ' MINVALUE 0';
-  EXECUTE IMMEDIATE v_stmt;
-  EXECUTE IMMEDIATE 'SELECT SEQ_INVOICE_ID.NEXTVAL FROM DUAL';
-  EXECUTE IMMEDIATE 'ALTER SEQUENCE SEQ_INVOICE_ID INCREMENT BY 1 MINVALUE 1';
-END;
-/
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Never edit an applied versioned migration.** Both tools detect checksum changes. If a deployed migration has a bug, write a new corrective migration. Reserve `flyway repair` or `liquibase changelogSync` only for truly broken environments where the change was already applied manually.
-- **Separate DDL owner from application user.** Run migrations as a schema owner (or DBA-equivalent) account. The application runtime user should have only DML privileges. This prevents accidental DDL from application bugs.
-- **Keep changesets small and focused.** One logical change per changeset. Large changesets are hard to roll back, hard to diagnose, and block other schema operations with long-held DDL locks.
-- **Always write rollback blocks.** Liquibase does not auto-generate rollback SQL for many Oracle DDL operations. Write explicit `<rollback>` blocks even if you never plan to use them — they serve as documentation.
-- **Use contexts and labels** to control which changesets run in which environments. Seed data, test fixtures, and performance-heavy backfills should be excluded from production runs.
-- **Run `updateSQL` before `update` in production.** The generated SQL file becomes an artifact for DBA review, audit logs, and post-incident analysis.
-- **Avoid `flyway clean` on shared environments.** It drops all objects. It should only be used in fully isolated development environments or ephemeral CI containers.
-
----
-
-## Common Mistakes
-
-**Mistake: Using `BOOLEAN` as a column type.**
-Oracle SQL does not have a BOOLEAN type (PL/SQL does, but not SQL DDL). Liquibase silently maps `BOOLEAN` to `NUMBER(1,0)` for Oracle, which is correct, but the intent is unclear to readers. Use `NUMBER(1,0)` explicitly with a CHECK constraint.
-
-```sql
--- Wrong (ambiguous mapping)
-<column name="IS_ACTIVE" type="BOOLEAN"/>
-
--- Right
-<column name="IS_ACTIVE" type="NUMBER(1,0)" defaultValueNumeric="1">
-  <constraints nullable="false" checkConstraint="IS_ACTIVE IN (0, 1)"/>
-</column>
-```
-
-**Mistake: Committing `splitStatements=true` with PL/SQL.**
-Liquibase splits statements on `;` by default. PL/SQL blocks contain many semicolons. Always set `splitStatements="false"` and use `endDelimiter="/"` for PL/SQL files.
-
-**Mistake: Including `GRANT` statements in versioned migrations.**
-Grants applied via versioned migrations are re-applied once and then forgotten. If a user is dropped and recreated, the grant is lost. Use repeatable migrations or a separate grants script that is idempotent.
-
-**Mistake: Not testing rollbacks.**
-Rollbacks are only useful if they work. Include rollback testing in CI by applying a migration set, then rolling back, and verifying the schema matches the pre-migration baseline.
-
-**Mistake: Running migrations synchronously with application deployment.**
-In high-availability deployments, the application and database versions may be temporarily mismatched. Design migrations to be backward-compatible: add columns as nullable before backfilling, do not drop columns until the old application version is fully retired.
+- **適用済みのマイグレーション・ファイルを編集しない。** 修正が必要な場合は、新しい「修正用」マイグレーションを作成する。
+- **DDL 所有者とアプリケーション・ユーザーを分ける。** マイグレーションはスキーマ所有者（または DBA 相当）のアカウントで実行する。アプリケーションの実行ユーザーには DML 権限のみを付与し、不慮の DDL 実行を防ぐ。
+- **チェンジセットを小さく保つ。** 1 つのチェンジセットには 1 つの論理的な変更のみを含める。巨大なチェンジセットは診断が難しく、DDL ロックを長時間保持してしまう。
+- **常にロールバック・ブロックを書く。** Liquibase は Oracle の一部の DDL 操作に対してロールバック SQL を自動生成しない。将来使う予定がなくても、ドキュメントとして `<rollback>` を記述すること。
+- **コンテキストとラベルを使用して、実行環境を制御する。** シード・データやテスト用データ、パフォーマンス負荷の高い処理などは本番環境から除外する。
+- **本番環境では `update` の前に `updateSQL` を実行する。** 生成された SQL ファイルは、DBA によるレビュー、監査ログ、および障害分析のためのアーティファクトとなる。
 
 ---
 
+## よくある間違い
 
-## Oracle Version Notes (19c vs 26ai)
+**間違い: `BOOLEAN` を列型として使用する。**
+Oracle SQL には BOOLEAN 型が存在しない（PL/SQL にはある）。Liquibase は自動的に `NUMBER(1,0)` にマップするが、意図が不明確になる。明示的に `NUMBER(1,0)` と CHECK 制約を使用すること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+**間違い: PL/SQL で `splitStatements=true` を指定したままコミットする。**
+Liquibase はデフォルトで `;` で文を分割するが、PL/SQL ブロックには多くのセミコロンが含まれる。PL/SQL ファイルでは常に `splitStatements="false"` と `endDelimiter="/"` を設定すること。
 
-## Sources
+**間違い: バージョン管理されたマイグレーションに `GRANT` 文を含める。**
+一度きりのマイグレーションで権限付与を行うと、ユーザーが再作成された際に権限が失われる。繰り返し可能なマイグレーションを使用するか、等価（idempotent）な権限付与スクリプトを別途用意すること。
 
-- [Liquibase Documentation](https://docs.liquibase.com/) — changelog structure, changeset anatomy, Oracle data type mappings, rollback
-- [Flyway Documentation](https://documentation.red-gate.com/flyway) — versioned vs. repeatable migrations, flyway.toml, PL/SQL delimiter configuration
-- [Oracle Database SQL Language Reference 19c — CREATE SEQUENCE](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-SEQUENCE.html) — CACHE, NOORDER, RESTART (18c+)
-- [Oracle Database Development Guide 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/adfns/) — Oracle-specific migration considerations
+**間違い: アプリケーションのデプロイと同時にマイグレーションを実行する。**
+高可用性が求められる環境では、アプリと DB のバージョンが一時的にずれることがある。新しい列を null 許可で追加し、古いアプリが完全に停止してから不要な列を削除するなど、後方互換性を持たせた設計にすること。
+
+---
+
+## Oracle バージョンに関する注意 (19c vs 26ai)
+
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c/23c 世代以降の機能は、Oracle Database 26ai 対応機能として扱う。
+- 環境に 19c と 26ai が混在する場合、デフォルト設定や非推奨機能が異なる可能性があるため、両方のバージョンでテストを行うこと。
+
+## ソース
+
+- [Liquibase Documentation](https://docs.liquibase.com/) 
+- [Flyway Documentation](https://documentation.red-gate.com/flyway)
+- [Oracle Database SQL Language Reference 19c — CREATE SEQUENCE](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-SEQUENCE.html)
+- [Oracle Database Development Guide 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/adfns/)

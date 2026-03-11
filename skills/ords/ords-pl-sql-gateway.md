@@ -1,32 +1,32 @@
-# ORDS PL/SQL Gateway: Calling Stored Procedures and Returning Custom Results
+# ORDS PL/SQL ゲートウェイ: ストアド・プロシージャの呼び出しとカスタム結果の返却
 
-## Overview
+## 概要
 
-The ORDS PL/SQL Gateway connects HTTP requests directly to Oracle PL/SQL stored procedures, packages, and anonymous blocks. It replaces the older Oracle HTTP Server (OHS) `mod_plsql` gateway that was previously used with Oracle Application Server. For ORDS REST APIs, the `plsql/block` source type allows full use of Oracle's PL/SQL capabilities: calling packages, executing complex business logic, returning custom JSON, handling errors with appropriate HTTP status codes, and streaming CLOB/BLOB content.
+ORDS PL/SQL ゲートウェイは、HTTP リクエストを Oracle PL/SQL ストアド・プロシージャ、パッケージ、または匿名ブロックに直接接続する。これは、以前 Oracle Application Server で `mod_plsql` ゲートウェイとともに使用されていた Oracle HTTP Server (OHS) を置き換えるものである。ORDS REST API における `plsql/block` ソース・タイプを使用すると、パッケージの呼び出し、複雑なビジネス・ロジックの実行、カスタム JSON の返却、適切な HTTP ステータス・コードによるエラー処理、および CLOB/BLOB コンテンツのストリーミングなど、Oracle PL/SQL の機能を最大限に活用できる。
 
-Understanding when to use each source type — and how to properly handle parameters, result sets, and errors — is essential for building robust PL/SQL-backed REST services.
+各ソース・タイプをいつ使用すべきか、またパラメータ、結果セット、およびエラーをどのように適切に処理するかを理解することは、堅牢な PL/SQL ベースの REST サービスを構築するために不可欠である。
 
 ---
 
-## Handler Source Types for PL/SQL
+## PL/SQL 用のハンドラー・ソース・タイプ
 
-ORDS supports several source types that determine how the handler's SQL/PL/SQL is executed and how results are serialized.
+ORDS は、ハンドラー内の SQL/PL/SQL がどのように実行され、結果がどのようにシリアル化（直列化）されるかを決定する、複数のソース・タイプをサポートしている。
 
-| Source Type | Constant | Description |
+| ソース・タイプ | 定数 | 説明 |
 |---|---|---|
-| `plsql/block` | `ORDS.source_type_plsql` | Anonymous PL/SQL block; manual result handling |
-| `query` / `collection/feed` | `ORDS.source_type_collection_feed` | SQL SELECT returning paginated JSON collection |
-| `query/one_row` / `collection/item` | `ORDS.source_type_collection_item` | SQL SELECT returning single JSON object |
-| `dml` | `ORDS.source_type_dml` | SQL INSERT/UPDATE/DELETE with implicit commit |
-| `query/resultset` | N/A (use plsql) | Use implicit results from PL/SQL |
+| `plsql/block` | `ORDS.source_type_plsql` | 匿名 PL/SQL ブロック。手動での結果処理が必要。 |
+| `query` / `collection/feed` | `ORDS.source_type_collection_feed` | SQL SELECT を実行し、ページ分けされた JSON コレクションを返す。 |
+| `query/one_row` / `collection/item` | `ORDS.source_type_collection_item` | SQL SELECT を実行し、単一の JSON オブジェクトを返す。 |
+| `dml` | `ORDS.source_type_dml` | SQL INSERT/UPDATE/DELETE を実行。暗黙的なコミットが行われる。 |
+| `query/resultset` | N/A (plsql を使用) | PL/SQL からの暗黙的な結果 (Implicit Results) を使用する。 |
 
 ---
 
-## Calling Stored Procedures from REST Handlers
+## REST ハンドラーからのストアド・プロシージャの呼び出し
 
-### Simple Procedure Call
+### 単純なプロシージャ呼び出し
 
-A stored procedure in the HR schema:
+HR スキーマにおけるストアド・プロシージャの例:
 
 ```sql
 CREATE OR REPLACE PROCEDURE hr.give_raise(
@@ -57,7 +57,7 @@ END;
 /
 ```
 
-ORDS REST handler calling this procedure:
+このプロシージャを呼び出す ORDS REST ハンドラー:
 
 ```sql
 BEGIN
@@ -72,13 +72,13 @@ BEGIN
         l_message     VARCHAR2(500);
       BEGIN
         hr.give_raise(
-          p_employee_id => :id,            -- URI parameter
-          p_percentage  => :percentage,    -- JSON body parameter
+          p_employee_id => :id,            -- URI パラメータ
+          p_percentage  => :percentage,    -- JSON ボディ・パラメータ
           p_new_salary  => l_new_salary,
           p_message     => l_message
         );
 
-        -- Build JSON response manually
+        -- 手動で JSON レスポンスを構築
         HTP.P('{"employee_id":' || :id ||
               ',"new_salary":' || l_new_salary ||
               ',"message":"' || l_message || '"}');
@@ -93,22 +93,22 @@ END;
 
 ---
 
-## IN/OUT Parameter Binding
+## IN/OUT パラメータ・バインディング
 
-### IN Parameters from the Request
+### リクエストからの IN パラメータ
 
-ORDS binds parameters from three sources — URI template, query string, and JSON body — all as named bind variables:
+ORDS は、URI テンプレート、クエリ文字列、および JSON ボディの 3 つのソースからパラメータをバインドし、それらをすべて「名前付きバインド変数」として扱う。
 
 ```
 URL: POST /ords/hr/v1/employees/101/raise
 Body: {"percentage": 10}
 
-Available binds:
-  :id          → "101" (from URI template :id)
-  :percentage  → 10    (from JSON body field "percentage")
+利用可能なバインド変数:
+  :id          → "101" (URI テンプレートの :id から)
+  :percentage  → 10    (JSON ボディの "percentage" フィールドから)
 ```
 
-All bind variables arrive as VARCHAR2 regardless of source. Cast them explicitly:
+すべてのバインド変数は、ソースに関係なく VARCHAR2 として渡される。必要に応じて明示的にキャストすること。
 
 ```sql
 l_percentage := TO_NUMBER(:percentage);
@@ -116,20 +116,20 @@ l_emp_id     := TO_NUMBER(:id);
 l_hire_date  := TO_DATE(:hire_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"');
 ```
 
-### OUT Parameters via Implicit Parameters
+### 暗黙的なパラメータを介した OUT パラメータ
 
-ORDS does not automatically serialize PL/SQL OUT parameters. Use these approaches:
+ORDS は PL/SQL の OUT パラメータを自動的にシリアル化しない。以下の方法を使用すること。
 
-1. **Assign to `:status_code`** and `:forward_location` for redirect responses.
-2. **Use `HTP.P` / `HTP.PRN`** to write raw response content.
-3. **Use `APEX_JSON`** for structured JSON output.
-4. **Use `DBMS_OUTPUT`** (not recommended; requires special config).
+1. **`:status_code`** や `:forward_location` に値を代入してレスポンスを制御する。
+2. **`HTP.P`** / **`HTP.PRN`** を使用して生のレスポンス・コンテンツを書き込む。
+3. **`APEX_JSON`** を使用して構造化された JSON を出力する。
+4. **`DBMS_OUTPUT`** (非推奨。特別な構成が必要)。
 
 ---
 
-## Returning Result Sets via Implicit Results
+## 暗黙的な結果 (Implicit Results) による結果セットの返却
 
-Oracle 12c+ supports **implicit results** (`DBMS_SQL.RETURN_RESULT`), which allows PL/SQL to return ref cursors that ORDS automatically serializes as a JSON collection.
+Oracle 12c 以降は **暗黙的な結果** (`DBMS_SQL.RETURN_RESULT`) をサポートしており、これにより PL/SQL は ref cursor を返すことができる。ORDS はこれを検出し、自動的に JSON コレクションとしてシリアル化する。
 
 ```sql
 CREATE OR REPLACE PROCEDURE hr.get_dept_employees(
@@ -148,7 +148,7 @@ END;
 /
 ```
 
-Call it from an ORDS handler (source type must be `plsql/block`):
+ORDS ハンドラーからの呼び出し（ソース・タイプは `plsql/block` である必要がある）:
 
 ```sql
 BEGIN
@@ -168,13 +168,13 @@ END;
 /
 ```
 
-ORDS detects the implicit result cursor and serializes it as a JSON collection. This is the cleanest way to return result sets from packages without exposing direct SQL.
+ORDS は暗黙的な結果カーソルを検出し、JSON コレクションとしてシリアル化する。これは、直接 SQL を公開することなく、パッケージから結果セットを返却するための最もクリーンな方法である。
 
 ---
 
-## Returning REF CURSORs
+## REF CURSOR の返却
 
-An alternative approach uses a REF CURSOR returned through a bind variable:
+もう一つの方法は、バインド変数を通じて REF CURSOR を返却することである。
 
 ```sql
 BEGIN
@@ -197,13 +197,13 @@ END;
 /
 ```
 
-Note: `:results` is a SYS_REFCURSOR OUT bind variable. ORDS recognizes cursor binds and serializes them automatically.
+注: `:results` は SYS_REFCURSOR 型の OUT バインド変数である。ORDS はカーソル・バインドを認識し、自動的にシリアル化する。
 
 ---
 
-## Using APEX_JSON for Custom JSON Output
+## カスタム JSON 出力用の APEX_JSON の使用
 
-When APEX is installed, `APEX_JSON` provides a clean API for generating JSON from PL/SQL:
+APEX がインストールされている場合、`APEX_JSON` は PL/SQL から JSON を生成するためのクリーンな API を提供する。
 
 ```sql
 DECLARE
@@ -232,7 +232,7 @@ BEGIN
 END;
 ```
 
-This produces:
+これにより以下が生成される。
 
 ```json
 {
@@ -246,15 +246,15 @@ This produces:
 
 ---
 
-## Using HTP Package for Raw Output
+## 生の出力のための HTP パッケージの使用
 
-Without APEX, use Oracle's `HTP` (Hypertext Procedures) package for raw HTTP output:
+APEX がない場合は、Oracle の `HTP` (Hypertext Procedures) パッケージを使用して、生の HTTP 出力を行うことができる。
 
 ```sql
 DECLARE
   l_result CLOB;
 BEGIN
-  -- Build JSON string
+  -- JSON 文字列の構築
   SELECT JSON_OBJECT(
            'employee_id' VALUE e.employee_id,
            'name'        VALUE e.first_name || ' ' || e.last_name,
@@ -265,12 +265,12 @@ BEGIN
   FROM employees e
   WHERE employee_id = :id;
 
-  -- Write response headers
+  -- レスポンス・ヘッダーの書き込み
   OWA_UTIL.MIME_HEADER('application/json', FALSE);
   HTP.P('Cache-Control: no-cache');
   OWA_UTIL.HTTP_HEADER_CLOSE;
 
-  -- Write body
+  -- ボディの書き込み
   HTP.PRN(l_result);
 EXCEPTION
   WHEN NO_DATA_FOUND THEN
@@ -280,35 +280,35 @@ END;
 
 ---
 
-## Error Handling and HTTP Status Codes
+## エラー処理と HTTP ステータス・コード
 
-### Using `:status_code`
+### `:status_code` の使用
 
-Set `:status_code` to control the HTTP response status:
+HTTP レスポンス・ステータスを制御するには、`:status_code` を設定する。
 
 ```sql
 BEGIN
-  -- Try the operation
+  -- 操作の試行
   DELETE FROM employees WHERE employee_id = :id;
 
   IF SQL%ROWCOUNT = 0 THEN
     :status_code := 404;  -- Not Found
   ELSE
-    :status_code := 204;  -- No Content (successful delete, no body)
+    :status_code := 204;  -- No Content (削除成功、ボディなし)
   END IF;
 EXCEPTION
   WHEN OTHERS THEN
     :status_code := 500;
-    -- Log error (but don't expose internal details)
+    -- エラーのログ記録 (内部詳細は外部に公開しない)
     INSERT INTO api_error_log (error_time, error_msg, sql_code)
     VALUES (SYSDATE, SQLERRM, SQLCODE);
     COMMIT;
 END;
 ```
 
-### Raising Application Errors
+### アプリケーション・エラーの発生
 
-ORDS translates `RAISE_APPLICATION_ERROR` to HTTP 400 responses:
+ORDS は `RAISE_APPLICATION_ERROR` を HTTP 400 レスポンスに変換する。
 
 ```sql
 BEGIN
@@ -324,7 +324,7 @@ BEGIN
 END;
 ```
 
-ORDS returns:
+ORDS は以下を返す。
 
 ```json
 {
@@ -335,9 +335,9 @@ ORDS returns:
 }
 ```
 
-### Custom Error Response with JSON Body
+### JSON ボディを含むカスタム・エラー・レスポンス
 
-For more control over error structure, catch exceptions and write custom JSON:
+エラー構造をより細かく制御する場合、例外をキャッチしてカスタム JSON を書き込む。
 
 ```sql
 BEGIN
@@ -356,185 +356,90 @@ EXCEPTION
     HTP.PRN('{"error":"VALIDATION_ERROR","message":"Invalid salary value: must be numeric"}');
   WHEN OTHERS THEN
     :status_code := 500;
-    -- Never expose SQLERRM to clients in production
+    -- 本番環境では SQLERRM をクライアントに公開してはならない
     HTP.PRN('{"error":"INTERNAL_ERROR","message":"An unexpected error occurred"}');
 END;
 ```
 
 ---
 
-## Invoking Packages
+## パラメータ映射 (Mapping Parameters)
 
-Packages are the preferred way to organize PL/SQL REST logic:
+パラメータを明示的に定義することで、期待されるデータ型や、JSON/HTTP ヘッダーへのアクセス方法を指定できる。
 
 ```sql
-CREATE OR REPLACE PACKAGE hr.employee_api AS
-  PROCEDURE get_employee(
-    p_id     IN  employees.employee_id%TYPE,
-    p_result OUT SYS_REFCURSOR
-  );
-
-  PROCEDURE create_employee(
-    p_first_name  IN employees.first_name%TYPE,
-    p_last_name   IN employees.last_name%TYPE,
-    p_email       IN employees.email%TYPE,
-    p_salary      IN employees.salary%TYPE,
-    p_dept_id     IN employees.department_id%TYPE,
-    p_new_id      OUT employees.employee_id%TYPE
+BEGIN
+  ORDS.DEFINE_PARAMETER(
+    p_module_name        => 'hr.api',
+    p_pattern            => 'employees/:id',
+    p_method             => 'GET',
+    p_name               => 'If-None-Match',
+    p_bind_variable_name => 'etag_in',
+    p_source_type        => 'HEADER',
+    p_access_method      => 'IN'
   );
 END;
 /
+```
 
-CREATE OR REPLACE PACKAGE BODY hr.employee_api AS
+- `p_source_type`: `HEADER`, `RESPONSE`, `URI`, `QUERY`。
+- `p_access_method`: `IN`, `OUT`, `INOUT`。
 
-  PROCEDURE get_employee(
-    p_id     IN  employees.employee_id%TYPE,
-    p_result OUT SYS_REFCURSOR
-  ) AS
-  BEGIN
-    OPEN p_result FOR
-      SELECT * FROM employees WHERE employee_id = p_id;
-  END;
+---
 
-  PROCEDURE create_employee(
-    p_first_name  IN employees.first_name%TYPE,
-    p_last_name   IN employees.last_name%TYPE,
-    p_email       IN employees.email%TYPE,
-    p_salary      IN employees.salary%TYPE,
-    p_dept_id     IN employees.department_id%TYPE,
-    p_new_id      OUT employees.employee_id%TYPE
-  ) AS
-  BEGIN
-    INSERT INTO employees (employee_id, first_name, last_name, email, salary, department_id)
-    VALUES (employees_seq.NEXTVAL, p_first_name, p_last_name, p_email, p_salary, p_dept_id)
-    RETURNING employee_id INTO p_new_id;
-  END;
+## ベスト・プラクティス
 
+### 1. 公開スキーマではなく、アプリケーション・スキーマを使用する
+ORDS ハンドラーを、データを持つ実際のスキーマ（例: `HR`）に直接定義する。プロキシ・ユーザー（`ORDS_PUBLIC_USER`）ではなく、実際のスキーマの権限でコードを実行できる。
+
+### 2. ビジネス・ロジックを PL/SQL パッケージに置く
+ハンドラー内に長い SQL コードを直接書くのではなく、パッケージ化された関数を呼び出すようにする。
+
+```sql
+-- 推奨されるハンドラー・ソース
+BEGIN
+  :new_id := hr_service_pkg.create_employee(
+               p_first_name => :first_name,
+               p_last_name  => :last_name,
+               p_email      => :email
+             );
+  :status_code := 201;
 END;
-/
 ```
 
-ORDS handlers calling the package:
+### 3. バージョン管理されたパス・プレフィックス
+API の互換性のために、バージョン番号（例: `/v1/`, `/v2/`）をモジュールのベース・パスに含める。
 
-```sql
--- GET handler using package
-ORDS.DEFINE_HANDLER(
-  p_module_name => 'hr.api',
-  p_pattern     => 'employees/:id',
-  p_method      => 'GET',
-  p_source_type => ORDS.source_type_plsql,
-  p_source      => q'[
-    DECLARE
-      l_cursor SYS_REFCURSOR;
-    BEGIN
-      hr.employee_api.get_employee(
-        p_id     => TO_NUMBER(:id),
-        p_result => l_cursor
-      );
-      OPEN :result_cursor FOR SELECT * FROM DUAL; -- placeholder
-      -- Implicit result will be used
-      DBMS_SQL.RETURN_RESULT(l_cursor);
-    END;
-  ]'
-);
+### 4. 適切な HTTP メソッドの遵守
+- `GET`: 情報の取得（副作用なし）
+- `POST`: 新規リソースの作成
+- `PUT`: 既存リソースの置換（べき等）
+- `PATCH`: リソースの部分的な更新
+- `DELETE`: リソースの削除
 
--- POST handler using package
-ORDS.DEFINE_HANDLER(
-  p_module_name => 'hr.api',
-  p_pattern     => 'employees/',
-  p_method      => 'POST',
-  p_source_type => ORDS.source_type_plsql,
-  p_source      => q'[
-    DECLARE
-      l_new_id employees.employee_id%TYPE;
-    BEGIN
-      hr.employee_api.create_employee(
-        p_first_name => :first_name,
-        p_last_name  => :last_name,
-        p_email      => :email,
-        p_salary     => TO_NUMBER(:salary),
-        p_dept_id    => TO_NUMBER(:department_id),
-        p_new_id     => l_new_id
-      );
-      :status_code      := 201;
-      :forward_location := 'employees/' || l_new_id;
-    END;
-  ]'
-);
-```
+### 5. ページネーションの活用
+大量のデータを返す GET エンドポイントには、常に `p_items_per_page` を設定し、`collection/feed` を使用して、リンク・ヘッダーや JSON 内のナビゲーション・リンクを提供すること。
 
 ---
 
-## Handling CLOB and BLOB Responses
+## よくある間違い
 
-For large text or binary responses, use the `media` source type or set appropriate content types:
-
-```sql
--- Handler returning a large text report as plain text
-ORDS.DEFINE_HANDLER(
-  p_module_name => 'hr.api',
-  p_pattern     => 'reports/salary-summary',
-  p_method      => 'GET',
-  p_source_type => ORDS.source_type_plsql,
-  p_source      => q'[
-    DECLARE
-      l_report CLOB;
-    BEGIN
-      -- Generate report as CLOB
-      l_report := hr.report_pkg.salary_summary_report;
-
-      OWA_UTIL.MIME_HEADER('text/plain', FALSE);
-      HTP.P('Content-Disposition: attachment; filename="salary-report.txt"');
-      OWA_UTIL.HTTP_HEADER_CLOSE;
-
-      -- Stream CLOB in chunks
-      DECLARE
-        l_offset  INTEGER := 1;
-        l_chunk   VARCHAR2(32767);
-        l_length  INTEGER := DBMS_LOB.GETLENGTH(l_report);
-      BEGIN
-        WHILE l_offset <= l_length LOOP
-          l_chunk := DBMS_LOB.SUBSTR(l_report, 32767, l_offset);
-          HTP.PRN(l_chunk);
-          l_offset := l_offset + 32767;
-        END LOOP;
-      END;
-    END;
-  ]'
-);
-```
+- **モジュールの末尾のスラッシュを忘れる**: `p_base_path => 'hr/v1'` とすると、URL が `.../hr/v1employees/` のように崩れる可能性がある。常に `'hr/v1/'` のように指定すること。
+- **データが見つからない場合の 200 OK**: 単一リソースの検索 (`collection/item`) でデータがない場合、ORDS は自動的に 404 を返すが、PL/SQL ハンドラーでは明示的に `:status_code := 404` を設定する必要がある。
+- **バインド変数の型を指定しない**: すべてのバインド変数はデフォルトで VARCHAR2 として扱われる。数値や日付の計算に使用する場合は、明示的に `TO_NUMBER` や `TO_DATE` を使用すること。
+- **セキュリティの欠如**: モジュールやテンプレートに対して privileges（権限）をマップしていない。すべての作成/更新エンドポイントは、必ず認証が必要なように権限をマップすること。
+- **エラー・メッセージの不備**: `RAISE_APPLICATION_ERROR` を使用して、クライアントに具体的なエラー原因（例: "Invalid email format"）を伝えること。
 
 ---
 
-## Best Practices
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-- **Put business logic in packages, call them from ORDS handlers**: Handlers should be thin orchestration layers. All business logic belongs in PL/SQL packages that can be tested independently of REST.
-- **Always handle exceptions with appropriate HTTP status codes**: Unhandled exceptions result in 500 errors with generic messages. Catch known business exceptions (NO_DATA_FOUND, VALUE_ERROR) and return 404/400 with meaningful messages.
-- **Use implicit results instead of REF CURSOR bind variables**: `DBMS_SQL.RETURN_RESULT` is cleaner and does not require a `:results` cursor bind variable in the handler source.
-- **Cast bind variable types explicitly**: All bind variables arrive as VARCHAR2. Always cast to the correct type (`TO_NUMBER`, `TO_DATE`, etc.) before use, and handle conversion errors gracefully.
-- **Never expose ORA- error messages or stack traces to clients**: These leak schema structure information. Log internally, return a generic message externally.
-- **Use `RAISE_APPLICATION_ERROR` with codes in -20000 to -20999**: ORDS maps these to 400 Bad Request. Codes outside this range may produce unexpected HTTP status codes.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。混在環境では 19c 互換の代替手段を維持すること。
+- 19c と 26ai の両方をサポートする環境では、リリース・アップデートによってデフォルトや非推奨が異なる場合があるため、両方のバージョンで構文とパッケージの動作をテストすること。
 
-## Common Mistakes
+## ソース
 
-- **Using `DBMS_OUTPUT` to return data**: DBMS_OUTPUT buffers are NOT returned in REST responses. Use `HTP.P`, `APEX_JSON`, or implicit results.
-- **Forgetting TO_NUMBER for numeric bind variables**: `WHERE employee_id = :id` works due to implicit conversion, but `employee_id = :id` in a calculation will fail if `:id` is VARCHAR2 '101' and the operation expects a number.
-- **Not setting `p_mimes_allowed` on POST/PUT handlers**: Without this, ORDS accepts requests with any Content-Type (including `text/plain`). JSON body parsing fails silently for wrong content types.
-- **Setting `:status_code` after writing to HTP**: Status codes must be set before any HTP output. Writing headers (implicitly via HTP) before setting status code has no effect.
-- **Expecting automatic COMMIT in `plsql/block` handlers**: Unlike `dml` source type, `plsql/block` does NOT auto-commit. Always include an explicit `COMMIT` (or `ROLLBACK` in exception blocks) in DML operations within PL/SQL handlers.
-- **Using `DBMS_SQL.RETURN_RESULT` in a non-plsql/block context**: Implicit results only work with `source_type_plsql`. They are ignored by `collection_feed` and `collection_item` source types.
-
----
-
-
-## Oracle Version Notes (19c vs 26ai)
-
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
-
-- [ORDS Developer's Guide — Developing PL/SQL-Based REST Services](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/developing-oracle-rest-data-services-applications.html)
-- [Oracle REST Data Services Handler Source Types Reference](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orrst/index.html)
-- [ORDS Implicit Parameters Reference (status_code, body, forward_location)](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/implicit-parameters.html)
+- [ORDS Developer's Guide — Developing Oracle REST Data Services Applications](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/developing-oracle-rest-data-services-applications.html)
+- [Defining RESTful Services with PL/SQL API](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/restful-services-api.html)
+- [ORDS PL/SQL Mapping Parameters Reference](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/implicit-parameters.html)

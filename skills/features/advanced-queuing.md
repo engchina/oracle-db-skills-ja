@@ -1,58 +1,56 @@
-# Oracle Advanced Queuing (AQ) and Transactional Event Queues (TQ)
+# Oracle アドバンスト・キューイング (AQ) とトランザクショナル・イベント・キュー (TQ)
 
-## Overview
+## 概要
 
-Oracle Advanced Queuing (AQ) is a database-integrated message queuing facility built directly into the Oracle database engine. Unlike external messaging systems, AQ stores messages in ordinary database tables, which means messages participate fully in Oracle transactions, benefit from the database's reliability guarantees, and are queryable using standard SQL.
+Oracle アドバンスト・キューイング (AQ) は、Oracle データベース・エンジンに直接組み込まれた、データベース統合型のメッセージ・キューイング機能である。外部のメッセージング・システムとは異なり、AQ はメッセージを通常のデータベース表に保存する。そのため、メッセージは Oracle のトランザクションに完全に完全参加し、データベースの信頼性保証を享受でき、さらに標準の SQL を使用してクエリを実行することも可能である。
 
-Oracle Database 21c rebranded and significantly enhanced AQ as **Transactional Event Queues (TQ/TEQ)**, adding high-throughput partitioned storage, Kafka-compatible APIs, and improved scalability while maintaining full backward compatibility with the original AQ APIs.
+Oracle Database 21c では、AQ が **トランザクショナル・イベント・キュー (Transactional Event Queue: TQ/TEQ)** として再ブランド化され、大幅に強化された。これにより、高スループットのパーティション化されたストレージ、Kafka 互換の API、およびスケーラビリティの向上が実現されつつ、従来の AQ API との完全な後方互換性も維持されている。
 
-**When to use Oracle AQ/TQ:**
-- Applications already running on Oracle that need guaranteed message delivery
-- Scenarios requiring transactional consistency between database writes and message publication
-- Systems where message data needs to be queryable or reportable
-- Environments where adding an external broker (Kafka, RabbitMQ) adds unwanted operational complexity
+**Oracle AQ/TQ を使用すべきケース:**
+- すでに Oracle 上で動作しており、確実なメッセージ配信を必要とするアプリケーション
+- データベースへの書き込みとメッセージのパブリッシュ（発行）の間で、トランザクションの一貫性を必要とするシナリオ
+- メッセージ・データをクエリしたり、レポートに使用したりする必要があるシステム
+- 外部ブローカー（Kafka、RabbitMQ など）を追加することで運用が複雑になるのを避けたい環境
 
 ---
 
-## Core Concepts
+## コア・コンセプト
 
-### Queue Types
+### キュー・タイプ (Queue Types)
 
-**Single-Consumer Queues**
-A message is dequeued by exactly one consumer. This is the simplest model and maps directly to a point-to-point (P2P) messaging pattern.
+**単一コンシューマ・キュー (Single-Consumer Queues)**
+メッセージは、ちょうど 1 つのコンシューマによってデキュー（取り出し）される。これは最もシンプルなモデルであり、ポイント・ツー・ポイント (P2P) メッセージング・パターンに直接対応する。
 
-**Multi-Consumer Queues**
-Multiple named subscribers can each receive a copy of every message. This maps to a publish/subscribe (pub/sub) pattern. Each subscriber maintains its own logical position in the queue.
+**マルチコンシューマ・キュー (Multi-Consumer Queues)**
+名前付きの複数のサブスクライバ（購読者）のそれぞれが、すべてのメッセージのコピーを受け取ることができる。これはパブリッシュ/サブスクライブ (pub/sub) パターンに対応する。各サブスクライバは、キュー内での自身の論理的な位置を保持する。
 
-**Exception Queues**
-Every queue is associated with an exception queue. Messages that cannot be delivered (e.g., maximum retry count exceeded) are moved here automatically, preventing queue poisoning.
+**例外キュー (Exception Queues)**
+すべてのキューには例外キューが関連付けられている。配信不能なメッセージ（例：最大リトライ回数を超えたもの）は自動的にここへ移動され、キューの「毒（ポイズニング）」化を防ぐ。
 
-### Message Payload Types
+### メッセージ・ペイロード・タイプ
 
-| Payload Type | Description |
+| ペイロード・タイプ | 説明 |
 |---|---|
-| `RAW` | Unstructured binary data |
-| `VARCHAR2` | Character string payload |
-| Object type | Any Oracle object type (most common) |
-| `DBMS_AQ.AQ$_JMS_TEXT_MESSAGE` | JMS-compatible text message |
-| `DBMS_AQ.AQ$_JMS_MAP_MESSAGE` | JMS-compatible map message |
-| `SYS.ANYDATA` | Self-describing type for heterogeneous payloads |
-| `JSON` | Native JSON payload (21c+) |
+| `RAW` | 非構造化バイナリ・データ |
+| `VARCHAR2` | 文字列ペイロード |
+| オブジェクト型 (Object type) | 任意の Oracle オブジェクト型 (最も一般的) |
+| `DBMS_AQ.AQ$_JMS_TEXT_MESSAGE` | JMS 互換のテキスト・メッセージ |
+| `JSON` | ネイティブ JSON ペイロード (21c 以降) |
 
-### Queue Tables vs Queues
+### キュー表とキュー
 
-A **queue table** is the underlying database table that stores messages. A **queue** is a logical object layered on top of a queue table. One queue table can host multiple queues. Queue tables have specific storage options and index structures managed by `DBMS_AQADM`.
+**キュー表 (Queue Table)** は、メッセージを保存する基礎となるデータベース表である。**キュー (Queue)** は、キュー表の上に構築された論理オブジェクトである。1 つのキュー表で複数のキューをホストできる。キュー表のストレージ・オプションや索引構造は `DBMS_AQADM` によって管理される。
 
 ---
 
-## DBMS_AQADM — Administration Package
+## DBMS_AQADM — 管理パッケージ
 
-`DBMS_AQADM` handles the lifecycle of queue infrastructure: creating queue tables, creating queues, starting and stopping queues, and adding/removing subscribers.
+`DBMS_AQADM` は、キュー表の作成、キューの作成、キューの開始/停止、およびサブスクライバの追加/削除など、キュー・インフラストラクチャのライフサイクルを管理する。
 
-### Creating a Queue Table
+### キュー表の作成
 
 ```sql
--- Define a payload type first
+-- まずペイロード・タイプを定義
 CREATE OR REPLACE TYPE order_payload_t AS OBJECT (
     order_id     NUMBER,
     customer_id  NUMBER,
@@ -62,67 +60,51 @@ CREATE OR REPLACE TYPE order_payload_t AS OBJECT (
 );
 /
 
--- Create a multi-consumer queue table using the object type
+-- オブジェクト型を使用したマルチコンシューマ・キュー表の作成
 BEGIN
     DBMS_AQADM.CREATE_QUEUE_TABLE(
         queue_table        => 'order_queue_tab',
         queue_payload_type => 'order_payload_t',
-        multiple_consumers => TRUE,       -- FALSE for single-consumer
-        sort_list          => 'PRIORITY,ENQ_TIME',  -- dequeue ordering
-        comment            => 'Order processing event queue'
+        multiple_consumers => TRUE,       -- 単一コンシューマの場合は FALSE
+        sort_list          => 'PRIORITY,ENQ_TIME',  -- デキュー順序の設定
+        comment            => '注文処理イベント・キュー'
     );
 END;
 /
 ```
 
-### Creating and Starting a Queue
+### キューの作成と開始
 
 ```sql
 BEGIN
-    -- Create the queue on top of the queue table
+    -- キュー表の上にキューを作成
     DBMS_AQADM.CREATE_QUEUE(
         queue_name         => 'order_events_q',
         queue_table        => 'order_queue_tab',
-        queue_type         => DBMS_AQADM.NORMAL_QUEUE,
         max_retries        => 5,
-        retry_delay        => 60,    -- seconds before retry after rollback
-        retention_time     => 86400, -- seconds to keep dequeued messages (0 = purge immediately)
-        comment            => 'Order lifecycle events'
+        retry_delay        => 60,    -- ロールバック後のリトライ待機時間(秒)
+        retention_time     => 86400, -- デキュー済みメッセージの保持期間(秒)
+        comment            => '注文ライフサイクル・イベント'
     );
 
-    -- Start the queue (enable both enqueue and dequeue)
-    DBMS_AQADM.START_QUEUE(
-        queue_name => 'order_events_q',
-        enqueue    => TRUE,
-        dequeue    => TRUE
-    );
+    -- キューの開始（エンキューとデキューの両方を有効化）
+    DBMS_AQADM.START_QUEUE(queue_name => 'order_events_q');
 END;
 /
 ```
 
-### Adding Subscribers (Multi-Consumer)
+### サブスクライバの追加 (マルチコンシューマの場合)
 
 ```sql
 DECLARE
     subscriber_agent SYS.AQ$_AGENT;
 BEGIN
-    -- Subscriber for the fulfillment service
-    subscriber_agent := SYS.AQ$_AGENT(
-        name    => 'FULFILLMENT_SERVICE',
-        address => NULL,
-        protocol => 0
-    );
+    subscriber_agent := SYS.AQ$_AGENT('FULFILLMENT_SERVICE', NULL, 0);
 
     DBMS_AQADM.ADD_SUBSCRIBER(
         queue_name => 'order_events_q',
         subscriber => subscriber_agent,
-        rule       => 'tab.user_data.status = ''NEW'''  -- content-based filtering
-    );
-
-    -- Subscriber for the analytics pipeline (no filter — receives all messages)
-    DBMS_AQADM.ADD_SUBSCRIBER(
-        queue_name => 'order_events_q',
-        subscriber => SYS.AQ$_AGENT('ANALYTICS_SERVICE', NULL, 0)
+        rule       => 'tab.user_data.status = ''NEW'''  -- コンテンツベースのフィルタリング
     );
 END;
 /
@@ -130,9 +112,9 @@ END;
 
 ---
 
-## DBMS_AQ — Enqueue and Dequeue Package
+## DBMS_AQ — エンキューとデキュー
 
-### Enqueue Options
+### エンキュー (Enqueue) の例
 
 ```sql
 DECLARE
@@ -141,24 +123,14 @@ DECLARE
     message_handle     RAW(16);
     payload            order_payload_t;
 BEGIN
-    -- Build the payload
-    payload := order_payload_t(
-        order_id     => 10042,
-        customer_id  => 5001,
-        status       => 'NEW',
-        total_amount => 249.99,
-        created_at   => SYSTIMESTAMP
-    );
+    payload := order_payload_t(10042, 5001, 'NEW', 249.99, SYSTIMESTAMP);
 
-    -- Configure enqueue options
-    enqueue_options.visibility      := DBMS_AQ.ON_COMMIT;  -- message visible after COMMIT
-    -- DBMS_AQ.IMMEDIATE makes message visible before COMMIT (use carefully)
+    -- 可視性の設定
+    enqueue_options.visibility := DBMS_AQ.ON_COMMIT;  -- COMMIT 後にメッセージが可視になる
 
-    -- Configure message properties
-    message_properties.priority     := 1;              -- lower number = higher priority
-    message_properties.delay        := 0;              -- delay in seconds before message is available
-    message_properties.expiration   := 3600;           -- expire after 1 hour if not dequeued
-    message_properties.correlation  := 'order-10042';  -- application-level correlation ID
+    -- メッセージ・プロパティの設定
+    message_properties.priority    := 1;              -- 数値が小さいほど高優先順位
+    message_properties.expiration  := 3600;           -- 1時間以内にデキューされなければ期限切れ
 
     DBMS_AQ.ENQUEUE(
         queue_name         => 'order_events_q',
@@ -169,12 +141,11 @@ BEGIN
     );
 
     COMMIT;
-    DBMS_OUTPUT.PUT_LINE('Enqueued message ID: ' || RAWTOHEX(message_handle));
 END;
 /
 ```
 
-### Dequeue Options
+### デキュー (Dequeue) の例
 
 ```sql
 DECLARE
@@ -183,15 +154,10 @@ DECLARE
     message_handle     RAW(16);
     payload            order_payload_t;
 BEGIN
-    -- Configure dequeue options
-    dequeue_options.consumer_name  := 'FULFILLMENT_SERVICE';  -- required for multi-consumer
-    dequeue_options.dequeue_mode   := DBMS_AQ.REMOVE;         -- REMOVE, BROWSE, LOCKED
-    dequeue_options.navigation     := DBMS_AQ.NEXT_MESSAGE;
-    dequeue_options.visibility     := DBMS_AQ.ON_COMMIT;
-    dequeue_options.wait           := 30;                      -- wait up to 30 seconds; DBMS_AQ.NO_WAIT or DBMS_AQ.FOREVER
-
-    -- Optional: filter by correlation or message ID
-    -- dequeue_options.correlation := 'order-10042';
+    -- デキュー・オプションの設定
+    dequeue_options.consumer_name := 'FULFILLMENT_SERVICE'; -- マルチコンシューマでは必須
+    dequeue_options.dequeue_mode  := DBMS_AQ.REMOVE;         -- 取得後に削除
+    dequeue_options.wait          := 30;                      -- 最大30秒待機
 
     DBMS_AQ.DEQUEUE(
         queue_name         => 'order_events_q',
@@ -201,113 +167,24 @@ BEGIN
         msgid              => message_handle
     );
 
-    DBMS_OUTPUT.PUT_LINE('Processing order: ' || payload.order_id);
-    -- ... business logic ...
+    DBMS_OUTPUT.PUT_LINE('処理中の注文: ' || payload.order_id);
 
-    COMMIT; -- message is permanently removed from queue on commit
+    COMMIT; -- コミット時にメッセージがキューから完全に削除される
 EXCEPTION
     WHEN DBMS_AQ.TIME_OUT THEN
-        DBMS_OUTPUT.PUT_LINE('No messages available within wait period');
-    WHEN DBMS_AQ.NO_MESSAGE_FOUND THEN
-        DBMS_OUTPUT.PUT_LINE('Queue is empty');
-END;
-/
-```
-
-### Browse Mode (Non-Destructive Read)
-
-```sql
-DECLARE
-    dequeue_options    DBMS_AQ.DEQUEUE_OPTIONS_T;
-    message_properties DBMS_AQ.MESSAGE_PROPERTIES_T;
-    message_handle     RAW(16);
-    payload            order_payload_t;
-BEGIN
-    dequeue_options.dequeue_mode := DBMS_AQ.BROWSE;
-    dequeue_options.navigation   := DBMS_AQ.FIRST_MESSAGE;
-    dequeue_options.wait         := DBMS_AQ.NO_WAIT;
-
-    LOOP
-        BEGIN
-            DBMS_AQ.DEQUEUE(
-                queue_name         => 'order_events_q',
-                dequeue_options    => dequeue_options,
-                message_properties => message_properties,
-                payload            => payload,
-                msgid              => message_handle
-            );
-            DBMS_OUTPUT.PUT_LINE('Found: order_id=' || payload.order_id
-                                 || ' priority=' || message_properties.priority);
-            dequeue_options.navigation := DBMS_AQ.NEXT_MESSAGE;
-        EXCEPTION
-            WHEN DBMS_AQ.NO_MESSAGE_FOUND THEN EXIT;
-        END;
-    END LOOP;
+        DBMS_OUTPUT.PUT_LINE('待機時間内にメッセージが見つかりませんでした');
 END;
 /
 ```
 
 ---
 
-## Message Propagation
+## トランザクショナル・イベント・キュー (21c 以降)
 
-Oracle AQ supports automatic **propagation** of messages between queues, including queues in remote databases via database links. This enables distributed messaging without application-level forwarding code.
-
-```sql
--- Enable propagation from local queue to a remote queue on db_link REMOTE_DB
-BEGIN
-    DBMS_AQADM.SCHEDULE_PROPAGATION(
-        queue_name     => 'order_events_q',
-        destination    => 'REMOTE_DB',         -- database link name
-        start_time     => SYSDATE,
-        duration       => NULL,                -- NULL = propagate indefinitely
-        next_time      => NULL,                -- NULL = continuous propagation
-        latency        => 5,                   -- max seconds of message latency
-        destination_queue => 'remote_orders_q' -- target queue name on remote DB
-    );
-END;
-/
-
--- Check propagation schedules
-SELECT queue_name, destination, schedule_disabled, failures
-FROM   dba_queue_schedules;
-```
-
----
-
-## JMS Integration
-
-Oracle AQ implements the Java Message Service (JMS) specification through the Oracle AQ JMS provider. This allows Java EE applications to use standard JMS APIs backed by Oracle database queues.
+TEQ は、イベント・ストリーミング・ワークロード向けに設計された**パーティション化された高スループット・ストレージ・エンジン**で AQ を強化する。
 
 ```sql
--- Create a JMS-compatible queue using the built-in JMS payload type
-BEGIN
-    DBMS_AQADM.CREATE_QUEUE_TABLE(
-        queue_table        => 'jms_text_queue_tab',
-        queue_payload_type => 'SYS.AQ$_JMS_TEXT_MESSAGE',
-        multiple_consumers => TRUE
-    );
-
-    DBMS_AQADM.CREATE_QUEUE(
-        queue_name   => 'jms_app_queue',
-        queue_table  => 'jms_text_queue_tab'
-    );
-
-    DBMS_AQADM.START_QUEUE(queue_name => 'jms_app_queue');
-END;
-/
-```
-
-Java-side JNDI/JMS connection to Oracle AQ uses `oracle.jms.AQjmsFactory` with a standard JDBC data source. The queue appears as a standard JMS `Queue` or `Topic`.
-
----
-
-## Transactional Event Queues (21c+)
-
-TEQ enhances AQ with a **partitioned, high-throughput storage engine** designed for event streaming workloads.
-
-```sql
--- Create a Transactional Event Queue (21c+)
+-- トランザクショナル・イベント・キューの作成 (21c+)
 BEGIN
     DBMS_AQADM.CREATE_TRANSACTIONAL_EVENT_QUEUE(
         queue_name         => 'iot_sensor_teq',
@@ -318,134 +195,40 @@ BEGIN
     DBMS_AQADM.START_QUEUE(queue_name => 'iot_sensor_teq');
 END;
 /
-
--- Kafka-compatible producer (21c+ with kafka_aq_adapter)
--- Oracle provides a Kafka adapter that lets Kafka clients connect to TEQ
--- without code changes, treating TEQ as a Kafka topic.
 ```
 
 ---
 
-## Monitoring and Administration
+## ベスト・プラクティス
 
-```sql
--- View all queues and their status
-SELECT owner, name, queue_type, enqueue_enabled, dequeue_enabled, queue_table
-FROM   dba_queues
-ORDER  BY owner, name;
-
--- Count messages in each queue by state
-SELECT q.name           AS queue_name,
-       t.msg_state,
-       COUNT(*)         AS message_count,
-       MIN(t.enq_time)  AS oldest_message
-FROM   dba_queues q
-JOIN   aq$order_queue_tab t ON t.q_name = q.name
-GROUP  BY q.name, t.msg_state;
-
--- Messages in exception (dead-letter) queue
-SELECT msgid, enq_time, exception_queue,
-       user_data.order_id, user_data.status
-FROM   aq$order_queue_tab
-WHERE  msg_state = 'EXPIRED';
-
--- View subscriber information
-SELECT queue_name, consumer_name, address, rule
-FROM   dba_queue_subscribers;
-
--- Current propagation health
-SELECT queue_name, destination, last_run_time, next_run_time, failures, last_error_msg
-FROM   dba_queue_schedules;
-```
+- **`ON_COMMIT` 可視性を使用する:** OLTP システムでのエンキュー・デキューでは、常に `ON_COMMIT` を使用する。`IMMEDIATE` を使用すると、トランザクションが完了する前にメッセージが公開され、不完全なデータが処理されるリスクがある。
+- **リトライ設定を適切に行う:** すべてのキューで `max_retries` と `retry_delay` を設定する。これがないと、失敗し続けるメッセージが処理を永久にブロックする可能性がある。制限を超えたメッセージは例外キューに送られる。
+- **例外キューを定期的に監視する:** メッセージが例外キューに入ったときにアラートを発するように監視機能を構築する。
+- **デキュー・ループでは例外処理を忘れない:** `DBMS_AQ.TIME_OUT` や `DBMS_AQ.NO_MESSAGE_FOUND` を適切にハンドリングし、コンシューマが予期せず停止しないようにする。
+- **キュー表の肥大化を防ぐ:** 処理済みの古いメッセージを削除するために、`DBMS_AQADM.PURGE_QUEUE_TABLE` を使用して定期的にクリーンアップを行う。
 
 ---
 
-## AQ vs Apache Kafka — Comparison
+## よくある間違い
 
-| Dimension | Oracle AQ / TEQ | Apache Kafka |
-|---|---|---|
-| Transactional consistency | Native, same ACID transaction as DB writes | Requires transactional producers (additional config) |
-| Message queryability | Full SQL access to queue tables | Requires external tooling (ksqlDB, etc.) |
-| Operational footprint | Zero — part of Oracle DB | Separate cluster (ZooKeeper/KRaft + brokers) |
-| Throughput (raw) | Moderate (TEQ improves significantly) | Very high — designed for streaming at scale |
-| Message retention | Configurable; tied to DB storage | Log-based; designed for long retention |
-| Schema enforcement | Oracle object types or JSON schema | Schema Registry (optional) |
-| Ecosystem | Oracle-centric; JMS compatible | Huge ecosystem (Kafka Connect, Streams, etc.) |
-| Replay / rewind | Limited (retention_time window) | First-class feature (offset reset) |
-| Best for | DB-integrated transactional messaging | High-throughput event streaming pipelines |
+**間違い: デキュー後のコミットを忘れる。**
+`ON_COMMIT` 可視性を使用している場合、コミットしなければメッセージはキューに残ったまま（あるいは元に戻る）となる。ビジネス・ロジックの完了と最終的なコミットをアトミック（不可分）に構成すること。
+
+**間違い: キュー表を過剰に作成する。**
+1 つのキュー表は複数の内部オブジェクト（索引など）を生成する。細かいバリエーションごとにキュー表を分けるのではなく、サブスクライバのルールや相関 ID を使用して、1 つのキュー内でストリームを区別することを検討する。
+
+**間違い: `DBMS_AQ.FOREVER` 待機を多用する。**
+`FOREVER` 指定による無期限待機は、データベース接続を永久に占有する。コネクション・プールを使用する環境では、有限の待機時間を設定し、ループ内でリトライするように構成すべきである。
 
 ---
 
-## Best Practices
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-- **Use `ON_COMMIT` visibility** for both enqueue and dequeue in OLTP systems. `IMMEDIATE` visibility can expose messages before the producing transaction completes, leading to consumers seeing partial data.
-- **Always handle `DBMS_AQ.TIME_OUT` and `DBMS_AQ.NO_MESSAGE_FOUND`** exceptions in dequeue loops. A missing handler causes silent consumer failures.
-- **Set `max_retries` and `retry_delay`** on every queue. Without `max_retries`, a persistently failing message will block processing indefinitely. With it, messages flow to the exception queue after the limit.
-- **Separate queue tables by payload type and consumer pattern.** Mixing single-consumer and multi-consumer queues in the same table is not allowed and mixing unrelated payload types makes monitoring confusing.
-- **Monitor exception queues regularly.** Build an alert or scheduled job that reports when any message appears in an exception queue.
-- **Use content-based routing rules on subscribers** rather than creating separate queues per use case. This reduces queue table proliferation.
-- **Grant only necessary privileges.** Use `DBMS_AQADM.GRANT_QUEUE_PRIVILEGE` rather than granting direct table access to the underlying queue table.
-- **Purge old messages.** Use `DBMS_AQADM.PURGE_QUEUE_TABLE` with a purge condition to remove processed messages and control table growth.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c/23c 世代以降の機能は、Oracle Database 26ai 対応機能として扱う。
 
-```sql
--- Scheduled purge of processed (dequeued) messages older than 7 days
-DECLARE
-    purge_options DBMS_AQADM.AQ$_PURGE_OPTIONS_T;
-BEGIN
-    purge_options.block := FALSE;
-    DBMS_AQADM.PURGE_QUEUE_TABLE(
-        queue_table    => 'order_queue_tab',
-        purge_condition => 'qtview.msg_state = ''PROCESSED'' AND qtview.enq_time < SYSDATE - 7',
-        purge_options  => purge_options
-    );
-END;
-/
-```
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Mistake 1: Committing after enqueue but forgetting the dequeue commit**
-If a dequeue uses `ON_COMMIT` visibility and the session rolls back instead of committing, the message is returned to the queue. This is intentional and correct behavior — do not fight it. Structure dequeue code so that business logic and the final COMMIT are atomic.
-
-**Mistake 2: Creating too many queue tables**
-Each queue table generates several internal Oracle objects (IOTs, indexes, etc.). Creating dozens of queue tables for minor variations wastes resources. Use subscriber rules and correlation IDs to differentiate message streams within a single queue.
-
-**Mistake 3: Using `DBMS_AQ.FOREVER` wait in high-volume applications**
-A session blocking forever with `FOREVER` wait consumes a database connection indefinitely. In connection-pool environments this starves other users. Use a finite wait (e.g., 30–60 seconds) and loop.
-
-**Mistake 4: Not testing exception queue behavior**
-Teams set `max_retries` but never test what happens when it is exceeded. Simulate a failure scenario during development to confirm messages land in the exception queue and that your monitoring alert fires.
-
-**Mistake 5: Dropping a queue without stopping it first**
-Always call `DBMS_AQADM.STOP_QUEUE` before `DBMS_AQADM.DROP_QUEUE`, and drop queues before dropping the queue table. Skipping steps causes ORA-24005 and related errors.
-
-```sql
--- Correct teardown sequence
-BEGIN
-    DBMS_AQADM.STOP_QUEUE(queue_name => 'order_events_q');
-    DBMS_AQADM.DROP_QUEUE(queue_name => 'order_events_q');
-    DBMS_AQADM.DROP_QUEUE_TABLE(queue_table => 'order_queue_tab');
-END;
-/
-```
-
-**Mistake 6: Ignoring propagation failures**
-Propagation schedules silently accumulate failure counts when the remote database or network is unavailable. Set up a job that queries `DBA_QUEUE_SCHEDULES.FAILURES > 0` and alerts the operations team.
-
----
-
-
-## Oracle Version Notes (19c vs 26ai)
-
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [DBMS_AQADM — Oracle Database PL/SQL Packages and Types Reference 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_AQADM.html)
 - [DBMS_AQ — Oracle Database PL/SQL Packages and Types Reference 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_AQ.html)
 - [Oracle Database Advanced Queuing User's Guide 19c](https://docs.oracle.com/en/database/oracle/oracle-database/19/adque/index.html)
-- [Transactional Event Queues and Advanced Queuing — Oracle 21c](https://docs.oracle.com/en/database/oracle/oracle-database/21/adque/index.html)

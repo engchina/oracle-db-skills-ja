@@ -1,43 +1,43 @@
-# Index Strategy — Oracle Index Types and Usage
+# インデックス戦略 (Index Strategy) — Oracle のインデックスの種類と活用法
 
-## Overview
+## 概要
 
-Indexes are Oracle's primary mechanism for efficiently locating rows without scanning entire tables. Choosing the right index type, structure, and column order is critical for query performance. Poor index strategy leads to either excessive full table scans (too few indexes) or degraded DML performance and wasted storage (too many or wrong indexes).
+インデックスは、表全体をスキャンすることなく、効率的に行を特定するための Oracle の主要なメカニズムである。適切なインデックスの種類、構造、および列の順序を選択することは、クエリのパフォーマンスにとって極めて重要である。不適切なインデックス戦略は、過度な全表スキャン（インデックス不足）を引き起こすか、あるいは DML パフォーマンスの低下やストレージの浪費（インデックスの過剰または不適切）を招く。
 
-This guide covers B-tree indexes, bitmap indexes, function-based indexes, composite index design, invisible indexes, monitoring, and maintenance.
+このガイドでは、B-tree インデックス、ビットマップ・インデックス、関数ベースのインデックス、複合インデックスの設計、不可視インデックス、監視、およびメンテナンスについて解説する。
 
 ---
 
-## B-Tree Indexes
+## B-Tree インデックス
 
-B-tree (Balanced Tree) is the default and most versatile index type. It stores indexed values in sorted order within a balanced tree structure, allowing O(log n) lookups.
+**B-tree (Balanced Tree)** は、デフォルトかつ最も汎用性の高いインデックス・タイプである。インデックス値をバランスの取れたツリー構造内にソートされた状態で保持し、O(log n) のルックアップを可能にする。
 
-### When to Use
+### 使用すべきケース
 
-- High-cardinality columns (many distinct values): primary keys, unique identifiers, timestamps
-- Columns frequently used in `WHERE` clauses with equality or range predicates
-- Foreign key columns (prevents full table lock during parent DELETE)
-- Columns in `ORDER BY` or `GROUP BY` that benefit from pre-sorted access
+- 高カーディナリティの列（個別値が多い）：主キー、一意識別子、タイムスタンプ。
+- `WHERE` 句で等価検索や範囲検索によく使用される列。
+- 外部キー列（親の `DELETE` 時の表全体のロックを防止する）。
+- `ORDER BY` や `GROUP BY` で事前にソートされたアクセスが有益な列。
 
-### When NOT to Use
+### 使用を避けるべきケース
 
-- Very low cardinality columns (e.g., Y/N flag, gender) — use bitmap instead
-- Columns almost always accessed as part of a full table scan
-- Columns with heavy DML where the index overhead exceeds the query benefit
+- 極めてカーディナリティが低い列（例：Y/N フラグ、性別） — 代わりにビットマップ・インデックスを検討。
+- ほとんどの場合、全表スキャンの一部としてアクセスされる列。
+- DML の負荷が非常に高く、インデックスによるオーバーヘッドがクエリのメリットを上回る列。
 
 ```sql
--- Simple B-tree index
+-- シンプルな B-tree インデックス
 CREATE INDEX emp_salary_ix ON employees (salary);
 
--- Unique B-tree index (enforces uniqueness and enables UNIQUE SCAN)
+-- 一意 B-tree インデックス (一一意性を強制し、UNIQUE SCAN を可能にする)
 CREATE UNIQUE INDEX emp_email_uk ON employees (email);
 
--- Verify index was created
+-- インデックスが作成されたか確認
 SELECT index_name, index_type, uniqueness, status
 FROM   user_indexes
 WHERE  table_name = 'EMPLOYEES';
 
--- See indexed columns
+-- インデックスが設定されている列を確認
 SELECT index_name, column_position, column_name, descend
 FROM   user_ind_columns
 WHERE  table_name = 'EMPLOYEES'
@@ -46,144 +46,144 @@ ORDER  BY index_name, column_position;
 
 ---
 
-## Bitmap Indexes
+## ビットマップ・インデックス (Bitmap Indexes)
 
-Bitmap indexes store one bit per row for each distinct value. They are extremely compact for low-cardinality columns and highly efficient for ad-hoc analytical queries with multiple predicates.
+ビットマップ・インデックスは、個別値ごとに 1 行あたり 1 ビットを格納する。低カーディナリティの列に対して極めてコンパクトであり、複数の述語を持つアドホックな分析クエリに対して非常に効率的である。
 
-### When to Use
+### 使用すべきケース
 
-- Columns with very **low cardinality** (2–100 distinct values): status codes, regions, Boolean flags
-- **Data warehouse** or reporting environments with heavy `SELECT` and infrequent `INSERT/UPDATE/DELETE`
-- Queries combining multiple low-cardinality filters (`AND`/`OR`) — Oracle can combine bitmaps with bitwise operations
+- **低カーディナリティ**の列（個別値が 2 ～ 100 程度）：ステータス・コード、地域、ブール値フラグ。
+- **データ・ウェアハウス**や、読み取り（`SELECT`）が中心で挿入/更新/削除が少ないレポート環境。
+- 複数の低カーディナリティ・フィルタ（`AND`/`OR`）を組み合わせるクエリ — Oracle はビットマップ演算を使用してこれらを結合できる。
 
-### When to Avoid
+### 使用を避けるべきケース
 
-- **OLTP environments** — bitmap indexes lock entire bitmaps during DML, causing severe contention
-- High-cardinality columns — wasteful; B-tree is better
-- Heavily updated columns — each DML locks bitmaps for all rows with the same value
+- **OLTP 環境** — ビットマップ・インデックスは DML 中にビットマップ全体をロックするため、激しい競合を引き起こす。
+- 高カーディナリティの列 — ストレージの無駄であり、B-tree の方が適している。
+- 頻繁に更新される列 — 1 つの DML が同じ値を持つすべての行のビットマップをロックする。
 
 ```sql
--- Bitmap index on a low-cardinality status column
+-- 低カーディナリティのステータス列に対するビットマップ・インデックス
 CREATE BITMAP INDEX orders_status_bix ON orders (status);
 
--- Bitmap indexes shine for multi-column filter queries
--- Oracle combines bitmaps with bitwise AND/OR before table access
+-- 複数列のフィルタ・クエリで威力を発揮する
+-- Oracle は表アクセス前にビットマップの論理積/和（AND/OR）を計算する
 SELECT COUNT(*) FROM sales
 WHERE  region  = 'WEST'
   AND  quarter = 'Q1'
   AND  channel = 'ONLINE';
--- With bitmap indexes on region, quarter, channel:
--- 3 bitmap scans → bitmap AND → COUNT (may not even need table access)
+-- region, quarter, channel にビットマップ・インデックスがある場合:
+-- 3 つのビットマップ・スキャン → ビットマップ AND 演算 → COUNT (表アクセスが不要になることもある)
 
--- Check for bitmap indexes
+-- ビットマップ・インデックスの確認
 SELECT index_name, index_type
 FROM   user_indexes
 WHERE  table_name = 'SALES'
   AND  index_type = 'BITMAP';
 ```
 
-### Bitmap vs B-Tree Comparison
+### ビットマップ vs B-Tree の比較
 
-| Characteristic | B-Tree | Bitmap |
+| 特徴 | B-Tree | ビットマップ |
 |---|---|---|
-| Best cardinality | High | Low (< 100 distinct) |
-| DML performance | Moderate overhead per row | Heavy contention; row-level lock escalates |
-| Storage | Per-value entries | Very compact for low cardinality |
-| Combined predicates | Separate index lookups | Bitwise operations; very efficient |
-| Best workload | OLTP + OLAP | Data warehouse / read-heavy OLAP |
-| NULL storage | Not stored (allows IS NULL to miss index) | NULL has its own bitmap |
+| 最適なカーディナリティ | 高 | 低 (個別値 100 未満) |
+| DML パフォーマンス | 1 行あたりのオーバーヘッドは中程度 | 激しい競合。行レベル・ロックが拡大 |
+| ストレージ | 値ごとのエントリー | 低カーディナリティでは極めてコンパクト |
+| 結合された述語 | 個別のインデックス・ルックアップ | ビット演算。極めて効率的 |
+| 最適なワークロード | OLTP + OLAP | データ・ウェアハウス / 読み取り主体の OLAP |
+| NULL の格納 | 格納されない (IS NULL 検索はインデックスを使えない) | NULL も独自のビットマップを持つ |
 
 ---
 
-## Function-Based Indexes (FBI)
+## 関数ベースのインデックス (FBI)
 
-A function-based index pre-computes a function or expression and indexes the result. This allows index access when a function is applied to an indexed column — which would otherwise suppress index use.
+**関数ベースのインデックス (Function-Based Index)** は、関数や式の計算結果を事前に求めてインデックス化する。これにより、インデックス付きの列に関数が適用された場合でも、インデックス・アクセスが可能になる（通常、関数の適用はインデックスの使用を抑制する）。
 
 ```sql
--- Without FBI: index on LAST_NAME is NOT used
+-- FBI がない場合: LAST_NAME 上のインデックスは使用されない
 SELECT * FROM employees WHERE UPPER(last_name) = 'SMITH';
 
--- Create FBI on the expression
+-- 式に対して FBI を作成
 CREATE INDEX emp_upper_lname_fix ON employees (UPPER(last_name));
 
--- Now Oracle can use the index
+-- これにより Oracle はインデックスを使用できるようになる
 SELECT * FROM employees WHERE UPPER(last_name) = 'SMITH';
 
--- FBI for case-insensitive email lookup
+-- 大文字小文字を区別しないメール検索用の FBI
 CREATE INDEX emp_lower_email_fix ON employees (LOWER(email));
 SELECT * FROM employees WHERE LOWER(email) = 'john.doe@example.com';
 
--- FBI for date truncation (report queries that filter on date portion)
+-- 日付の切り捨て用 FBI (日付部分のみでフィルタするレポート・クエリ用)
 CREATE INDEX orders_order_date_trunc ON orders (TRUNC(order_date));
 SELECT * FROM orders WHERE TRUNC(order_date) = DATE '2026-03-01';
 
--- FBI for expression combining columns
+-- 複数の列を組み合わせた式に対する FBI
 CREATE INDEX emp_annual_sal_ix ON employees (salary * 12);
 SELECT * FROM employees WHERE salary * 12 > 120000;
 ```
 
-### Important Notes
+### 重要な注意点
 
-- The function must be **deterministic** (same input always produces same output)
-- User-defined functions used in FBIs must be declared `DETERMINISTIC`
-- `QUERY_REWRITE_ENABLED` must be set to `TRUE` (default) for Oracle to use FBIs
+- 関数は **決定論的 (deterministic)** である必要がある（同じ入力に対して常に同じ出力を返すこと）。
+- FBI で使用されるユーザー定義関数は、`DETERMINISTIC` として宣言されている必要がある。
+- Oracle が FBI を使用するには、`QUERY_REWRITE_ENABLED` が `TRUE`（デフォルト）に設定されている必要がある。
 
 ```sql
--- Verify QUERY_REWRITE_ENABLED
+-- QUERY_REWRITE_ENABLED の確認
 SELECT name, value FROM v$parameter WHERE name = 'query_rewrite_enabled';
 ```
 
 ---
 
-## Composite (Multi-Column) Indexes
+## 複合 (複数列) インデックス
 
-A composite index covers two or more columns. Column order is critical and must match query access patterns.
+複合インデックスは、2 つ以上の列をカバーする。列の順序は極めて重要であり、クエリのアクセス・パターンと一致していなければならない。
 
-### Column Order Rules
+### 列順序のルール
 
-**Rule 1: The leading column must be present in the query predicate** for the index to be used for access (range or equality scan). A query that skips the leading column can only use an Index Skip Scan, which is only efficient when the leading column has very low cardinality.
+**ルール 1: インデックスがアクセス（範囲または等価スキャン）に使用されるためには、先頭列がクエリ述語に含まれている必要がある。** 先頭列をスキップするクエリは、「インデックス・スキップ・スキャン」しか使用できず、これは先頭列のカーディナリティが極めて低い場合にのみ効率的である。
 
-**Rule 2: Columns used in equality predicates should come first, then range predicates.**
+**ルール 2: 等価検索に使用される列を先に配置し、その後に範囲検索に使用される列を配置する。**
 
 ```sql
--- Index on (DEPT_ID, SALARY)
+-- (DEPT_ID, SALARY) 上のインデックス
 CREATE INDEX emp_dept_sal_ix ON employees (department_id, salary);
 
--- Uses the index (leading column in predicate)
+-- インデックスを使用する (先頭列が述語に含まれる)
 SELECT * FROM employees WHERE department_id = 50 AND salary > 5000;
--- Access: INDEX RANGE SCAN on department_id=50, filter salary>5000
+-- アクセス: department_id=50 で INDEX RANGE SCAN を行い、salary>5000 でフィルタ。
 
--- Uses the index (leading column only)
+-- インデックスを使用する (先頭列のみ)
 SELECT * FROM employees WHERE department_id = 50;
--- Access: INDEX RANGE SCAN
+-- アクセス: INDEX RANGE SCAN
 
--- Does NOT use the index efficiently (leading column absent)
+-- インデックスを効率的に使用できない (先頭列が含まれない)
 SELECT * FROM employees WHERE salary > 5000;
--- Access: INDEX SKIP SCAN or TABLE ACCESS FULL (depends on cardinality)
+-- アクセス: INDEX SKIP SCAN または TABLE ACCESS FULL (カーディナリティに依存)
 
--- Column order matters for range predicates:
--- Index (DEPT_ID, HIRE_DATE) — good for: WHERE dept=X AND hire_date BETWEEN...
--- Index (HIRE_DATE, DEPT_ID) — good for: WHERE hire_date=X AND dept=Y
---   but cannot efficiently range-scan HIRE_DATE if DEPT_ID is not equality
+-- 範囲述語では列の順序が重要:
+-- インデックス (DEPT_ID, HIRE_DATE) — 適しているケース: WHERE dept=X AND hire_date BETWEEN...
+-- インデックス (HIRE_DATE, DEPT_ID) — 適しているケース: WHERE hire_date=X AND dept=Y
+--   ただし、DEPT_ID が等価検索でない場合、HIRE_DATE の範囲スキャンを効率的に行えないことがある。
 ```
 
-### When Composite Beats Two Separate Indexes
+### 複合インデックスが個別のインデックスよりも優れているケース
 
-- Query filters on both columns → single index range scan vs two separate scans + bitmap merge
-- Index covers all needed columns → **index-only scan** (no table access)
-- `ORDER BY` or `GROUP BY` can use the index order
+- クエリが両方の列でフィルタする場合 → 2 つの別個のスキャンとビットマップ・マージを行う代わりに、単一のインデックス範囲スキャンで済む。
+- インデックスが必要なすべての列をカバーしている場合 → **インデックス・オンリー・スキャン** (表へのアクセスが不要になる)。
+- `ORDER BY` や `GROUP BY` がインデックスの順序を利用できる場合。
 
-### Covering Index (Index-Only Scan)
+### カバリング・インデックス (インデックス・オンリー・スキャン)
 
 ```sql
--- Without covering index: index scan + table row fetch (two I/Os per row)
--- With covering index: index scan only (one I/O per row)
+-- カバリング・インデックスがない場合: インデックス・スキャン + 表の行取得 (1 行あたり 2 回の I/O)
+-- カバリング・インデックスがある場合: インデックス・スキャンのみ (1 行あたり 1 回の I/O)
 
--- Query: SELECT last_name, salary FROM employees WHERE department_id = 60
--- Covering index includes all selected + filtered columns:
+-- クエリ: SELECT last_name, salary FROM employees WHERE department_id = 60
+-- 選択される列とフィルタされる列をすべて含むカバリング・インデックスを作成:
 CREATE INDEX emp_dept_cover_ix ON employees (department_id, last_name, salary);
 
--- Verify with EXPLAIN PLAN — look for "INDEX FAST FULL SCAN" or no TABLE ACCESS step
+-- EXPLAIN PLAN で確認 — "INDEX FAST FULL SCAN" または表アクセス・ステップがないことを確認
 EXPLAIN PLAN FOR
 SELECT last_name, salary FROM employees WHERE department_id = 60;
 SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY());
@@ -191,54 +191,52 @@ SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY());
 
 ---
 
-## Invisible Indexes
+## 不可視インデックス (Invisible Indexes)
 
-An invisible index is maintained by DML but **ignored by the optimizer** by default. This allows safe testing of a new index without impacting production queries, or safe deprecation before dropping.
+不可視インデックスは、DML によってメンテナンスされるが、デフォルトでは **オプティマイザから無視される**。これにより、本番クエリに影響を与えることなく新しいインデックスをテストしたり、削除前に安全に無効化したりすることができる。
 
 ```sql
--- Create an invisible index
+-- 不可視インデックスの作成
 CREATE INDEX emp_job_id_ix ON employees (job_id) INVISIBLE;
 
--- Make an existing index invisible
+-- 既存のインデックスを不可視にする
 ALTER INDEX emp_job_id_ix INVISIBLE;
 
--- Test whether it helps: enable invisible index use for your session only
+-- 効果をテストする: 自セッションでのみ不可視インデックスの使用を許可
 ALTER SESSION SET OPTIMIZER_USE_INVISIBLE_INDEXES = TRUE;
 
--- Test your query
+-- クエリをテスト
 EXPLAIN PLAN FOR SELECT * FROM employees WHERE job_id = 'IT_PROG';
 SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY());
 
--- If the index helps, make it visible to all
+-- 有効であれば、すべてのユーザーに対して可視にする
 ALTER INDEX emp_job_id_ix VISIBLE;
 
--- View invisible indexes
+-- 不可視インデックスの表示
 SELECT index_name, visibility, status
 FROM   user_indexes
 WHERE  table_name = 'EMPLOYEES';
 ```
 
-### Invisible Index Use Cases
+### 不可視インデックスの活用シーン
 
-1. **Testing a new index** without affecting other sessions
-2. **Safe decommissioning:** make invisible for a week, confirm no regressions, then drop
-3. **Testing index removal:** make current index invisible, run workload, assess impact
+1. 他のセッションに影響を与えずに **新しいインデックスをテストする**。
+2. **安全な廃止:** しばらく不可視にして問題が発生しないことを確認してから削除する。
+3. **インデックス削除のテスト:** 既存のインデックスを不可視にし、ワークロードを実行して影響を評価する。
 
 ---
 
-## Index Monitoring
+## インデックスの監視
 
-Oracle can track whether an index has been used (accessed by the optimizer during query execution). This helps identify unused indexes that can be dropped to reduce DML overhead.
+Oracle は、インデックスが使用されたかどうか（クエリ実行中にオプティマイザによってアクセスされたか）を追跡できる。これにより、不要なインデックスを特定して削除し、DML のオーバーヘッドを軽減できる。
 
-### 12c+ (Automatic Monitoring via DBA_INDEX_USAGE)
+### 12c 以降 (DBA_INDEX_USAGE による自動監視)
 
-In Oracle 12c Release 2 and later, index usage is automatically tracked without enabling explicit monitoring.
-Statistics are flushed from `V$INDEX_USAGE_INFO` (an instance-level control view) to `DBA_INDEX_USAGE`
-approximately every 15 minutes.
+Oracle Database 12c Release 2 以降、インデックスの使用状況は明示的に監視を有効にしなくても自動的に追跡される。統計情報は `V$INDEX_USAGE_INFO` から `DBA_INDEX_USAGE` へ、およそ 15 分ごとにフラッシュされる。
 
 ```sql
--- Check index usage statistics (12cR2+) — query DBA_INDEX_USAGE, not V$INDEX_USAGE_INFO
--- V$INDEX_USAGE_INFO is a control/status view; DBA_INDEX_USAGE holds the per-index stats
+-- インデックス使用統計の確認 (12cR2+)
+-- V$INDEX_USAGE_INFO ではなく DBA_INDEX_USAGE をクエリする
 SELECT name            AS index_name,
        total_access_count,
        total_exec_count,
@@ -250,93 +248,93 @@ WHERE  owner = 'HR'
   );
 ```
 
-### Pre-12c Monitoring (ALTER INDEX MONITORING USAGE)
+### 12c 以前の監視 (ALTER INDEX MONITORING USAGE)
 
 ```sql
--- Enable monitoring
+-- 監視を有効にする
 ALTER INDEX emp_salary_ix MONITORING USAGE;
 
--- Run workload...
+-- ワークロードを実行...
 
--- Check if used
+-- 使用されたか確認
 SELECT index_name, monitoring, used, start_monitoring, end_monitoring
 FROM   v$object_usage
 WHERE  index_name = 'EMP_SALARY_IX';
 
--- Disable monitoring
+-- 監視を無効にする
 ALTER INDEX emp_salary_ix NOMONITORING USAGE;
 ```
 
-**Caution:** Pre-12c monitoring only records a TRUE/FALSE used flag, not usage frequency. An index used once in a month appears the same as one used a million times.
+**注意:** 12c 以前の監視機能は、「使用されたかどうか（TRUE/FALSE）」を記録するだけであり、使用頻度は記録されない。1 か月に 1 回使われたインデックスも、100 万回使われたインデックスも、表示上は同じになる。
 
 ---
 
-## Rebuilding vs. Coalescing
+## 再構築 (Rebuild) vs. 結合 (Coalesce)
 
-Over time, B-tree indexes can develop "clustering factor" issues and deleted/wasted space. Two maintenance options exist:
+時間の経過とともに、B-tree インデックスにはデフラグメンテーションや未使用領域が発生することがある。これに対処するための 2 つのメンテナンス・オプションがある。
 
-### COALESCE
+### 結合 (COALESCE)
 
-Merges leaf blocks within existing branches. Does **not** reduce index height. Minimal I/O overhead. Appropriate for minor fragmentation.
+既存のブランチ内のリーフ・ブロックをマージ（結合）する。インデックスの高さ（Height）は **減少しない**。I/O オーバーヘッドは最小限であり、軽度の断片化に適している。
 
 ```sql
 ALTER INDEX emp_salary_ix COALESCE;
 ```
 
-### REBUILD
+### 再構築 (REBUILD)
 
-Rebuilds the index from scratch using the table data. Can fix height issues, improve clustering factor, and change storage parameters. More expensive (reads all table data).
+表データを使用してインデックスをゼロから作り直す。高さの問題の解消、クラスタリング・ファクタの改善、ストレージ・パラメータの変更が可能である。オーバーヘッドは大きい（表データ全体を読み取るため）。
 
 ```sql
--- Rebuild online (does not block DML)
+-- オンラインで再構築 (DML をブロックしない)
 ALTER INDEX emp_salary_ix REBUILD ONLINE;
 
--- Rebuild with new tablespace
+-- 別の表領域に再構築
 ALTER INDEX emp_salary_ix REBUILD TABLESPACE idx_tbs ONLINE;
 
--- Rebuild and compress (for composite indexes with repeated leading values)
+-- キーを圧縮して再構築 (先頭値が繰り返される複合インデックスに有効)
 ALTER INDEX emp_dept_sal_ix REBUILD COMPRESS 1;
 ```
 
-### When to Rebuild vs. Coalesce
+### 再構築 vs 結合の使い分け
 
-| Scenario | Recommendation |
+| シナリオ | 推奨アクション |
 |---|---|
-| Many deletes caused leaf block waste | Coalesce (fast, online-safe) |
-| Index height grown to 4+ levels on small-medium table | Rebuild |
-| Clustering factor severely degraded | Rebuild (or reorganize table with move) |
-| Moving index to different tablespace | Rebuild |
-| Periodic "maintenance" on a healthy index | Neither — unnecessary on healthy indexes |
+| 大量の削除によりリーフ・ブロックに無駄がある | 結合 (高速で安全) |
+| 中小規模の表でインデックスの高さが 4 以上になった | 再構築 |
+| クラスタリング・ファクタが著しく低下した | 再構築 (または表自体の MOVE による再配置) |
+| インデックスを別の表領域に移動する | 再構築 |
+| 健全なインデックスに対する定期的な「メンテナンス」 | 不要 (副作用の方が大きいこともある) |
 
-**Important:** Automatically rebuilding indexes on a schedule (e.g., monthly) is largely unnecessary in modern Oracle versions (10g+). An index with good statistics and normal operation rarely needs rebuilding. Always verify with `ANALYZE INDEX ... VALIDATE STRUCTURE` before deciding.
+**重要:** Oracle 10g 以降、インデックスの定期的な再構築（月次など）は、ほとんどの場合不要である。統計情報が適切で正常に動作しているインデックスを再構築する必要はほとんどない。決定する前に、必ず `ANALYZE INDEX ... VALIDATE STRUCTURE` で状況を確認すること。
 
 ```sql
--- Analyze index structure to check for damage or extreme fragmentation
+-- インデックスの構造を分析し、断片化の状態を確認
 ANALYZE INDEX emp_salary_ix VALIDATE STRUCTURE;
 
--- Query results
+-- 分析結果の確認
 SELECT name,
        height,
        blocks,
-       lf_rows,     -- leaf rows (actual entries)
-       lf_blks,     -- leaf blocks
-       del_lf_rows, -- deleted leaf rows
+       lf_rows,     -- リーフ行 (実際のエントリー)
+       lf_blks,     -- リーフ・ブロック
+       del_lf_rows, -- 削除されたリーフ行
        ROUND(del_lf_rows / NULLIF(lf_rows, 0) * 100, 2) AS pct_deleted
 FROM   index_stats;
--- If pct_deleted > 20-30%, rebuilding may be beneficial
+-- pct_deleted が 20-30% を超える場合、再構築が有効な場合がある。
 ```
 
 ---
 
-## Index on Foreign Keys
+## 外部キー上のインデックス
 
-A frequently overlooked index is on the **foreign key column** of a child table. Without it:
+頻繁に見落とされるのが、子テーブルの **外部キー列** 上のインデックスである。これがない場合：
 
-- Full table scans occur when navigating from parent to child
-- Deleting or updating a parent row causes an **exclusive table-level lock** on the child table in Oracle (until the cascade/validation completes)
+- 親から子へ移動する際に全表スキャンが発生する。
+- 親行の削除や更新時に、子テーブルに対して **表レベルの排他ロック** が発生する（カスケード/整合性チェックが完了するまで）。
 
 ```sql
--- Identify unindexed foreign keys
+-- インデックスのない外部キーを特定する
 SELECT ac.table_name,
        ac.constraint_name,
        acc.column_name
@@ -344,7 +342,7 @@ FROM   all_constraints ac
 JOIN   all_cons_columns acc
   ON   ac.constraint_name = acc.constraint_name
   AND  ac.owner           = acc.owner
-WHERE  ac.constraint_type = 'R'  -- Referential (FK)
+WHERE  ac.constraint_type = 'R'  -- 参照整合性 (FK)
   AND  ac.owner           = 'HR'
   AND  NOT EXISTS (
     SELECT 1
@@ -358,41 +356,40 @@ WHERE  ac.constraint_type = 'R'  -- Referential (FK)
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Index selectively:** Add indexes only when you have evidence (explain plan, ASH, AWR) that they will be used.
-- **Monitor for unused indexes** regularly using `V$INDEX_USAGE_INFO` (12cR2+) and drop them if truly unused. Unused indexes waste space and slow DML.
-- **Always create FK indexes** on child tables to avoid lock contention and unnecessary full scans.
-- **Prefer covering indexes** for high-frequency OLTP queries to eliminate the table row fetch step.
-- **Use invisible indexes** to safely test before making changes visible to all sessions.
-- **Avoid over-compression** on B-tree indexes; index key compression is beneficial for composite indexes with repeated leading values but has CPU overhead.
-- **Rebuild indexes online** (`REBUILD ONLINE`) in production to avoid blocking DML.
-- **After a large batch delete**, consider coalescing or rebuilding indexes on heavily affected tables.
+- **選択的にインデックスを作成する:** 使用されるという証拠（実行計画、ASH、AWR）がある場合にのみ、インデックスを追加すること。
+- **定期的に不要なインデックスを監視する:** `DBA_INDEX_USAGE` (12cR2+) を使用し、本当に使われていない場合は削除する。不要なインデックスは領域を浪費し、DML を遅くする。
+- **外部キーには必ずインデックスを作成する:** ロックの競合や不要な全表スキャンを回避するためである。
+- **高頻度の OLTP クエリにはカバリング・インデックスを優先する:** 表の行取得ステップを排除するためである。
+- **不可視インデックスを活用する:** 全ユーザーに公開する前に安全にテストを行う。
+- **過度なキー圧縮を避ける:** B-tree インデックスのキー圧縮は、先頭値が繰り返される複合インデックスには有効だが、CPU オーバーヘッドが発生する。
+- **本番環境ではオンラインで再構築する:** DML のブロッキングを避けるために `REBUILD ONLINE` を使用すること。
+- **大規模なバッチ削除の後**、影響を受けた表のインデックスを結合または再構築することを検討する。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Impact | Fix |
+| 間違い | 影響 | 対策 |
 |---|---|---|
-| Creating B-tree on a Y/N flag column | Rarely used; DML overhead for no benefit | Use bitmap index (if DW) or no index (if OLTP) |
-| Wrong column order in composite index | Index not used for common queries | Put equality columns first, then range |
-| Not indexing FK columns | Lock escalation on parent DML; slow joins | Always index FK columns |
-| Using FTS result to conclude "no index needed" | May be an FBI or type mismatch issue | Check predicate info; fix function application |
-| Rebuilding all indexes on schedule | Wasted maintenance window; no real benefit | Rebuild only when fragmentation is confirmed |
-| Dropping an index without testing | May cause performance regression | Make invisible first; test; then drop |
-| Creating duplicate indexes | DML overhead; storage waste | Check existing indexes before creating new ones |
+| Y/N フラグ列に B-tree インデックスを作成する | ほとんど使用されず、DML のオーバーヘッドのみが発生 | DW ならビットマップ、OLTP ならインデックスなし。 |
+| 複合インデックスの列順序が不適切 | 代表的なクエリでインデックスが使用されない | 等価検索の列を先に、範囲検索の列を後にする。 |
+| 外部キー列へのインデックス作成漏れ | 親の DML 時にロック競合が発生。結合が遅くなる | 外部キーには必ずインデックスを作成する。 |
+| FTS の結果を見て「インデックスは不要」と結論づける | FBI の不足や型不一致が原因かもしれない | 述語情報をチェックし、関数適用や型変換を修正する。 |
+| スケジュールに基づいてすべてのインデックスを再構築する | メンテナンス・ウィンドウの浪費。実質的なメリットなし | 断片化が確認された場合にのみ再構築する。 |
+| テストせずにインデックスを削除する | パフォーマンス低下を引き起こす可能性がある | まず不可視にし、テストしてから削除する。 |
+| 重複したインデックスを作成する | DML オーバーヘッド。ストレージの浪費 | 新規作成前に既存のインデックスを確認する。 |
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。混在環境では 19c 互換の代替策を保持すること。
+- 19c と 26ai の両方をサポートする環境では、リリース更新によってデフォルトや非推奨が異なる場合があるため、両方のバージョンで構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c SQL Tuning Guide (TGSQL)](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgsql/)
 - [Oracle Database 19c Performance Tuning Guide (TGDBA)](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgdba/)

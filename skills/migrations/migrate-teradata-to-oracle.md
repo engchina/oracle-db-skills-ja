@@ -1,21 +1,21 @@
-# Migrating Teradata to Oracle
+# Teradata から Oracle への移行
 
-## Overview
+## 概要
 
-Teradata is a purpose-built analytical data warehouse optimized for massively parallel processing (MPP) of large analytical workloads. Oracle Database, particularly Oracle Autonomous Data Warehouse (ADW) and Oracle Exadata, serves as the primary migration target. Both are enterprise-grade platforms, but they differ substantially in SQL dialect, architectural model, data loading tools, and analytical capabilities.
+Teradata は、大規模な分析ワークロードの超並列処理 (MPP) に最適化された、専用設計の分析データウェアハウスである。移行先としては、Oracle Autonomous Data Warehouse (ADW) や Oracle Exadata が主なターゲットとなる。両者ともエンタープライズ・グレードのプラットフォームであるが、SQL 方言、アーキテクチャ・モデル、データ・ロード・ツール、および分析機能において実質的な違いがある。
 
-This guide covers Teradata-specific SQL syntax (including BTEQ and SEL shorthand), multiset vs set table semantics, data type mapping, the QUALIFY clause, Teradata-specific aggregates, and migrating from Teradata's TPT (Teradata Parallel Transporter) to Oracle SQL*Loader or Data Pump.
+本ガイドでは、Teradata 固有の SQL 構文 (BTEQ や SEL 短縮形を含む)、MULTISET 表と SET 表のセマンティクス、データ型マッピング、QUALIFY 句、Teradata 固有の集計、および Teradata TPT (Teradata Parallel Transporter) から Oracle SQL*Loader や Data Pump への移行について解説する。
 
 ---
 
-## Teradata SQL Dialect
+## Teradata SQL 方言
 
-### SEL Shorthand and BTEQ Commands
+### SEL 短縮形と BTEQ コマンド
 
-Teradata uses `SEL` as shorthand for `SELECT`, and BTEQ (Basic Teradata Query) adds scripting commands with `.` prefix:
+Teradata では `SELECT` の短縮形として `SEL` を使用できる。また、BTEQ (Basic Teradata Query) では `.` プレフィックスを付けるスクリプト・コマンドが使用される。
 
 ```sql
--- Teradata BTEQ session
+-- Teradata BTEQ セッション
 .LOGON myhost/myuser,mypassword;
 .SET WIDTH 200;
 .SET TITLEDASHES OFF;
@@ -23,7 +23,7 @@ Teradata uses `SEL` as shorthand for `SELECT`, and BTEQ (Basic Teradata Query) a
 SEL * FROM customers WHERE cust_id = 12345;
 SEL COUNT(*) FROM orders;
 
--- Insert using SEL
+-- SEL を使用したインサート
 INSERT INTO archive_orders SEL * FROM orders WHERE order_date < '2020-01-01' (DATE);
 
 .LOGOFF;
@@ -31,7 +31,7 @@ INSERT INTO archive_orders SEL * FROM orders WHERE order_date < '2020-01-01' (DA
 ```
 
 ```sql
--- Oracle SQL*Plus equivalent
+-- Oracle SQL*Plus での同等実装
 CONNECT myuser/mypassword@myhost:1521/MYDB
 SET LINESIZE 200
 SET UNDERLINE OFF
@@ -39,15 +39,15 @@ SET UNDERLINE OFF
 SELECT * FROM customers WHERE cust_id = 12345;
 SELECT COUNT(*) FROM orders;
 
--- Insert using subquery
+-- サブクエリを使用したインサート
 INSERT INTO archive_orders SELECT * FROM orders WHERE order_date < DATE '2020-01-01';
 
 EXIT;
 ```
 
-### BTEQ → SQL*Plus/SQLcl Command Mapping
+### BTEQ → SQL*Plus/SQLcl コマンド・マッピング
 
-| BTEQ Command | SQL*Plus/SQLcl Equivalent |
+| BTEQ コマンド | SQL*Plus/SQLcl 同等機能 |
 |---|---|
 | `.LOGON host/user,pass` | `CONNECT user/pass@host` |
 | `.LOGOFF` | `DISCONNECT` |
@@ -57,22 +57,22 @@ EXIT;
 | `.EXPORT FILE=out.txt` | `SPOOL out.txt` |
 | `.EXPORT RESET` | `SPOOL OFF` |
 | `.IF ERRORCODE <> 0 THEN .QUIT 12` | `WHENEVER SQLERROR EXIT 12` |
-| `.SYSTEM cmd` | `HOST cmd` or `!cmd` |
-| `.REMARK text` | `-- text` or `REM text` |
+| `.SYSTEM cmd` | `HOST cmd` または `!cmd` |
+| `.REMARK text` | `-- text` または `REM text` |
 | `SHOW TABLE tbl` | `DESC tbl` |
 
-### Teradata SELECT Syntax Variations
+### Teradata SELECT 構文のバリエーション
 
 ```sql
--- Teradata: column alias without AS (optional AS)
+-- Teradata: AS なしの列エイリアス (AS は任意)
 SEL
-    cust_id               (INTEGER),     -- explicit type cast in output
-    first_name (CHAR(50)) customer,      -- format and alias
-    last_name             ln,            -- positional alias
-    order_date (FORMAT 'YYYY-MM-DD')     -- output format
+    cust_id               (INTEGER),     -- 出力時の明示的な型キャスト
+    first_name (CHAR(50)) customer,      -- フォーマットとエイリアス
+    last_name             ln,            -- 位置によるエイリアス
+    order_date (FORMAT 'YYYY-MM-DD')     -- 出力フォーマット
 FROM customers;
 
--- Oracle equivalent
+-- Oracle での同等実装
 SELECT
     CAST(cust_id AS NUMBER(10))  AS cust_id,
     RPAD(first_name, 50)         AS customer,
@@ -83,25 +83,25 @@ FROM customers;
 
 ---
 
-## Multiset vs Set Tables
+## MULTISET 表 vs SET 表
 
-This is one of the most important Teradata concepts to understand before migrating.
+これは移行前に理解しておくべき最重要の Teradata 概念の 1 つである。
 
-### Teradata Table Semantics
+### Teradata の表セマンティクス
 
-In Teradata:
-- **SET table** (the default in older TD): duplicate rows are silently rejected at insert time based on the Primary Index (PI) or unique constraints. No error, no insert.
-- **MULTISET table**: allows duplicate rows (standard SQL behavior).
+Teradata における表の種類：
+- **SET 表** (古い TD のデフォルト) : インサート時に、プライマリ・インデックス (PI) や一意制約に基づいて重複行が暗黙的に拒否される。エラーは発生せず、インサートも行われない。
+- **MULTISET 表** : 重複行を許可する (標準的な SQL の挙動)。
 
 ```sql
--- Teradata SET table (default): duplicates are silently discarded
+-- Teradata SET 表 (デフォルト) : 重複は暗黙的に破棄される
 CREATE SET TABLE customers, NO FALLBACK (
     cust_id     INTEGER     NOT NULL,
     cust_name   VARCHAR(100)
 )
 PRIMARY INDEX (cust_id);
 
--- Teradata MULTISET table: allows duplicates
+-- Teradata MULTISET 表 : 重複を許可する
 CREATE MULTISET TABLE fact_events, NO FALLBACK (
     event_id    BIGINT,
     event_type  VARCHAR(50),
@@ -110,75 +110,74 @@ CREATE MULTISET TABLE fact_events, NO FALLBACK (
 PRIMARY INDEX (event_id);
 ```
 
-### Oracle Equivalent
+### Oracle での同等実装
 
-Oracle tables allow duplicates by default (equivalent to MULTISET). To enforce uniqueness, add a PRIMARY KEY or UNIQUE constraint.
+Oracle のテーブルはデフォルトで重複を許可する (MULTISET に相当)。一意性を強制するには、PRIMARY KEY または UNIQUE 制約を追加する必要がある。
 
 ```sql
--- Oracle equivalent of SET table (unique enforcement via constraint)
+-- SET 表に相当する Oracle での実装 (制約による一意性強制)
 CREATE TABLE customers (
     cust_id   NUMBER(10)   NOT NULL,
     cust_name VARCHAR2(100),
     CONSTRAINT pk_customers PRIMARY KEY (cust_id)
 );
 
--- Oracle equivalent of MULTISET table (no uniqueness enforcement)
+-- MULTISET 表に相当する Oracle での実装 (一意性強制なし)
 CREATE TABLE fact_events (
     event_id   NUMBER(19),
     event_type VARCHAR2(50),
     event_date DATE
 );
--- Note: no primary key means duplicates are allowed
+-- 注意：プライマリ・キーがないため重複が許可される
 ```
 
-**Critical migration issue:** If your Teradata SET tables have been relying on silent duplicate rejection as a data cleansing mechanism, that behavior will NOT exist in Oracle. Data that "just worked" in Teradata (duplicates silently dropped) will cause ORA-00001 (unique constraint violated) errors in Oracle if you add primary key constraints. Profile your data for duplicates before applying constraints.
+**重要な移行課題：** Teradata の SET 表で、暗黙的な重複拒否をデータ・クレンジング・メカニズムとして利用していた場合、その挙動は Oracle には存在しない。Teradata で「正常に動作（重複が暗黙的に削除）」していたデータは、Oracle でプライマリ・キー制約を追加すると ORA-00001 (一意制約違反) エラーを引き起こす。制約を適用する前に、データの重複状況をプロファイリングすること。
 
 ---
 
-## Data Type Mapping
+## データ型マッピング
 
-### Numeric Types
+### 数値型
 
-| Teradata | Oracle | Notes |
+| Teradata | Oracle | 備考 |
 |---|---|---|
-| `BYTEINT` | `NUMBER(3)` | −128 to 127 |
+| `BYTEINT` | `NUMBER(3)` | −128 ～ 127 |
 | `SMALLINT` | `NUMBER(5)` | |
 | `INTEGER` / `INT` | `NUMBER(10)` | |
 | `BIGINT` | `NUMBER(19)` | |
-| `DECIMAL(p,s)` / `DEC(p,s)` | `NUMBER(p,s)` | Direct equivalent |
-| `NUMERIC(p,s)` | `NUMBER(p,s)` | Direct equivalent |
+| `DECIMAL(p,s)` / `DEC(p,s)` | `NUMBER(p,s)` | 直接的な同等物 |
+| `NUMERIC(p,s)` | `NUMBER(p,s)` | 直接的な同等物 |
 | `FLOAT` / `REAL` | `BINARY_FLOAT` | IEEE 754 |
 | `DOUBLE PRECISION` | `BINARY_DOUBLE` | |
 | `NUMBER(n)` | `NUMBER(n)` | |
-| `BYTEINT` | `NUMBER(3)` | Teradata-specific 1-byte integer |
 
-### String Types
+### 文字列型
 
-| Teradata | Oracle | Notes |
+| Teradata | Oracle | 備考 |
 |---|---|---|
-| `CHAR(n)` | `CHAR(n)` | Teradata max 64,000 bytes; Oracle max 2,000 |
-| `VARCHAR(n)` / `CHAR VARYING(n)` | `VARCHAR2(n)` | Teradata max 64,000; Oracle max 4,000/32,767 |
-| `LONG VARCHAR` | `CLOB` | Deprecated in Teradata; max ~64K |
-| `CLOB(n)` | `CLOB` | Character large object |
-| `BYTE(n)` | `RAW(n)` | Fixed-length binary |
-| `VARBYTE(n)` | `RAW(n)` | Variable-length binary |
-| `BLOB(n)` | `BLOB` | Binary large object |
+| `CHAR(n)` | `CHAR(n)` | Teradata 最大 64,000 バイト、Oracle 最大 2,000 |
+| `VARCHAR(n)` / `CHAR VARYING(n)` | `VARCHAR2(n)` | Teradata 最大 64,000、Oracle 最大 4,000/32,767 |
+| `LONG VARCHAR` | `CLOB` | Teradata では非推奨。最大 約 64K |
+| `CLOB(n)` | `CLOB` | キャラクター・ラージ・オブジェクト |
+| `BYTE(n)` | `RAW(n)` | 固定長バイナリ |
+| `VARBYTE(n)` | `RAW(n)` | 可変長バイナリ |
+| `BLOB(n)` | `BLOB` | バイナリ・ラージ・オブジェクト |
 
-### Date / Time Types
+### 日付 / 時刻型
 
-| Teradata | Oracle | Notes |
+| Teradata | Oracle | 備考 |
 |---|---|---|
-| `DATE` | `DATE` | Teradata DATE is date-only; Oracle DATE includes time |
-| `TIME(n)` | No equivalent | Store as `VARCHAR2(15)` or seconds |
+| `DATE` | `DATE` | Teradata は日付のみ。Oracle は時刻も含む |
+| `TIME(n)` | 同等の型なし | `VARCHAR2(15)` または秒数として保存 |
 | `TIMESTAMP(n)` | `TIMESTAMP(n)` | |
 | `TIME WITH TIME ZONE` | `TIMESTAMP WITH TIME ZONE` | |
 | `TIMESTAMP WITH TIME ZONE` | `TIMESTAMP WITH TIME ZONE` | |
 
-**Teradata DATE storage:** Teradata stores dates internally as integers in format (year-1900)*10000 + month*100 + day. Oracle stores dates as 7-byte internal format. This internal difference is transparent when using SQL, but matters for binary-level bulk data transfers.
+**Teradata の DATE 格納：** Teradata は内部的に日付を整数 (year-1900)*10000 + month*100 + day の形式で保持する。Oracle は 7 バイトの内部フォーマットで保持する。SQL を使用する分には透明だが、バイナリ・レベルの一括データ転送ではこの違いが重要になる。
 
 ```sql
--- Teradata: DATE arithmetic
-SEL CURRENT_DATE + 30;             -- add 30 days
+-- Teradata: DATE 演算
+SEL CURRENT_DATE + 30;             -- 30 日追加
 SEL CURRENT_DATE - CAST(7 AS INTEGER);
 
 -- Oracle
@@ -186,28 +185,28 @@ SELECT SYSDATE + 30 FROM DUAL;
 SELECT SYSDATE - 7 FROM DUAL;
 ```
 
-### Special Teradata Types
+### 特殊な Teradata 型
 
-| Teradata | Oracle | Notes |
+| Teradata | Oracle | 備考 |
 |---|---|---|
 | `INTERVAL YEAR` | `INTERVAL YEAR TO MONTH` | |
 | `INTERVAL YEAR TO MONTH` | `INTERVAL YEAR TO MONTH` | |
 | `INTERVAL DAY` | `INTERVAL DAY TO SECOND` | |
 | `INTERVAL DAY TO SECOND` | `INTERVAL DAY TO SECOND` | |
-| `PERIOD(DATE)` | Two DATE columns (start/end) | Teradata temporal period type; no Oracle equivalent |
-| `PERIOD(TIMESTAMP)` | Two TIMESTAMP columns | |
-| `JSON` | `JSON` (21c+) or `CLOB IS JSON` | |
-| `ST_GEOMETRY` | `SDO_GEOMETRY` | Oracle Spatial |
+| `PERIOD(DATE)` | 2 つの DATE 列（開始/終了） | Teradata の時間的期間型。Oracle に同等の単一型はない |
+| `PERIOD(TIMESTAMP)` | 2 つの TIMESTAMP 列 | |
+| `JSON` | `JSON` (21c 以降) または `CLOB IS JSON` | |
+| `ST_GEOMETRY` | `SDO_GEOMETRY` | Oracle Spatial が必要 |
 | `XML` | `XMLTYPE` | |
 
 ---
 
-## QUALIFY Clause → Subquery with Window Function
+## QUALIFY 句 → ウィンドウ関数を伴うサブクエリ
 
-Teradata's `QUALIFY` is a filtering clause that applies to window function results, similar to `HAVING` for aggregates. No other major RDBMS supports `QUALIFY` natively (Snowflake does as well, but Oracle does not).
+Teradata の `QUALIFY` は、集計に対する `HAVING` のように、ウィンドウ関数の結果に適用されるフィルタリング句である。Oracle を含む他の主要な RDBMS には、これをネイティブにサポートしているものはない。
 
 ```sql
--- Teradata: keep only the top-ranked row per customer
+-- Teradata: 顧客ごとに最新の注文 1 件のみを保持
 SEL
     cust_id,
     order_id,
@@ -216,11 +215,11 @@ SEL
 FROM orders
 QUALIFY RANK() OVER (PARTITION BY cust_id ORDER BY order_date DESC) = 1;
 
--- Teradata: filter on row number for pagination
+-- Teradata: ページネーションのための行番号フィルタ
 SEL * FROM products
 QUALIFY ROW_NUMBER() OVER (ORDER BY price DESC) BETWEEN 11 AND 20;
 
--- Oracle equivalent: subquery or CTE
+-- Oracle での同等実装: サブクエリまたは CTE
 SELECT cust_id, order_id, order_date, total_amount
 FROM (
     SELECT cust_id, order_id, order_date, total_amount,
@@ -229,7 +228,7 @@ FROM (
 )
 WHERE rnk = 1;
 
--- Oracle pagination with CTE
+-- CTE による Oracle ページネーション
 WITH ranked AS (
     SELECT product_id, product_name, price,
            ROW_NUMBER() OVER (ORDER BY price DESC) AS rn
@@ -242,12 +241,12 @@ WHERE rn BETWEEN 11 AND 20;
 
 ---
 
-## Teradata-Specific Aggregates and Functions
+## Teradata 固有の集計と関数
 
-### String Aggregation
+### 文字列の集計
 
 ```sql
--- Teradata: XML-based string aggregation (common workaround)
+-- Teradata: XML ベースの文字列集計 (一般的な回避策)
 SELECT cust_id,
        TRIM(TRAILING ',' FROM
             XMLAGG(XMLELEMENT(NAME x, TRIM(product_name) || ',')
@@ -256,32 +255,32 @@ SELECT cust_id,
 FROM order_items
 GROUP BY cust_id;
 
--- Oracle: LISTAGG (much cleaner)
+-- Oracle: LISTAGG (より簡潔)
 SELECT cust_id,
        LISTAGG(product_name, ',') WITHIN GROUP (ORDER BY product_name) AS products
 FROM order_items
 GROUP BY cust_id;
 ```
 
-### Statistical Functions
+### 統計関数
 
-| Teradata Function | Oracle Equivalent |
+| Teradata 関数 | Oracle 同等物 |
 |---|---|
-| `PERCENTILE_CONT(p) WITHIN GROUP (ORDER BY col)` | `PERCENTILE_CONT(p) WITHIN GROUP (ORDER BY col)` — same |
-| `PERCENTILE_DISC(p) WITHIN GROUP (ORDER BY col)` | `PERCENTILE_DISC(p) WITHIN GROUP (ORDER BY col)` — same |
-| `REGR_SLOPE(y, x)` | `REGR_SLOPE(y, x)` — same |
-| `REGR_INTERCEPT(y, x)` | `REGR_INTERCEPT(y, x)` — same |
-| `CORR(y, x)` | `CORR(y, x)` — same |
+| `PERCENTILE_CONT(p) WITHIN GROUP (ORDER BY col)` | `PERCENTILE_CONT(p) WITHIN GROUP (ORDER BY col)` — 同様 |
+| `PERCENTILE_DISC(p) WITHIN GROUP (ORDER BY col)` | `PERCENTILE_DISC(p) WITHIN GROUP (ORDER BY col)` — 同様 |
+| `REGR_SLOPE(y, x)` | `REGR_SLOPE(y, x)` — 同様 |
+| `REGR_INTERCEPT(y, x)` | `REGR_INTERCEPT(y, x)` — 同様 |
+| `CORR(y, x)` | `CORR(y, x)` — 同様 |
 | `STDDEV_SAMP(n)` | `STDDEV(n)` |
-| `STDDEV_POP(n)` | `STDDEV_POP(n)` — same |
+| `STDDEV_POP(n)` | `STDDEV_POP(n)` — 同様 |
 | `VAR_SAMP(n)` | `VARIANCE(n)` |
-| `VAR_POP(n)` | `VAR_POP(n)` — same |
-| `KURTOSIS(n)` | No built-in; use statistical package |
-| `SKEWNESS(n)` | No built-in |
+| `VAR_POP(n)` | `VAR_POP(n)` — 同様 |
+| `KURTOSIS(n)` | 組み込み関数なし。統計パッケージを使用 |
+| `SKEWNESS(n)` | 組み込み関数なし |
 
-### Common Teradata Functions
+### 一般的な Teradata 関数
 
-| Teradata Function | Oracle Equivalent |
+| Teradata 関数 | Oracle 同等物 |
 |---|---|
 | `OREPLACE(s, old, new)` | `REPLACE(s, old, new)` |
 | `OTRANSLATE(s, from, to)` | `TRANSLATE(s, from, to)` |
@@ -292,24 +291,18 @@ GROUP BY cust_id;
 | `TRIM(BOTH 'x' FROM s)` | `TRIM('x' FROM s)` |
 | `ZEROIFNULL(n)` | `NVL(n, 0)` |
 | `NULLIFZERO(n)` | `NULLIF(n, 0)` |
-| `COALESCE(a, b, c)` | `COALESCE(a, b, c)` — same |
-| `CASE` | `CASE` — same |
-| `DECODE(...)` (TD 13.10+) | `DECODE(...)` — same |
-| `HASHBUCKET(col)` | No equivalent (Teradata internal hash routing) |
-| `HASHROW(col)` | `ORA_HASH(col)` (approximate) |
-| `TD_NORMALIZE_OVERLAP` | No equivalent; use temporal SQL manually |
-| `WEEKS_IN_YEAR(d)` | `CASE WHEN TO_CHAR(DATE '9999-12-28', 'IW') = '53' THEN 53 ELSE 52 END` |
+| `HASHROW(col)` | `ORA_HASH(col)` (近似値) |
 | `DAY_OF_WEEK(d)` | `TO_NUMBER(TO_CHAR(d, 'D'))` |
 | `MONTH_OF_YEAR(d)` | `EXTRACT(MONTH FROM d)` |
 
 ---
 
-## Teradata Temporal Tables → Oracle Temporal Queries
+## Teradata Temporal 表 → Oracle での時間的クエリ
 
-Teradata has built-in support for temporal (bi-temporal) tables with `PERIOD` type columns and temporal DML. Oracle does not have a native bi-temporal SQL extension, but you can implement the same patterns manually.
+Teradata は、`PERIOD` 型の列と時間的 DML を使用した時間的 (Temporal) 表 (バイテンポラル表) を組み込みでサポートしている。Oracle にはネイティブの拡張構文はないが、手動で同様のパターンを実装できる。
 
 ```sql
--- Teradata temporal table
+-- Teradata 時間的表
 CREATE TABLE employee_salary (
     emp_id     INTEGER,
     salary     DECIMAL(10,2),
@@ -318,7 +311,7 @@ CREATE TABLE employee_salary (
 )
 PRIMARY INDEX (emp_id);
 
--- Oracle equivalent using explicit period columns
+-- Oracle での明示的な期間列を使用した同等実装
 CREATE TABLE employee_salary (
     emp_id          NUMBER(10)    NOT NULL,
     salary          NUMBER(10,2)  NOT NULL,
@@ -329,7 +322,7 @@ CREATE TABLE employee_salary (
     CONSTRAINT pk_emp_salary PRIMARY KEY (emp_id, valid_from, transaction_from)
 );
 
--- Query current valid state
+-- 現在有効な状態を照会
 SELECT emp_id, salary
 FROM employee_salary
 WHERE valid_from <= TRUNC(SYSDATE) AND valid_to > TRUNC(SYSDATE)
@@ -340,13 +333,12 @@ WHERE valid_from <= TRUNC(SYSDATE) AND valid_to > TRUNC(SYSDATE)
 
 ## TPT (Teradata Parallel Transporter) → Oracle SQL*Loader / Data Pump
 
-### Teradata TPT Export
+### Teradata TPT によるエクスポート
 
 ```bash
-# TPT export script (tbuild)
-# File: export_orders.tpt
+# TPT エクスポート・スクリプト (tbuild)
+# ファイル: export_orders.tpt
 DEFINE JOB export_orders_job
-DESCRIPTION 'Export orders to CSV'
 (
     DEFINE OPERATOR export_oper
     TYPE EXPORT
@@ -356,37 +348,18 @@ DESCRIPTION 'Export orders to CSV'
         VARCHAR DirectoryPath    = '/data/export',
         VARCHAR FileWritingRule  = 'Truncate',
         VARCHAR Format           = 'DELIMITED',
-        VARCHAR OpenQuoteMark    = '"',
-        VARCHAR CloseQuoteMark   = '"',
         VARCHAR TextDelimiter    = ','
     );
-
-    DEFINE SCHEMA orders_schema
-    (
-        order_id     INTEGER,
-        customer_id  INTEGER,
-        order_date   DATE,
-        total_amount DECIMAL(10,2)
-    );
-
-    STEP export_step
-    (
-        APPLY TO OPERATOR (export_oper)
-        SELECT * FROM orders;
-    );
+    -- ... スキーマ定義とステップ定義 ...
 );
 ```
 
-```bash
-tbuild -f export_orders.tpt
-```
+### Oracle SQL*Loader によるインポート
 
-### Oracle SQL*Loader Import
-
-After exporting from Teradata to CSV:
+Teradata から CSV にエクスポートした後：
 
 ```
--- SQL*Loader control file: orders.ctl
+-- SQL*Loader コントロール・ファイル: orders.ctl
 OPTIONS (DIRECT=TRUE, PARALLEL=TRUE, ROWS=10000)
 LOAD DATA
 INFILE '/data/export/orders*.dat'
@@ -406,103 +379,76 @@ TRAILING NULLCOLS
 sqlldr userid=myuser/mypass@mydb control=orders.ctl log=orders.log
 ```
 
-### Oracle Data Pump for Large Migrations
-
-For Oracle-to-Oracle movements (where a staging Oracle database is used):
-
-```bash
-# Export from staging Oracle
-expdp myuser/mypass@staging \
-  DUMPFILE=orders_%U.dmp \
-  LOGFILE=expdp_orders.log \
-  TABLES=ORDERS \
-  PARALLEL=4
-
-# Import to target Oracle
-impdp myuser/mypass@target \
-  DUMPFILE=orders_%U.dmp \
-  LOGFILE=impdp_orders.log \
-  TABLE_EXISTS_ACTION=APPEND \
-  PARALLEL=4
-```
-
 ---
 
-## Teradata FastLoad / MultiLoad → Oracle Equivalents
+## Teradata FastLoad / MultiLoad → Oracle の対応ツール
 
-| Teradata Utility | Oracle Equivalent | Use Case |
+| Teradata ユーティリティ | Oracle 同等ツール | ユースケース |
 |---|---|---|
-| FastLoad | SQL*Loader DIRECT=TRUE | Bulk empty table load |
-| MultiLoad | SQL*Loader with APPEND | Bulk DML on existing tables |
-| FastExport | External tables + SQL | Fast data export |
-| BTEQ | SQL*Plus / SQLcl | Interactive querying and scripting |
-| TPT | SQL*Loader + shell scripting | Parallel ETL |
-| Teradata JDBC/ODBC | Oracle JDBC/ODBC | Application connectivity |
+| FastLoad | SQL*Loader DIRECT=TRUE | 空テーブルへの大量ロード |
+| MultiLoad | SQL*Loader (APPEND 指定) | 既存テーブルへの大量 DML |
+| FastExport | 外部表 + SQL | 高速なデータ・エクスポート |
+| BTEQ | SQL*Plus / SQLcl | 対話型クエリとスクリプト実行 |
+| TPT | SQL*Loader + シェル・スクリプト | 並列 ETL 処理 |
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Profile PI (Primary Index) usage.** Teradata's Primary Index determines data distribution across AMPs. When migrating to Oracle, the PI column is often a good candidate for partitioning or the primary key. Understand how queries filter and join on the PI to inform Oracle index strategy.
+1. **PI (Primary Index) の使用状況をプロファイリングする。** Teradata の PI は、AMP 間でのデータ分散を決定する。Oracle 移行時、PI 列はパーティション・キーや主キーの有力な候補となる。PI でのフィルタリングや結合がどのように行われているかを理解し、Oracle の索引戦略に役立てること。
 
-2. **Handle MULTISET table duplicates before migrating.** Check for duplicate rows in MULTISET tables:
+2. **移行前に MULTISET 表の重複を処理する。** MULTISET 表の重複行を確認すること：
    ```sql
-   -- Teradata: find duplicate rows in a MULTISET table
+   -- Teradata: MULTISET 表内の重複行を特定
    SEL order_id, COUNT(*) cnt FROM fact_orders GROUP BY order_id HAVING cnt > 1;
    ```
-   Decide whether to deduplicate, keep all rows, or add a surrogate key.
+   重複を除去するか、保持するか、または代替キーを追加するかを検討すること。
 
-3. **Rewrite QUALIFY to subqueries systematically.** Use a find-replace-aware tool or regex to locate all QUALIFY usages and convert them to equivalent subquery or CTE patterns. This is mechanical work but must be done for every occurrence.
+3. **QUALIFY を体系的にサブクエリに書き換える。** すべての `QUALIFY` 使用箇所を特定し、同等のサブクエリまたは CTE パターンに変換すること。これは機械的な作業であるが、すべての箇所で行う必要がある。
 
-4. **Review Teradata macro objects.** Teradata macros are parameterized SQL templates stored in the database. They translate most naturally to Oracle stored procedures.
+4. **Teradata のマクロ・オブジェクトを見直す。** Teradata マクロは、データベース内に保存されたパラメータ化された SQL テンプレートである。これらは、Oracle のストアド・プロシージャに移行するのが最も自然である。
 
-5. **Map Teradata UDFs to Oracle.** Teradata User-Defined Functions (UDFs) written in C may require rewriting in PL/SQL or Java (Oracle Java stored procedures). Identify all UDF dependencies before migration.
-
-6. **Plan for Teradata views referencing derived tables.** Teradata allows complex derived table views. Oracle supports these but may require materialized views for performance where Teradata's optimizer handled them more efficiently.
+5. **Teradata UDF を Oracle にマッピングする。** C 言語で記述された Teradata UDF は、PL/SQL または Java (Oracle Java ストアド・プロシージャ) での書き直しが必要になる場合がある。移行前にすべての UDF 依存関係を特定すること。
 
 ---
 
-## Common Migration Pitfalls
+## よくある移行の落とし穴
 
-**Pitfall 1 — SET table silent duplicate rejection:**
-As covered above, this is the most common silent data issue. Set table semantics disappear in Oracle and must be replaced with explicit constraints. Audit data for duplicates first.
+**落とし穴 1 — SET 表の暗黙的な重複拒否：**
+前述の通り、これは最も一般的な「静かな」データ移行の問題である。SET 表のセマンティクスは Oracle にはないため、明示的な制約に置き換える必要がある。まずデータに重複がないか監査すること。
 
-**Pitfall 2 — BYTEINT type:**
-Oracle has no 1-byte integer type. Use NUMBER(3) or NUMBER(5). Applications doing bitwise operations on BYTEINT values need review.
+**落とし穴 2 — BYTEINT 型：**
+Oracle には 1 バイトの整数型がない。`NUMBER(3)` または `NUMBER(5)` を使用する。BYTEINT 値に対してビット演算を行っているアプリケーションは注意が必要である。
 
-**Pitfall 3 — Teradata NULL comparison:**
-Teradata follows ANSI SQL for NULL comparisons (NULL = NULL is unknown). Oracle does the same — this is compatible. But Teradata's `SEL` permitting some non-standard comparisons may produce different results.
+**落とし穴 3 — ANSI モード vs Teradata モード：**
+Teradata セッションは ANSI モードまたは Teradata モードで動作する。Teradata モードでは、表の種類、暗黙的な型変換、トランザクション処理が異なる。Teradata モードを使用している場合は、Oracle の ANSI 準拠の挙動と一致しない可能性があることに注意。
 
-**Pitfall 4 — ANSI mode vs Teradata mode:**
-Teradata sessions can run in ANSI mode or Teradata mode. In Teradata mode, SET tables, implicit type conversions, and transaction handling differ. If sessions are using Teradata mode, be aware that some behaviors may not match Oracle's ANSI-compliant behavior.
-
-**Pitfall 5 — Teradata COMPRESS keyword on columns:**
-Teradata column-level compression stores NULL values and most-frequent values more efficiently. This is an internal storage optimization invisible to SQL. In Oracle, use table-level compression instead:
+**落とし穴 4 — 列レベルの COMPRESS キーワード：**
+Teradata の列レベル圧縮 (COMPRESS) は、NULL や頻出値を効率的に格納する内部最適化である。Oracle では、代わりにテーブル・レベルの圧縮を使用すること。
 ```sql
--- Teradata: COMPRESS column value
+-- Teradata: 列レベルの圧縮
 salary DECIMAL(10,2) COMPRESS (0.00, NULL)
 
--- Oracle: use table-level compression
+-- Oracle: テーブル・レベルの圧縮
 CREATE TABLE employees (...) COMPRESS FOR OLTP;
 ```
 
-**Pitfall 6 — BTEQ error handling:**
-BTEQ error handling via `.IF ERRORCODE <> 0 THEN .QUIT n` does not translate to SQL*Plus or SQLcl directly. Use `WHENEVER SQLERROR EXIT n ROLLBACK` and `WHENEVER OSERROR EXIT n` in SQL*Plus for equivalent behavior.
+**落とし穴 5 — BTEQ エラー処理：**
+BTEQ の `.IF ERRORCODE <> 0 THEN .QUIT` によるエラー処理は、SQL*Plus や SQLcl に直接変換できない。SQL*Plus では `WHENEVER SQLERROR EXIT n ROLLBACK` などを使用して同等の挙動を実現すること。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ファイル内の基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c, 23c, または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- 複数バージョンをサポートする環境では、リリース更新（RU）によってデフォルト値や非推奨機能が異なる場合があるため、19c と 26ai の両方で動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c SQL Language Reference — Data Types](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/Data-Types.html)
 - [Oracle Database 19c SQL Language Reference — CREATE TABLE](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-TABLE.html)
-- [Oracle Database 19c SQL Language Reference — Analytic Functions (QUALIFY equivalent patterns)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/Analytic-Functions.html)
+- [Oracle Database 19c SQL Language Reference — Analytic Functions](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/Analytic-Functions.html)
 - [Oracle Database 19c SQL Language Reference — LISTAGG](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/LISTAGG.html)
 - [Oracle Database 19c Utilities — SQL*Loader](https://docs.oracle.com/en/database/oracle/oracle-database/19/sutil/oracle-sql-loader.html)
 - [Oracle Database 19c Utilities — Data Pump Export (expdp)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sutil/oracle-data-pump-export-utility.html)

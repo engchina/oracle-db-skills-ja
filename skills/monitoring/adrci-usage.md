@@ -1,61 +1,62 @@
-# ADRCI Usage
+# ADRCI の使用方法
 
-## Overview
+## 概要
 
-`adrci` (Automatic Diagnostic Repository Command Interpreter) is Oracle's command-line interface for managing the Automatic Diagnostic Repository (ADR). It was introduced in Oracle 11g as the standard tool for searching diagnostic data, managing incidents, packaging diagnostic information for Oracle Support, and purging stale diagnostic content.
+`adrci` (Automatic Diagnostic Repository Command Interpreter) は、自動診断リポジトリ (ADR) を管理するための Oracle のコマンドライン・インターフェースである。Oracle 11g で導入され、診断データの検索、インシデントの管理、Oracle Support 向けの診断情報のパッケージ化、および古い診断コンテンツのパージを行うための標準ツールとなっている。
 
-Every DBA should be proficient with `adrci` because it provides structured, filterable access to the alert log, trace files, incidents, and problems—capabilities that are impossible or impractical with plain file system tools like `grep` or `tail`. It is especially critical when preparing diagnostic packages for Oracle Support (IPS packages) and when correlating multiple related incidents.
+すべての DBA は `adrci` に精通している必要がある。なぜなら、`adrci` はアラート・ログ、トレース・ファイル、インシデント、および問題に対して、構造化されフィルタリング可能なアクセスを提供するからである。これは、`grep` や `tail` のような単純なファイル・システム・ツールでは不可能、あるいは実用的ではない機能である。特に、Oracle Support 向けの診断パッケージ (IPS パッケージ) の作成や、複数の関連するインシデントの相関分析を行う際に極めて重要となる。
 
 ---
 
-## ADR Repository Structure
+## ADR リポジトリの構造
 
-The ADR is a file-based repository organized in a predictable directory hierarchy. Understanding this structure helps when navigating the file system directly or when interpreting `adrci` output.
+ADR は、予測可能なディレクトリ階層で構成されたファイル・ベースのリポジトリである。この構造を理解しておくことは、ファイル・システムを直接ナビゲートする場合や、`adrci` の出力を解釈する場合に役立つ。
 
 ```
 $ADR_BASE/
 └── diag/
-    └── rdbms/                          ← Product type
-        └── <db_name>/                  ← DB unique name (lowercase)
-            └── <instance_name>/        ← Instance name (ADR Home)
-                ├── alert/              ← XML alert log (log.xml)
-                ├── trace/              ← Trace files + text alert log
-                ├── incident/           ← Per-incident directories
-                │   └── incdir_<id>/    ← Trace files for one incident
-                ├── incpkg/             ← IPS package staging area
-                ├── cdump/              ← Core dump files
-                ├── hm/                 ← Health Monitor results
-                ├── sweep/              ← Sweep (automated action) results
-                └── metadata/           ← ADR internal metadata (SQLite DB)
+    └── rdbms/                          ← 製品タイプ
+        └── <db_name>/                  ← DB一意名（小文字）
+            └── <instance_name>/        ← インスタンス名 (ADRホーム)
+                ├── alert/              ← XMLアラート・ログ (log.xml)
+                ├── trace/              ← トレース・ファイル + テキスト形式アラート・ログ
+                ├── incident/           ← インシデントごとのディレクトリ
+                │   └── incdir_<id>/    ← 特定のインシデントに関するトレース・ファイル
+                ├── incpkg/             ← IPSパッケージのステージング領域
+                ├── cdump/              ← コア・ドンプ・ファイル
+                ├── hm/                 ← ヘルス・モニターの結果
+                ├── sweep/              ← スイープ（自動アクション）の結果
+                └── metadata/           ← ADR内部メタデータ (SQLite DB)
 ```
 
-### Finding Your ADR Home
+### ADR ホームの確認
 
 ```sql
--- From SQL*Plus or any SQL client
+-- SQL*Plus または任意の SQL クライアントから実行
 SELECT name, value
 FROM   v$diag_info
 ORDER BY name;
 ```
 
-Key rows:
+主な項目:
 
-| `ADR Base` | Root of the ADR (`$ORACLE_BASE` or `DIAGNOSTIC_DEST`) |
+| 項目名 | 説明 |
 |---|---|
-| `ADR Home` | Full path for this instance |
-| `Diag Alert` | XML alert log directory |
-| `Diag Trace` | Trace file directory (also has text alert log) |
-| `Diag Incident` | Incident directory |
+| `ADR Base` | ADR のルート (`$ORACLE_BASE` または `DIAGNOSTIC_DEST`) |
+| `ADR Home` | このインスタンスのフルパス |
+| `Diag Alert` | XML アラート・ログのディレクトリ |
+| `Diag Trace` | トレース・ファイルのディレクトリ（テキスト形式アラート・ログも含まれる） |
+| `Diag Incident` | インシデント・ディレクトリ |
 
-### Multiple ADR Homes
+### 複数の ADR ホーム
 
-A single server may have multiple ADR homes—one per Oracle product instance (database instances, listeners, ASM, etc.). `adrci` can work with all of them simultaneously:
+単一のサーバーに複数の ADR ホームが存在する場合がある（データベース・インスタンス、リスナー、ASM など、Oracle 製品のインスタンスごとに 1 つ）。`adrci` は、それらすべてを同時に操作することができる。
 
 ```bash
-# List all ADR homes on this server
+# このサーバー上のすべての ADR ホームを表示
 adrci> SHOW HOMES
 
-# Example output:
+# 出力例:
 # ADR Homes:
 # diag/rdbms/orcl/orcl
 # diag/rdbms/testdb/testdb
@@ -65,232 +66,232 @@ adrci> SHOW HOMES
 
 ---
 
-## Starting adrci
+## adrci の起動
 
 ```bash
-# Start interactively (uses ORACLE_BASE environment variable for ADR base)
+# 対話モードで起動（環境変数 ORACLE_BASE を使用して ADR ベースを特定）
 adrci
 
-# Start and execute a single command non-interactively
+# 非対話モードで単一のコマンドを実行
 adrci exec="SHOW ALERT -TAIL 50"
 
-# Execute multiple commands non-interactively (semicolon-separated)
+# 非対話モードで複数のコマンドを実行（セミコロンで区切る）
 adrci exec="SET HOMEPATH diag/rdbms/orcl/orcl; SHOW ALERT -TAIL 50"
 
-# Run adrci commands from a script file
+# スクリプト・ファイルから adrci コマンドを実行
 adrci script=/path/to/adrci_commands.sql
 ```
 
 ---
 
-## Core adrci Command Reference
+## adrci コマンド・リファレンス
 
-### Navigation and Configuration
+### ナビゲーションと構成
 
 ```bash
-# Show all available ADR homes
+# 利用可能なすべての ADR ホームを表示
 SHOW HOMES
 
-# Set working ADR home (single)
+# 作業対象の ADR ホームを設定（単一）
 SET HOMEPATH diag/rdbms/orcl/orcl
 
-# Set multiple homes (for cross-instance queries)
+# 複数のホームを設定（インスタンスを跨いだクエリ用）
 SET HOMEPATH diag/rdbms/orcl/orcl diag/rdbms/testdb/testdb
 
-# Show current home setting
+# 現在のホーム設定を表示
 SHOW HOMEPATH
 
-# Show ADR base path
+# ADR ベースのパスを表示
 SHOW BASE
 
-# Get help on any command
+# コマンドのヘルプを表示
 HELP
 HELP SHOW INCIDENT
 HELP IPS
 ```
 
-### Viewing the Alert Log
+### アラート・ログの表示
 
 ```bash
-# Show entire alert log (use with caution on large logs)
+# アラート・ログ全体を表示（ログが大きい場合は注意）
 SHOW ALERT
 
-# Show last N lines (equivalent to tail -n)
+# 最後の N 行を表示（tail -n に相当）
 SHOW ALERT -TAIL 100
 
-# Show last N lines and continue watching (tail -f equivalent)
+# 最後の N 行を表示し、監視を継続する（tail -f に相当）
 SHOW ALERT -TAIL 50 -F
 
-# Filter alert log by predicate (WHERE clause syntax)
+# 条件を指定してアラート・ログをフィルタリング（WHERE 句の構文）
 SHOW ALERT -P "MESSAGE_TEXT LIKE '%ORA-%'"
 
-# Filter by time range
+# 時間範囲でフィルタリング
 SHOW ALERT -P "ORIGINATING_TIMESTAMP > TIMESTAMP '2026-03-06 08:00:00'"
 
-# Combine predicates
+# 条件の組み合わせ
 SHOW ALERT -P "ORIGINATING_TIMESTAMP > TIMESTAMP '2026-03-06 00:00:00' AND MESSAGE_TEXT LIKE '%ORA-00600%'"
 
-# Output to terminal (default behaviour when no pager is set)
+# ターミナルに出力（ページャーが設定されていない場合のデフォルトの動作）
 SHOW ALERT -TERM
 
-# Specify an alert file outside ADR
+# ADR 以外の場所にあるアラート・ファイルを指定して表示
 SHOW ALERT -FILE /path/to/alert_file
 ```
 
-The predicate language in `adrci` uses column names from the underlying XML schema. Key columns for `SHOW ALERT` filtering:
+`adrci` のフィルタリング（述語）では、基盤となる XML スキーマの列名を使用する。`SHOW ALERT` のフィルタリングに使用される主な列は以下の通り：
 
-| Column | Description |
+| 列名 | 説明 |
 |--------|-------------|
-| `ORIGINATING_TIMESTAMP` | When the message was generated |
-| `MESSAGE_TEXT` | The actual log message |
-| `MESSAGE_TYPE` | Numeric message type (1=Unknown, 2=Incident, 3=Error, 4=Warning, 5=Notification, 6=Trace) |
-| `COMPONENT_ID` | Oracle component that generated the message |
+| `ORIGINATING_TIMESTAMP` | メッセージが生成された時刻 |
+| `MESSAGE_TEXT` | 実際のログ・メッセージ |
+| `MESSAGE_TYPE` | メッセージ・タイプの数値 (1=Unknown, 2=Incident, 3=Error, 4=Warning, 5=Notification, 6=Trace) |
+| `COMPONENT_ID` | メッセージを生成した Oracle コンポーネント |
 
-### Working with Incidents
+### インシデントの管理
 
-An **incident** is a single occurrence of a critical error. Each incident gets a unique ID and its own subdirectory under `$ADR_HOME/incident/incdir_<id>/` containing all diagnostic data related to that error.
+**インシデント (Incident)** とは、重大なエラーの 1 回の発生を指す。各インシデントには一意の ID が割り当てられ、`$ADR_HOME/incident/incdir_<id>/` の下にそのエラーに関連するすべての診断データを格納する専用のディレクトリが作成される。
 
-A **problem** is a group of incidents sharing the same root cause, identified by a **problem key** (a string like `ORA 600 [kcbz_check_objd_typ_3]`).
+**問題 (Problem)** とは、同じ根本原因を共有するインシデントのグループであり、**問題キー (Problem Key)**（例：`ORA 600 [kcbz_check_objd_typ_3]`）によって識別される。
 
 ```bash
-# List all incidents (most recent first)
+# すべてのインシデントを表示（新しい順）
 SHOW INCIDENT
 
-# List incidents with full details
+# 詳細モードでインシデントを表示
 SHOW INCIDENT -MODE DETAIL
 
-# Show a specific incident
+# 特定のインシデントを表示
 SHOW INCIDENT -P "INCIDENT_ID=12345"
 
-# Show incidents in a time range
+# 時間範囲でインシデントを表示
 SHOW INCIDENT -P "CREATE_TIME > TIMESTAMP '2026-03-06 00:00:00'"
 
-# Show incidents by problem key
+# 問題キーでインシデントを表示
 SHOW INCIDENT -P "PROBLEM_KEY LIKE '%ORA-00600%'"
 
-# Show all problems (grouped incidents)
+# すべての問題（グループ化されたインシデント）を表示
 SHOW PROBLEM
 
-# Show problems with full detail
+# 詳細モードで問題を表示
 SHOW PROBLEM -MODE DETAIL
 
-# Show a specific problem
+# 特定の問題を表示
 SHOW PROBLEM -P "PROBLEM_ID=3"
 ```
 
-Sample `SHOW INCIDENT` output:
+`SHOW INCIDENT` の出力例：
 ```
 ADR Home = /u01/app/oracle/diag/rdbms/orcl/orcl:
 *************************************************************************
-                                                    INCIDENT_ID PROBLEM_KEY                 CREATE_TIME
-                                                    ----------- --------------------------- ----------------------------------------
-                                                          12345 ORA 600 [kcbz_check_objd_t] 2026-03-06 14:23:15.000000 +00:00
-                                                          12344 ORA 7445 [sigsegv]          2026-03-05 09:11:02.000000 +00:00
+                                                     INCIDENT_ID PROBLEM_KEY                 CREATE_TIME
+                                                     ----------- --------------------------- ----------------------------------------
+                                                           12345 ORA 600 [kcbz_check_objd_t] 2026-03-06 14:23:15.000000 +00:00
+                                                           12344 ORA 7445 [sigsegv]          2026-03-05 09:11:02.000000 +00:00
 2 rows fetched
 ```
 
-### Viewing Trace Files
+### トレース・ファイルの表示
 
 ```bash
-# List trace files associated with an incident
+# インシデントに関連付けられたトレース・ファイルを表示
 SHOW TRACEFILE -I 12345
 
-# List all trace files in the ADR home
+# ADR ホーム内のすべてのトレース・ファイルを表示
 SHOW TRACEFILE
 
-# List trace files matching a pattern
+# パターンに一致するトレース・ファイルを表示
 SHOW TRACEFILE "%ora_12345%"
 
-# View a specific trace file
+# 特定のトレース・ファイルを表示
 SHOW TRACE /u01/app/oracle/diag/rdbms/orcl/orcl/incident/incdir_12345/orcl_ora_12345.trc
 
-# View last N lines of a trace file
+# トレース・ファイルの最後の N 行を表示
 SHOW TRACE /path/to/file.trc -TAIL 100
 ```
 
 ---
 
-## IPS: Incident Packaging System
+## IPS: インシデント・パッケージング・システム
 
-The **Incident Packaging System (IPS)** automates the collection and packaging of all diagnostic data related to one or more incidents into a ZIP file suitable for uploading to Oracle Support. This is the correct way to gather diagnostic data—it ensures all related files (trace files, alert log excerpts, system state dumps, SQL plan baselines, etc.) are included.
+**インシデント・パッケージング・システム (IPS)** は、1 つ以上のインシデントに関連するすべての診断データを自動的に収集し、Oracle Support へのアップロードに適した ZIP ファイルにパッケージ化する機能である。これは診断データを収集するための正しい方法であり、関連するすべてのファイル（トレース・ファイル、アラート・ログの抜粋、システム状態のダンプ、SQL 計画ベースラインなど）が確実に含まれるようになる。
 
-### Creating an IPS Package
+### IPS パッケージの作成
 
 ```bash
-# Create a package for a specific incident
+# 特定のインシデントに対するパッケージを作成
 IPS CREATE PACKAGE INCIDENT 12345
 
-# Create a package for a time window
+# 時間範囲を指定してパッケージを作成
 IPS CREATE PACKAGE TIMEWINDOW '2026-03-06 14:00:00' '2026-03-06 15:00:00'
 
-# Create a package for a problem (all incidents with same root cause)
+# 特定の問題に対するパッケージを作成（同じ根本原因を持つすべてのインシデント）
 IPS CREATE PACKAGE PROBLEM 3
 
-# Create a package and immediately generate the ZIP
+# パッケージを作成し、即座に ZIP ファイルを生成
 IPS CREATE PACKAGE INCIDENT 12345 CORRELATE BASIC
 
-# Create with full correlation (includes related incidents from same problem)
+# 完全な関連付け（同じ問題に起因する関連インシデントを含む）を行って作成
 IPS CREATE PACKAGE INCIDENT 12345 CORRELATE ALL
 ```
 
-### Adding and Removing Files from a Package
+### パッケージへのファイルの追加と削除
 
 ```bash
-# Show current packages
+# 現在のパッケージを表示
 IPS SHOW PACKAGE
 
-# Show contents of a specific package
+# 特定のパッケージの内容を表示
 IPS SHOW PACKAGE PACKAGE 1
 
-# Add a file to the package
+# ファイルをパッケージに追加
 IPS ADD FILE /path/to/additional_trace.trc PACKAGE 1
 
-# Add an incident to an existing package
+# インシデントを既存のパッケージに追加
 IPS ADD INCIDENT 12346 PACKAGE 1
 
-# Remove a file from a package
+# ファイルをパッケージから削除
 IPS REMOVE FILE /path/to/file.trc PACKAGE 1
 ```
 
-### Generating the ZIP File
+### ZIP ファイルの生成
 
 ```bash
-# Generate the ZIP for package 1 in the current directory
+# 現在のディレクトリにパッケージ 1 の ZIP ファイルを生成
 IPS GENERATE PACKAGE 1 IN /tmp
 
-# The ZIP is created in the specified directory
-# Typical output: /tmp/ORA600_20260306_142315_COM_1.zip
+# 指定したディレクトリに ZIP ファイルが作成される
+# 出力例: /tmp/ORA600_20260306_142315_COM_1.zip
 ```
 
-### Uploading to Oracle Support
+### Oracle Support へのアップロード
 
-After generating the ZIP:
-1. Log in to My Oracle Support (MOS) at `support.oracle.com`
-2. Open or create a Service Request
-3. Upload the ZIP file to the SR
-4. Paste the incident ID and problem key in the SR description
+ZIP ファイルを生成した後の手順：
+1. My Oracle Support (MOS) (`support.oracle.com`) にログインする。
+2. サービス・リクエスト (SR) を作成または開く。
+3. ZIP ファイルを SR にアップロードする。
+4. SR の説明欄にインシデント ID と問題キーを貼り付ける。
 
 ---
 
-## Correlating Incidents
+## インシデントの関連付け
 
-Correlation is the process of identifying related incidents that share the same root cause or occurred in the same time window. `adrci` handles this automatically with IPS or manually with `SHOW INCIDENT` filtering.
+関連付け (Correlation) とは、同じ根本原因を共有、または同じ時間帯に発生した、関連するインシデントを特定するプロセスである。`adrci` は、IPS 使用時に自動的に、または `SHOW INCIDENT` のフィルタリングによって手動でこれを行うことができる。
 
 ```bash
-# Show incidents correlated to incident 12345
+# インシデント 12345 に関連付けられたインシデントを表示
 IPS GET METADATA INCIDENT 12345
 
-# Show all incidents for a problem (same problem key)
+# 特定の問題（同じ問題キー）に関するすべてのインシデントを表示
 SHOW INCIDENT -P "PROBLEM_ID=3"
 
-# Manual correlation: incidents within 30 minutes of a target incident
+# 手動での関連付け：特定のインシデントの前後 30 分以内のインシデント
 SHOW INCIDENT -P "CREATE_TIME > TIMESTAMP '2026-03-06 14:00:00' AND CREATE_TIME < TIMESTAMP '2026-03-06 14:30:00'"
 ```
 
-From SQL, a broader correlation view:
+SQL を使用した、より広範な関連付けビュー：
 
 ```sql
--- Incidents with their problem keys and timing
+-- インシデントとその問題キー、発生時刻
 SELECT i.incident_id,
        i.create_time,
        p.problem_key,
@@ -302,7 +303,7 @@ FETCH FIRST 50 ROWS ONLY;
 ```
 
 ```sql
--- Problems with incident counts (find recurring issues)
+-- 問題ごとのインシデント数（再発している問題の特定）
 SELECT problem_id,
        problem_key,
        last_incident_time,
@@ -313,66 +314,66 @@ ORDER BY last_incident_time DESC;
 
 ---
 
-## Purging Old Diagnostic Data
+## 古い診断データのパージ
 
-ADR data accumulates over time. Oracle has default retention policies, but DBAs should actively manage purging—especially on systems with high incident rates or limited disk space.
+ADR データは時間の経過とともに蓄積される。Oracle にはデフォルトの保持ポリシーがあるが、特にインシデント発生率が高いシステムやディスク容量が限られているシステムでは、DBA が積極的にパージを管理する必要がある。
 
-### Default Retention Policies
+### デフォルトの保持ポリシー
 
-These defaults map to the `LONGP_POLICY` (long-lived content, default 8760 hours = 1 year) and `SHORTP_POLICY` (short-lived content, default 720 hours = 30 days) settings visible in `SHOW CONTROL`.
+これらのデフォルト値は、`SHOW CONTROL` で確認できる `LONGP_POLICY`（長期保持コンテンツ、デフォルトは 8760 時間 = 1 年）と `SHORTP_POLICY`（短期保持コンテンツ、デフォルトは 720 時間 = 30 日）の設定に対応している。
 
-| Data Type | Default Retention | Policy |
+| データ型 | デフォルト保持期間 | ポリシー |
 |-----------|------------------|--------|
-| Incidents | 1 year (8760 hours) | LONGP_POLICY |
-| Alert log (XML) | 1 year (8760 hours) | LONGP_POLICY |
-| Trace files | 30 days (720 hours) | SHORTP_POLICY |
-| Core dumps | 30 days (720 hours) | SHORTP_POLICY |
+| インシデント | 1 年 (8760 時間) | LONGP_POLICY |
+| アラート・ログ (XML) | 1 年 (8760 時間) | LONGP_POLICY |
+| トレース・ファイル | 30 日 (720 時間) | SHORTP_POLICY |
+| コア・ドンプ | 30 日 (720 時間) | SHORTP_POLICY |
 
-> **Note:** Run `SHOW CONTROL` inside `adrci` to see the current values for your environment. Defaults may vary by Oracle version and patch level.
+> **注意:** 自身の環境の現在の設定を確認するには、`adrci` 内で `SHOW CONTROL` を実行すること。デフォルト値は Oracle のバージョンやパッチ・レベルによって異なる場合がある。
 
-### Viewing and Changing Retention Policies
+### 保持ポリシーの表示と変更
 
 ```bash
-# Show current retention policies
+# 現在の保持ポリシーを表示
 SHOW CONTROL
 
-# Change short-term retention to 30 days (in hours: 30 * 24 = 720)
-# SHORTP_POLICY covers trace files, core dumps, and packaging info
-SET CONTROL (SHORTP_POLICY=720)     -- 30 days in hours (default)
+# 短期保持ポリシーを 30 日に変更（時間単位：30 * 24 = 720）
+# SHORTP_POLICY はトレース・ファイル、コア・ドンプ、パッケージ情報を対象とする
+SET CONTROL (SHORTP_POLICY=720)     -- 30日（デフォルト）
 
-# Change long-term retention to 180 days (in hours: 180 * 24 = 4320)
-# LONGP_POLICY covers incident data, incident dumps, and alert logs
-SET CONTROL (LONGP_POLICY=4320)     -- 180 days in hours
+# 長期保持ポリシーを 180 日に変更（時間単位：180 * 24 = 4320）
+# LONGP_POLICY はインシデント・データ、インシデント・ドンプ、アラート・ログを対象とする
+SET CONTROL (LONGP_POLICY=4320)     -- 180日
 
-# Show current ADR home disk usage
+# 現在の ADR ホームのディスク使用量を表示
 SHOW CONTROL
 ```
 
-> **Note:** `SET CONTROL` values are in **hours**, not minutes. Default `SHORTP_POLICY` = 720 hours (30 days); default `LONGP_POLICY` = 8760 hours (365 days).
+> **注意:** `SET CONTROL` に指定する値は、分ではなく **時間** 単位である。デフォルトの `SHORTP_POLICY` は 720 時間 (30 日)、`LONGP_POLICY` は 8760 時間 (365 日) である。
 
-### Purging Specific Data
+### 特定のデータのパージ
 
 ```bash
-# Purge all data older than the retention policy (automatic purge)
+# 保持ポリシーより古いすべてのデータをパージ（自動パージ）
 PURGE
 
-# Purge data older than a specific age (-AGE value is in MINUTES)
-PURGE -AGE 10080 -TYPE INCIDENT     -- Incidents older than 10080 minutes (7 days)
-PURGE -AGE 43200 -TYPE TRACE        -- Trace files older than 43200 minutes (30 days)
+# 指定した期間より古いデータをパージ（-AGE の値は 分 単位）
+PURGE -AGE 10080 -TYPE INCIDENT     -- 10080分（7日）より古いインシデント
+PURGE -AGE 43200 -TYPE TRACE        -- 43200分（30日）より古いトレース・ファイル
 
-# Purge a specific incident (removes incident directory and its trace files)
+# 特定のインシデントをパージ（インシデント・ディレクトリとそのトレース・ファイルを削除）
 PURGE -I 12344
 
-# Purge a range of incidents
+# 範囲を指定してインシデントをパージ
 PURGE -I 12340 12344
 ```
 
-### Automated Purging via Script
+### スクリプトによるパージの自動化
 
 ```bash
 #!/bin/bash
-# purge_adr.sh — Run weekly via cron to keep ADR lean
-# Purge incidents older than 90 days (129600 min), traces older than 30 days (43200 min)
+# purge_adr.sh — ADR をクリーンに保つために cron で週次実行する例
+# 90日（129600分）より古いインシデント、30日（43200分）より古いトレースを削除
 
 ORACLE_SID=orcl
 export ORACLE_SID ORACLE_BASE=/u01/app/oracle
@@ -382,25 +383,25 @@ adrci exec="SET HOMEPATH diag/rdbms/orcl/orcl; PURGE -AGE 129600 -TYPE INCIDENT;
 
 ---
 
-## Advanced adrci Queries
+## 高度な adrci クエリ
 
-### Using the HOME Clause with Multiple Instances
+### 複数インスタンスでの HOME 句の使用
 
 ```bash
-# Query incidents across all ADR homes simultaneously
+# 複数の ADR ホームに対して同時にインシデントをクエリ
 SET HOMEPATH diag/rdbms/orcl/orcl diag/rdbms/testdb/testdb
 
-# This will search across both homes
+# 両方のホームを検索対象にする
 SHOW INCIDENT
 
-# Reset to a single home
+# 単一のホームに戻す
 SET HOMEPATH diag/rdbms/orcl/orcl
 ```
 
-### Non-Interactive Scripting
+### 非対話型スクリプト
 
 ```bash
-# Run a sequence of adrci commands from a shell script
+# シェル・スクリプトから一連の adrci コマンドを実行
 adrci << 'EOF'
 SET HOMEPATH diag/rdbms/orcl/orcl
 SHOW ALERT -P "ORIGINATING_TIMESTAMP > TIMESTAMP '2026-03-06 00:00:00' AND MESSAGE_TEXT LIKE '%ORA-%'" -OUT /tmp/todays_errors.txt
@@ -410,78 +411,77 @@ EOF
 ```
 
 ```bash
-# Use exec for a single command
+# exec を使用して単一のコマンドを実行
 adrci exec="SET HOMEPATH diag/rdbms/orcl/orcl; SHOW ALERT -TAIL 50" > /tmp/alert_tail.txt
 ```
 
-### Extracting Incident Trace File Paths
+### インシデント・トレース・ファイルのパス抽出
 
 ```sql
--- Get all trace file paths for a given incident from SQL
+-- 特定のインシデントに関するすべてのトレース・ファイル・パスを SQL から取得
 SELECT trace_filename
 FROM   v$diag_trace_file
-WHERE  con_id = 0  -- CDB root or non-CDB
+WHERE  con_id = 0  -- CDBルートまたは非CDB
 ORDER BY change_time DESC;
 ```
 
 ```bash
-# In adrci: show trace file for most recent incident
+# adrci 内：直近のインシデントの詳細モードを表示してパスを確認
 SHOW INCIDENT -MODE DETAIL -P "CREATE_TIME > TIMESTAMP '2026-03-06 00:00:00'"
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-1. **Always use `adrci` to package diagnostics for Oracle Support.** Manually zipping trace files misses metadata, XML alert log excerpts, and correlated data that Oracle Support needs. The IPS workflow ensures completeness.
+1. **Oracle Support 向けの診断パッケージ作成には必ず `adrci` を使用すること。** トレース・ファイルを個別に手動で ZIP 圧縮すると、Oracle Support が必要とするメタデータ、XML アラート・ログの抜粋、および関連データが欠落する。IPS ワークフローを使用することで、情報の完全性が保証される。
 
-2. **Set up automatic purging.** Without regular purging, the ADR can consume tens or hundreds of gigabytes on a busy system. Schedule a weekly `PURGE` command and consider lowering retention for trace files if disk is constrained.
+2. **自動パージを設定すること。** 定期的なパージを行わないと、稼働率の高いシステムでは ADR が数十から数百 GB を消費することがある。週次の `PURGE` コマンドをスケジュールし、ディスク容量が厳しい場合はトレース・ファイルの保持期間を短縮することを検討する。
 
-3. **Use the `-F` option with `-TAIL` during live troubleshooting.** `SHOW ALERT -TAIL 20 -F` is the `adrci` equivalent of `tail -f` and is more reliable because it reads from the XML format, not a file descriptor that might roll over.
+3. **リアルタイムのトラブルシューティングには `SHOW ALERT -TAIL -F` を使用すること。** これは `tail -f` の `adrci` 版であり、ローテートされる可能性のあるファイル記述子ではなく、XML 形式から読み取るため、より信頼性が高い。
 
-4. **Always note the incident ID when an ORA-00600 or ORA-07445 occurs.** The incident ID links the alert log entry to the trace file directory, simplifying later analysis and IPS packaging.
+4. **ORA-00600 や ORA-07445 が発生した際は、必ずインシデント ID を控えること。** インシデント ID は、アラート・ログのエントリとトレース・ファイル・ディレクトリを紐付けるため、その後の分析や IPS パッケージ作成を容易にする。
 
-5. **Use predicates to filter, not post-processing tools like grep.** `adrci` predicates operate on indexed metadata, making them faster and more precise than text-searching the raw log file.
+5. **grep などの外部ツールではなく、述語 (Predicates) を使用してフィルタリングすること。** `adrci` の述語はインデックス化されたメタデータに対して動作するため、生のログ・ファイルをテキスト検索するよりも高速かつ正確である。
 
-6. **Correlate incidents before packaging.** Use `IPS CREATE PACKAGE INCIDENT <id> CORRELATE ALL` so that related incidents from the same root cause are included in the support package—this often speeds up Oracle Support resolution significantly.
+6. **パッケージ化する前にインシデントを関連付けること。** `IPS CREATE PACKAGE INCIDENT <id> CORRELATE ALL` を使用して、同じ根本原因に関連するインシデントをサポート・パッケージに含めるようにする。これにより、Oracle Support による解決が大幅に早まることが多い。
 
-7. **Monitor the ADR disk usage.** Include `$ADR_HOME` in your disk space monitoring. A flood of incidents (e.g., from a recurring ORA-00600) can fill the file system in hours.
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Mistake: Running `adrci` without setting the correct home.**
-If multiple homes exist and you do not call `SET HOMEPATH`, `adrci` either uses the first found home or queries all of them. Explicitly set the home at the start of every `adrci` session or script.
-
-**Mistake: Manually deleting trace files from the OS.**
-Deleting files from `$ADR_HOME/trace/` or `$ADR_HOME/incident/` directly bypasses ADR metadata, leaving orphaned entries that cause `adrci` errors. Always use `PURGE` inside `adrci`.
-
-**Mistake: Creating an IPS package without `CORRELATE ALL`.**
-The minimal package (`CORRELATE BASIC` or no correlation) often misses critical trace files from related background processes. Always use `CORRELATE ALL` when the issue is unclear.
-
-**Mistake: Not specifying `IN /path` for `IPS GENERATE`.**
-Without a target path, the ZIP file is created in the current directory, which may not have enough space or may be a temporary location that gets cleaned up. Always specify an explicit destination path with sufficient free space.
-
-**Mistake: Assuming `SHOW ALERT` shows real-time data.**
-`adrci` reads from the XML alert log, which is updated synchronously with the text log. However, on very high-activity systems, there can be a brief lag. For live monitoring, use `SHOW ALERT -TAIL -F` or poll with a short-interval script.
-
-**Mistake: Forgetting that `PURGE -AGE` uses minutes, not days.**
-`PURGE -AGE 30` purges data older than 30 minutes, not 30 days. Convert: 30 days = 43,200 minutes. Always double-check the unit before running purge commands in production.
-
-**Mistake: Confusing `PURGE -AGE` units with `SET CONTROL` units.**
-`PURGE -AGE` is in **minutes**; `SET CONTROL (SHORTP_POLICY/LONGP_POLICY)` is in **hours**. These are different units for two different commands.
+7. **ADR のディスク使用量を監視すること。** ディスク容量の監視対象に `$ADR_HOME` を含める。インシデントが大量発生（例：再発する ORA-00600 など）した場合、数時間でファイル・システムがいっぱいになる可能性がある。
 
 ---
 
+## よくある間違いと回避方法
 
-## Oracle Version Notes (19c vs 26ai)
+**間違い: 正しいホームを設定せずに `adrci` を実行する。**
+複数のホームが存在し、`SET HOMEPATH` を実行しなかった場合、`adrci` は最初に見つかったホームを使用するか、すべてのホームをクエリする。すべての `adrci` セッションまたはスクリプトの最初で、明示的にホームを設定することを推奨する。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+**間違い: OS から手動でトレース・ファイルを削除する。**
+`$ADR_HOME/trace/` または `$ADR_HOME/incident/` から直接ファイルを削除すると、ADR のメタデータをバイパスすることになり、`adrci` でエラーを引き起こす孤立したエントリが残ってしまう。削除には必ず `adrci` 内の `PURGE` を使用すること。
 
-## Sources
+**間違い: `CORRELATE ALL` を指定せずに IPS パッケージを作成する。**
+最小限のパッケージ（`CORRELATE BASIC` または関連付けなし）では、関連するバックグラウンド・プロセスからの重要なトレース・ファイルが漏れることが多い。原因が不明確な場合は、常に `CORRELATE ALL` を使用すること。
+
+**間違い: `IPS GENERATE` で `IN /path` を指定し忘れる。**
+出力先パスを指定しない場合、ZIP ファイルは現在のディレクトリに作成される。現在のディレクトリに十分な空き容量がない場合や、一時的な場所で後に削除される可能性がある。常に十分な空き容量のある明示的な保存先パスを指定すること。
+
+**間違い: `SHOW ALERT` がリアルタイムのデータを表示していると思い込む。**
+`adrci` は XML アラート・ログから読み取る。XML ログはテキスト・ログと同期して更新されるが、非常に負荷の高いシステムでは、わずかな遅延が発生する場合がある。ライブ監視には `SHOW ALERT -TAIL -F` を使用するか、短期間の間隔で実行するスクリプトを使用すること。
+
+**間違い: `PURGE -AGE` の単位を分ではなく日と勘違いする。**
+`PURGE -AGE 30` は、30 日ではなく 30 分より古いデータをパージする。30 日を分に換算すると 43,200 分である。本番環境でパージ・コマンドを実行する前に、必ず単位を再確認すること。
+
+**間違い: `PURGE -AGE` の単位と `SET CONTROL` の単位を混同する。**
+`PURGE -AGE` は **分** 単位だが、`SET CONTROL (SHORTP_POLICY/LONGP_POLICY)` は **時間** 単位である。これらは異なるコマンドの異なる単位である。
+
+---
+
+## Oracle バージョンに関する注意 (19c vs 26ai)
+
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c/23c 以降の機能は、Oracle Database 26ai 対応機能として扱う。
+- 19c と 26ai では、リリース更新によってデフォルト設定や非推奨機能が異なる場合があるため、両方の環境をサポートする場合は構文とパッケージの動作をテストすること。
+
+## ソース
 
 - [Oracle Database 19c Administrator's Guide — Managing Diagnostic Data](https://docs.oracle.com/en/database/oracle/oracle-database/19/admin/diagnosing-and-resolving-problems.html)
 - [Oracle Database 19c Utilities — ADRCI: ADR Command Interpreter](https://docs.oracle.com/en/database/oracle/oracle-database/19/sutil/oracle-adr-command-interpreter-adrci.html)

@@ -1,61 +1,61 @@
 ---
 name: oracle-db-skills
-description: 102 Oracle Database reference guides covering SQL, PL/SQL, performance tuning, security, ORDS, SQLcl, migrations, and more. Load individual skill files on demand for expert guidance on any Oracle topic.
+description: SQL、PL/SQL、パフォーマンス・チューニング、セキュリティ、ORDS、SQLcl、移行など、102のOracle Databaseリファレンス・ガイドが含まれています。個々のスキル・ファイルをオンデマンドでロードし、Oracleの各トピックに関する専門的なガイダンスを得ることができます。
 ---
 
 # Oracle DB Skills
 
-A collection of 102 standalone reference guides for Oracle Database. Each file covers one topic with explanations, practical examples, best practices, and common mistakes.
+Oracle Databaseに関する102の独立したリファレンス・ガイドのコレクションです。各ファイルは1つのトピックを扱い、解説、実用的な例、ベスト・プラクティス、およびよくある間違いを網羅しています。
 
-## How to Use
+## 使用方法
 
-1. **Find the right skill** using the category routing table below.
-2. **Read only the file(s)** relevant to the user's task — do not load all files at once.
-3. **Apply the guidance** to answer questions, generate code, or review existing work.
+1. 以下のカテゴリ・ルーティング表を使用して、**適切なスキルを見つけます**。
+2. ユーザーのタスクに関連する**ファイルのみを読み取ります**。すべてのファイルを一度にロードしないでください。
+3. 質問への回答、コードの生成、または既存作業のレビューに**ガイダンスを適用します**。
 
-## Category Routing
+## カテゴリ・ルーティング
 
-| User asks about… | Read from |
+| ユーザーの質問内容 | 読み取り先 |
 |------------------|-----------|
-| Backup, recovery, RMAN, Data Guard, redo/undo logs, users | `skills/admin/` |
-| JDBC, connection pooling, JSON, XML, spatial, full-text, transactions | `skills/appdev/` |
-| RAC, CDB/PDB, Exadata, In-Memory, OCI, ATP/ADW | `skills/architecture/` |
-| ERD, data modeling, partitioning, tablespaces | `skills/design/` |
-| Liquibase, Flyway, online operations, EBR, utPLSQL, git for SQL | `skills/devops/` |
-| Advanced Queuing, DBMS_SCHEDULER, materialized views, DBLinks, APEX | `skills/features/` |
-| Migrating from PostgreSQL, MySQL, SQL Server, MongoDB, etc. | `skills/migrations/` |
-| Alert log, ADR, adrci, space, top SQL, health checks | `skills/monitoring/` |
-| ORDS, REST APIs, OAuth2, AutoREST, PL/SQL gateway | `skills/ords/` |
-| AWR, ASH, explain plan, indexes, optimizer stats, wait events, memory | `skills/performance/` |
-| Packages, cursors, collections, error handling, unit testing, debugging | `skills/plsql/` |
-| Privileges, VPD, TDE, encryption, auditing, network security | `skills/security/` |
-| SQL patterns, window functions, CTEs, dynamic SQL, injection | `skills/sql-dev/` |
-| SQLcl commands, scripting, Liquibase CLI, MCP server, CI/CD | `skills/sqlcl/` |
+| バックアップ、リカバリ、RMAN、Data Guard、REDO/UNDOログ、ユーザー | `skills/admin/` |
+| JDBC、接続プール、JSON、XML、空間データ、全文検索、トランザクション | `skills/appdev/` |
+| RAC、CDB/PDB、Exadata、インメモリー、OCI、ATP/ADW | `skills/architecture/` |
+| ERD、データ・モデリング、パーティショニング、表領域 | `skills/design/` |
+| Liquibase、Flyway、オンライン操作、EBR、utPLSQL、SQL用git | `skills/devops/` |
+| アドバンスト・キューイング、DBMS_SCHEDULER、マテリアライズド・ビュー、DBリンク、APEX | `skills/features/` |
+| PostgreSQL、MySQL、SQL Server、MongoDBなどからの移行 | `skills/migrations/` |
+| アラートログ、ADR、adrci、領域管理、トップSQL、ヘルスチェック | `skills/monitoring/` |
+| ORDS、REST API、OAuth2、AutoREST、PL/SQLゲートウェイ | `skills/ords/` |
+| AWR、ASH、実行計画、索引、オプティマイザ統計、待機イベント、メモリー | `skills/performance/` |
+| パッケージ、カーソル、コレクション、エラー処理、ユニット・テスト、デバッグ | `skills/plsql/` |
+| 権限、VPD、TDE、暗号化、監査、ネットワーク・セキュリティ | `skills/security/` |
+| SQLパターン、分析関数、CTE、動的SQL、インジェクション対策 | `skills/sql-dev/` |
+| SQLclコマンド、スクリプト、Liquibase CLI、MCPサーバー、CI/CD | `skills/sqlcl/` |
 
-## Skills Directory
+## スキル・ディレクトリ
 
 ```
 skills/
-├── admin/          Database administration (backup, recovery, users, redo/undo)
-├── appdev/         Application development (JSON, XML, spatial, text, pooling)
-├── architecture/   Infrastructure (RAC, Multitenant, Exadata, In-Memory, OCI)
-├── design/         Schema design (ERD, modeling, partitioning, tablespaces)
-├── devops/         CI/CD and DevOps (migrations, EBR, testing, version control)
-├── features/       Oracle features (AQ, Scheduler, MVs, DBLinks, APEX)
-├── migrations/     Migrating from other databases to Oracle
-├── monitoring/     Diagnostics (alert log, ADR, health, space, top SQL)
+├── admin/          データベース管理 (バックアップ、リカバリ、ユーザー、REDO/UNDO)
+├── appdev/         アプリケーション開発 (JSON、XML、空間データ、テキスト、プール)
+├── architecture/   インフラストラクチャ (RAC、マルチテナント、Exadata、インメモリー、OCI)
+├── design/         スキーマ設計 (ERD、モデリング、パーティショニング、表領域)
+├── devops/         CI/CDとDevOps (移行、EBR、テスト、バージョン管理)
+├── features/       Oracleの機能 (AQ、Scheduler、MV、DBリンク、APEX)
+├── migrations/     他データベースからOracleへの移行
+├── monitoring/     診断 (アラートログ、ADR、ヘルスチェック、領域、トップSQL)
 ├── ords/           Oracle REST Data Services
-├── performance/    Tuning (AWR, ASH, indexes, optimizer, wait events, memory)
-├── plsql/          PL/SQL development (packages, cursors, collections, testing)
-├── security/       Security (privileges, VPD, TDE, auditing, network)
-├── sql-dev/        SQL development (tuning, patterns, dynamic SQL, injection)
-└── sqlcl/          SQLcl CLI tool (basics, scripting, Liquibase, MCP server)
+├── performance/    チューニング (AWR、ASH、索引、オプティマイザ、待機イベント、メモリー)
+├── plsql/          PL/SQL開発 (パッケージ、カーソル、コレクション、テスト)
+├── security/       セキュリティ (権限、VPD、TDE、監査、ネットワーク)
+├── sql-dev/        SQL開発 (チューニング、パターン、動的SQL、インジェクション)
+└── sqlcl/          SQLcl CLIツール (基本、スクリプト、Liquibase、MCPサーバー)
 ```
 
-## Key Starting Points
+## 主要な開始ポイント
 
-- **`skills/sqlcl/sqlcl-mcp-server.md`** — connecting AI assistants to Oracle via the SQLcl MCP server
-- **`skills/migrations/migration-assessment.md`** — start here for any database migration project
-- **`skills/performance/explain-plan.md`** — foundation for all SQL performance work
-- **`skills/plsql/plsql-package-design.md`** — foundation for PL/SQL architecture questions
-- **`skills/devops/schema-migrations.md`** — Liquibase/Flyway with Oracle in CI/CD pipelines
+- **`skills/sqlcl/sqlcl-mcp-server.md`** — SQLcl MCPサーバー経由でのAIアシスタントのOracle接続
+- **`skills/migrations/migration-assessment.md`** — データベース移行プロジェクトの開始点
+- **`skills/performance/explain-plan.md`** — すべてのSQLパフォーマンス作業の基礎
+- **`skills/plsql/plsql-package-design.md`** — PL/SQLアーキテクチャに関する質問の基礎
+- **`skills/devops/schema-migrations.md`** — CI/CDパイプラインでのLiquibase/FlywayとOracleの活用

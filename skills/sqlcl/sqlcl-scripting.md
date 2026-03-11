@@ -1,20 +1,20 @@
-# SQLcl Scripting with JavaScript
+# JavaScriptによるSQLclスクリプティング
 
-## Overview
+## 概要
 
-SQLcl includes a built-in JavaScript engine that allows you to write scripts that combine JavaScript logic with SQL execution. This makes it possible to build sophisticated automation workflows entirely within SQLcl, without external tools or programming languages. You can iterate over query results, manipulate data, write files, call Java libraries, and orchestrate complex multi-step database operations from a single script.
+SQLclにはJavaScriptエンジンが組み込まれており、JavaScriptのロジックとSQLの実行を組み合わせたスクリプトを記述できます。これにより、外部ツールや他のプログラミング言語を使用することなく、高度な自動化ワークフローをSQLcl内だけで構築することが可能になります。クエリ結果の反復処理、データの加工、ファイルの書き出し、Javaライブラリの呼び出し、さらには複雑な多段階のデータベース操作のオーケストレーションを、単一のスクリプトから実行できます。
 
-The JavaScript engine used by SQLcl depends on your Java runtime. When running on Java 11 with the bundled Nashorn engine, ES5 syntax is supported. When running on Java 17 or later (the requirement for SQLcl 25.2+), Nashorn is no longer included in the JDK; JavaScript support requires installing the Oracle GraalVM JavaScript Runtime Plugin or running on GraalVM, which provides GraalJS with full ECMAScript 2021+ support. In SQLcl 22.1, running JavaScript on Java 17 required the GraalVM JavaScript plugin.
+SQLclで使用されるJavaScriptエンジンは、Javaランタイムに依存します。Nashornエンジンが同梱されているJava 11で実行する場合、ES5構文がサポートされます。Java 17以降で実行する場合（SQLcl 25.2+ の要件）、NashornはJDKに含まれなくなりました。JavaScriptサポートを利用するには、Oracle GraalVM JavaScript Runtimeプラグインをインストールするか、GraalVM上で実行する必要があります。これにより、ECMAScript 2021+ を完全にサポートするGraalJSが提供されます。SQLcl 22.1では、Java 17でJavaScriptを実行するためにGraalVM JavaScriptプラグインが必要でした。
 
-> ⚠️ Unverified: The exact SQLcl release version (22.x) at which the default engine switched to GraalJS for all users — the transition depends on the JDK in use, not just the SQLcl version. Verify with `script` and check which engine is active in your environment.
+> ⚠️ 未検証：すべてのユーザーにおいてデフォルトのエンジンがGraalJSに切り替わった正確なSQLclリリースのバージョン（22.x）。移行はSQLclのバージョンだけでなく、使用されているJDKにも依存します。`script` コマンドで確認し、お使いの環境でどのエンジンがアクティブかチェックしてください。
 
 ---
 
-## The `script` Command
+## scriptコマンド
 
-The `script` command is the entry point for JavaScript execution in SQLcl. There are two modes:
+`script` コマンドは、SQLclでJavaScriptを実行するためのエントリ・ポイントです。2つのモードがあります。
 
-### Inline Script (Interactive)
+### インライン・スクリプト（対話型）
 
 ```sql
 script
@@ -23,21 +23,21 @@ print(result);
 /
 ```
 
-The block is terminated by a line containing only `/`.
+ブロックは、`/` のみの行で終了します。
 
-### Script File
+### スクリプト・ファイル
 
 ```sql
 script /path/to/myscript.js
 ```
 
-Or from the command line:
+またはコマンドラインから：
 
 ```shell
-sql username/password@service @script.sql
+sql ユーザー名/パスワード@サービス名 @script.sql
 ```
 
-Where `script.sql` contains:
+ここで、`script.sql` には以下が含まれます。
 
 ```sql
 script /path/to/myscript.js
@@ -46,71 +46,71 @@ exit
 
 ---
 
-## The `ctx` Object and Implicit Globals
+## ctxオブジェクトと暗黙のグローバル変数
 
-SQLcl exposes several global objects inside the JavaScript engine:
+SQLclはJavaScriptエンジン内にいくつかのグローバル・オブジェクトを公開しています。
 
-| Object | Description |
+| オブジェクト | 説明 |
 |---|---|
-| `ctx` | The SQLcl context object (primary API) |
-| `util` | Utility functions for query execution and output |
-| `args` | Array of command-line arguments passed to the script |
-| `print()` | Write a line to standard output |
-| `sqlcl` | Alias for `ctx` in some versions |
+| `ctx` | SQLclコンテキスト・オブジェクト（プライマリAPI） |
+| `util` | クエリの実行と出力のためのユーティリティ関数 |
+| `args` | スクリプトに渡されたコマンドライン引数の配列 |
+| `print()` | 標準出力に1行書き出す |
+| `sqlcl` | 一部のバージョンにおける `ctx` のエイリアス |
 
-The `ctx` object is the main interface. Key methods:
+`ctx` オブジェクトがメイン・インターフェースです。主なメソッドは以下の通りです。
 
 ```javascript
-ctx.write("text\n");                    // Write to output (no newline added)
-ctx.getOutputStream();                  // Get raw output stream
-ctx.getProperty("sqlcl.version");       // Read SQLcl internal properties
+ctx.write("text\n");                    // 出力への書き出し（改行は自動追加されません）
+ctx.getOutputStream();                  // 生の出力ストリームを取得
+ctx.getProperty("sqlcl.version");       // SQLclの内部プロパティを読み取る
 ```
 
-The `util` object provides the most commonly used functions:
+`util` オブジェクトは、最も頻繁に使用される関数を提供します。
 
 ```javascript
-util.execute("SQL statement");           // Execute DML/DDL, returns void
-util.executeQuery("SELECT ...");         // Execute query, returns ResultSet-like object
-util.executeReturnListofList("SELECT ...");  // Returns array of arrays
-util.executeReturnList("SELECT ...");    // Returns array of row objects
-util.print("line\n");                    // Print to output
-util.getConnection();                    // Get the underlying JDBC connection
+util.execute("SQL statement");           // DML/DDLを実行、戻り値はなし（void）
+util.executeQuery("SELECT ...");         // クエリを実行、ResultSetに似たオブジェクトを返す
+util.executeReturnListofList("SELECT ...");  // 配列の配列（2次元配列）を返す
+util.executeReturnList("SELECT ...");    // 行オブジェクトの配列を返す
+util.print("line\n");                    // 出力にプリント
+util.getConnection();                    // 基盤となるJDBC接続を取得
 ```
 
 ---
 
-## Running SQL from JavaScript
+## JavaScriptからのSQLの実行
 
-### Execute DML or DDL
+### DMLまたはDDLの実行
 
 ```javascript
-// Execute any statement that does not return rows
+// 行を返さないステートメントを実行
 util.execute("CREATE TABLE temp_log (id NUMBER, msg VARCHAR2(200))");
 util.execute("INSERT INTO temp_log VALUES (1, 'Test message')");
 util.execute("COMMIT");
 util.execute("DROP TABLE temp_log PURGE");
 ```
 
-### Execute a Query and Iterate Results
+### クエリの実行と結果の反復処理
 
-The most common pattern uses `executeReturnListofList`, which returns a 2D JavaScript array:
+最も一般的なパターンは `executeReturnListofList` を使用する方法で、JavaScriptの2次元配列が返されます。
 
 ```javascript
 var rows = util.executeReturnListofList("SELECT table_name, num_rows FROM user_tables ORDER BY 1");
 
-// Row 0 is the column headers
+// 0行目は列ヘッダー
 var headers = rows[0];
 print(headers.join("\t"));
 
-// Rows 1+ are data
+// 1行目以降がデータ
 for (var i = 1; i < rows.length; i++) {
     print(rows[i].join("\t"));
 }
 ```
 
-### Execute a Query as Named Objects
+### 名前付きオブジェクトとしてのクエリ実行
 
-`executeReturnList` returns an array of objects with named properties:
+`executeReturnList` は、列名（プロパティ名）を持つオブジェクトの配列を返します。
 
 ```javascript
 var rows = util.executeReturnList("SELECT employee_id, first_name, last_name, salary FROM employees WHERE department_id = 90");
@@ -121,11 +121,11 @@ for (var i = 0; i < rows.length; i++) {
 }
 ```
 
-Note: Column names are always uppercase in the returned objects.
+注：返されるオブジェクトのプロパティ名（列名）は常に大文字になります。
 
-### Bind Variables in Queries
+### クエリ内でのバインド変数
 
-Use the JDBC-style `?` placeholder with an array of bind values:
+JDBCスタイルの `?` プレースホルダーと、バインド値の配列を使用します。
 
 ```javascript
 var deptId = 50;
@@ -140,21 +140,21 @@ for (var i = 1; i < rows.length; i++) {
 
 ---
 
-## Accessing Java Classes from JavaScript
+## JavaScriptからのJavaクラスへのアクセス
 
-Nashorn and GraalJS both allow you to instantiate Java classes directly:
+NashornとGraalJSはいずれも、Javaのクラスを直接インスタンス化できます。
 
 ```javascript
-// Import Java classes
+// Javaクラスのインポート
 var File       = Java.type("java.io.File");
 var FileWriter = Java.type("java.io.FileWriter");
 var ArrayList  = Java.type("java.util.ArrayList");
 
-// Check if a file exists
+// ファイルの存在確認
 var f = new File("/tmp/myfile.txt");
 print("Exists: " + f.exists());
 
-// Read a file line by line
+// ファイルを1行ずつ読み込む
 var BufferedReader = Java.type("java.io.BufferedReader");
 var FileReader     = Java.type("java.io.FileReader");
 var br = new BufferedReader(new FileReader("/tmp/input.csv"));
@@ -167,9 +167,9 @@ br.close();
 
 ---
 
-## Reading and Writing Files
+## ファイルの読み書き
 
-### Writing a File
+### ファイルへの書き出し
 
 ```javascript
 var FileWriter     = Java.type("java.io.FileWriter");
@@ -189,7 +189,7 @@ bw.close();
 print("Report written to: " + outputPath);
 ```
 
-### Reading a File
+### ファイルの読み込み
 
 ```javascript
 var Files   = Java.type("java.nio.file.Files");
@@ -199,13 +199,13 @@ var content = new java.lang.String(Files.readAllBytes(Paths.get("/tmp/input.sql"
 print(content);
 ```
 
-### Appending to a File
+### ファイルへの追記
 
 ```javascript
 var FileWriter     = Java.type("java.io.FileWriter");
 var BufferedWriter = Java.type("java.io.BufferedWriter");
 
-// Second argument `true` enables append mode
+// 第2引数の `true` は追記モードを有効にします
 var bw = new BufferedWriter(new FileWriter("/tmp/audit.log", true));
 bw.write(new java.util.Date() + " - Operation completed\n");
 bw.close();
@@ -213,19 +213,19 @@ bw.close();
 
 ---
 
-## Practical Automation Examples
+## 実用的な自動化の例
 
-### Schema Object Inventory Report
+### スキーマ・オブジェクト目録レポート
 
 ```javascript
 // schema_inventory.js
-// Produces a CSV report of all user objects with status and size info
+// すべてのユーザー・オブジェクトのステータスとサイズ情報を含むCSVレポートを生成
 
 var FileWriter     = Java.type("java.io.FileWriter");
 var BufferedWriter = Java.type("java.io.BufferedWriter");
 var bw = new BufferedWriter(new FileWriter("/tmp/schema_inventory.csv"));
 
-// Header
+// ヘッダー
 bw.write("OBJECT_TYPE,OBJECT_NAME,STATUS,LAST_DDL_TIME\n");
 
 var sql = "SELECT object_type, object_name, status, " +
@@ -246,11 +246,11 @@ print("Schema inventory written to /tmp/schema_inventory.csv");
 print("Total objects: " + (rows.length - 1));
 ```
 
-### Data Export to JSON
+### JSONへのデータ・エクスポート
 
 ```javascript
 // export_to_json.js
-// Export a table to a JSON file
+// 表の内容をJSONファイルにエクスポート
 
 var table  = "EMPLOYEES";
 var output = "/tmp/employees.json";
@@ -275,7 +275,7 @@ for (var i = 0; i < rows.length; i++) {
         } else if (typeof val === "number") {
             parts.push('"' + key + '": ' + val);
         } else {
-            // Escape quotes in string values
+            // 文字列値内のダブルクォーテーションをエスケープ
             var escaped = String(val).replace(/"/g, '\\"');
             parts.push('"' + key + '": "' + escaped + '"');
         }
@@ -291,17 +291,17 @@ bw.close();
 print("Exported " + rows.length + " rows to " + output);
 ```
 
-### Batch Update with Progress Reporting
+### 進捗レポート付きの一括更新
 
 ```javascript
 // batch_update.js
-// Process rows in batches and report progress
+// 行をバッチ単位で処理し、進捗をレポート
 
 var batchSize = 1000;
 var processed = 0;
 var errors    = 0;
 
-// Get IDs to process
+// 処理対象のIDを取得
 var ids = util.executeReturnListofList(
     "SELECT id FROM orders WHERE status = 'PENDING' AND ROWNUM <= 10000"
 );
@@ -323,16 +323,16 @@ for (var i = 1; i < ids.length; i++) {
     }
 }
 
-// Final commit
+// 最終コミット
 util.execute("COMMIT");
 print("Done. Processed: " + processed + " | Errors: " + errors);
 ```
 
-### Dynamic DDL Generation
+### 動的なDDL生成
 
 ```javascript
 // gen_ddl.js
-// Generate CREATE TABLE DDL for all tables with a specific prefix
+// 特定の接頭辞を持つすべての表の CREATE TABLE DDL を生成
 
 var prefix = args.length > 0 ? args[0] : "APP_";
 var outFile = "/tmp/ddl_" + prefix + ".sql";
@@ -347,7 +347,7 @@ var tables = util.executeReturnListofList(
 
 for (var i = 1; i < tables.length; i++) {
     var tname = tables[i][0];
-    // Use the SQLcl DDL command by executing it through the context
+    // コンテキストを通じて SQLcl の DDL コマンドを実行
     var ddlRows = util.executeReturnListofList("SELECT DBMS_METADATA.GET_DDL('TABLE', '" + tname + "') AS ddl FROM DUAL");
     if (ddlRows.length > 1) {
         bw.write("-- Table: " + tname + "\n");
@@ -360,11 +360,11 @@ bw.close();
 print("DDL written to " + outFile);
 ```
 
-### Email-style HTML Report
+### Eメール・スタイルのHTMLレポート
 
 ```javascript
 // html_report.js
-// Generate an HTML summary of database health metrics
+// データベースのヘルス・メトリクスのHTMLサマリーを生成
 
 var outFile = "/tmp/db_health.html";
 var FileWriter     = Java.type("java.io.FileWriter");
@@ -382,7 +382,7 @@ function writeRow(bw, cells) {
 bw.write("<html><body><h1>Database Health Report</h1>\n");
 bw.write("<p>Generated: " + new java.util.Date() + "</p>\n");
 
-// Invalid objects
+// 無効なオブジェクト
 bw.write("<h2>Invalid Objects</h2>\n");
 bw.write("<table border='1'><tr><th>Type</th><th>Name</th><th>Status</th></tr>\n");
 var invalid = util.executeReturnListofList(
@@ -405,26 +405,26 @@ print("Report written to " + outFile);
 
 ---
 
-## Calling Scripts from the Command Line
+## コマンドラインからのスクリプトの呼び出し
 
-### Passing a Script via SQL wrapper file
+### SQLラッパー・ファイルを介したスクリプトの実行
 
-Create `run_script.sql`:
+`run_script.sql` を作成します：
 
 ```sql
 script /path/to/myscript.js
 exit
 ```
 
-Then run:
+実行：
 
 ```shell
-sql username/password@service @run_script.sql
+sql ユーザー名/パスワード@サービス名 @run_script.sql
 ```
 
-### Passing Arguments to JavaScript
+### JavaScriptへの引数の渡し方
 
-Arguments passed after the script file name are available in the `args` array:
+スクリプト・ファイル名の後に渡された引数は、`args` 配列で利用できます。
 
 ```sql
 -- run_export.sql
@@ -433,17 +433,17 @@ exit
 ```
 
 ```shell
-sql username/password@service @run_export.sql
+sql ユーザー名/パスワード@サービス名 @run_export.sql
 ```
 
-To pass arguments into the JS script itself, define them as SQL substitution variables and reference `&1` etc. in the JS:
+JavaScriptスクリプト自体に引数を渡すには、それらをSQLの置換変数として定義し、JS内で `&1` などを参照します。
 
 ```javascript
-// In JS, read a substitution variable set by SQL
-var tableName = "EMPLOYEES"; // hard-coded or read from args
+// JS内で、SQLで設定された置換変数を読み込む
+var tableName = "EMPLOYEES"; // ハードコードするか、引数から読み込む
 ```
 
-A cleaner approach is to set `DEFINE` variables before calling the script:
+よりクリーンな方法は、スクリプトを呼び出す前に `DEFINE` 変数を設定することです。
 
 ```sql
 -- caller.sql
@@ -453,52 +453,52 @@ script /path/to/export.js
 exit
 ```
 
-Then in JavaScript:
+JavaScript内：
 
 ```javascript
-// These come through because SQLcl performs substitution before passing to JS
-// Or use ctx to get defined variables
+// SQLcl が JS に渡す前に置換を実行するため、これらの値が渡されます。
+// または ctx を使用して定義済み変数を取得します。
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- Always close file handles (`bw.close()` / `br.close()`) inside the script. JavaScript in SQLcl does not have automatic resource management equivalent to Java's try-with-resources, so unclosed handles can leak resources.
-- Use `util.executeReturnListofList` when you need to process column headers alongside data. Use `util.executeReturnList` when you want named field access and do not need the header row.
-- Keep business logic in JavaScript and data access in SQL. Avoid building complex SQL strings through string concatenation where possible; use parameterized queries with `?` bind variables to prevent SQL injection.
-- For long-running scripts, commit in batches (every 500–1000 rows) to avoid large undo segments and reduce lock contention.
-- Wrap individual row operations in try/catch blocks in batch scripts so one failure does not abort the entire run.
-- Test scripts interactively with small row counts before running against full production datasets. Use `WHERE ROWNUM <= 10` during development.
-- For GraalJS environments (requires GraalVM or the GraalVM JavaScript plugin on Java 17+), you can use modern JS features like `let`, `const`, arrow functions, template literals, and `for...of` loops. On Nashorn (Java 11 only), stick to ES5.
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Mistake: Column names accessed in lowercase**
-`executeReturnList` returns objects with UPPERCASE column names. `row.first_name` will be `undefined`; use `row.FIRST_NAME`.
-
-**Mistake: Forgetting the `/` terminator after inline script block**
-An inline `script` block must be closed with a `/` on its own line. Missing this causes SQLcl to wait for more input indefinitely.
-
-**Mistake: Using `var result = util.execute(...)` and checking the return value**
-`util.execute()` returns void for DML/DDL. Use `util.executeReturnListofList` or `util.executeReturnList` when you need result data.
-
-**Mistake: Not handling NULL values in result sets**
-NULL columns in query results come back as JavaScript `null`. String concatenation with null produces the string `"null"`. Always check `if (val !== null)` before using values.
-
-**Mistake: Large result sets in memory**
-`executeReturnListofList` and `executeReturnList` load the entire result set into a JavaScript array. For tables with millions of rows, this will exhaust memory. Process in batches using `WHERE ROWNUM <= N` or cursor-based approaches using the raw JDBC connection.
-
-**Mistake: JS engine version assumptions**
-Scripts written for GraalJS using `const`, arrow functions, or `for...of` will fail on SQLcl with Nashorn (Java 11). Use ES5 syntax for maximum portability, or verify your Java runtime and install the GraalVM JavaScript plugin if needed (required for Java 17+).
+- スクリプト内では必ずファイル・ハンドル（`bw.close()` / `br.close()`）を閉じてください。SQLclのJavaScriptにはJavaのtry-with-resourcesに相当する自動リソース管理がないため、閉じられていないハンドルはリソース・リークの原因になります。
+- データとともに列ヘッダーも処理する必要がある場合は `util.executeReturnListofList` を選択してください。名前付きフィールド・アクセスが必要で、ヘッダー行が不要な場合は `util.executeReturnList` を使用してください。
+- ビジネス・ロジックはJavaScriptで、データ・アクセスはSQLで記述するように役割を分けてください。文字列連結による複雑なSQL文の構築は避け、SQLインジェクションを防ぐために `?` バインド変数を使用したパラメータ化クエリを使用してください。
+- 長時間実行されるスクリプトでは、大規模なアンドゥ・セグメントを回避し、ロック競合を減らすために、バッチ（500〜1000行ごとなど）でコミットしてください。
+- バッチ・スクリプト内での個々の行操作はtry/catchブロックで囲み、1つの行の失敗によって全体の実行が中断されないようにしてください。
+- 本番のデータセットに対してスクリプトを実行する前に、まずは少数の行数でインタラクティブにテストしてください。開発時は `WHERE ROWNUM <= 10` などの条件を付けてください。
+- GraalJS環境（Java 17+ で GraalVM または GraalVM JavaScriptプラグインが必要）では、`let`, `const`, アロー関数, テンプレート・リテラル, `for...of` ループなどの最新のJS機能を使用できます。Nashorn（Java 11のみ）では、ES5構文を使用してください。
 
 ---
 
-## Sources
+## よくある間違いと回避策
 
-- [Oracle oracle-db-tools SQLcl Scripting Guide (GitHub)](https://github.com/oracle/oracle-db-tools/blob/master/sqlcl/SCRIPTING.md)
-- [How to run JavaScript in Oracle SQLcl with Java 17 — ThatJeffSmith](https://www.thatjeffsmith.com/archive/2022/04/running-javascript-in-oracle-sqlcl-22-1/)
-- [Oracle SQLcl 25.2 User's Guide](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/oracle-sqlcl-users-guide.pdf)
-- [SQLcl Release Notes 25.2.1 — Java 17/21 requirement](https://www.oracle.com/tools/sqlcl/sqlcl-relnotes-25.2.1.html)
+**間違い：小文字で列名にアクセスしようとする**
+`executeReturnList` は、大文字の列名を持つオブジェクトを返します。`row.first_name` は `undefined` になります。必ず `row.FIRST_NAME` を使用してください。
+
+**間違い：インライン・スクリプト・ブロックの後の `/` ターミネータを忘れる**
+インラインの `script` ブロックは、独立した行の `/` で閉じる必要があります。これを忘れると、SQLclは無期限に入力を待ち続けます。
+
+**間違い：`util.execute(...)` の戻り値を結果変数としてチェックしようとする**
+`util.execute()` は、DML/DDLに対して戻り値なし（void）を返します。クエリ結果データが必要な場合は、`util.executeReturnListofList` または `util.executeReturnList` を使用してください。
+
+**間違い：結果セット内の NULL 値を処理しない**
+クエリ結果の NULL 列は、JavaScript では `null` として返されます。null と文字列を連結すると `"null"` という文字列になります。値を使用する前に、必ず `if (val !== null)` でチェックしてください。
+
+**間違い：メモリー内に巨大な結果セットを読み込もうとする**
+`executeReturnListofList` および `executeReturnList` は、結果セット全体を JavaScript 配列に読み込みます。数百万行の表の場合、メモリーが不足します。`WHERE ROWNUM <= N` を使用してバッチ処理するか、生の JDBC 接続を使用してカーソル・ベースのアプローチを検討してください。
+
+**間違い：JSエンジンのバージョンに関する誤った想定**
+GraalJS向けに `const`, アロー関数, `for...of` を使用して書かれたスクリプトは、Nashorn（Java 11）を使用する SQLcl では失敗します。最大限のポータビリティが必要な場合は ES5 構文を使用するか、Java ランタイムを確認して必要に応じて GraalVM JavaScript プラグインをインストールしてください（Java 17+ で必要）。
+
+---
+
+## 参考資料
+
+- [Oracle oracle-db-tools SQLcl スクリプティング・ガイド (GitHub)](https://github.com/oracle/oracle-db-tools/blob/master/sqlcl/SCRIPTING.md)
+- [Java 17 で Oracle SQLcl を使用して JavaScript を実行する方法 — ThatJeffSmith](https://www.thatjeffsmith.com/archive/2022/04/running-javascript-in-oracle-sqlcl-22-1/)
+- [Oracle SQLcl 25.2 ユーザーズ・ガイド](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/oracle-sqlcl-users-guide.pdf)
+- [SQLcl リリース・ノート 25.2.1 — Java 17/21の要件](https://www.oracle.com/tools/sqlcl/sqlcl-relnotes-25.2.1.html)

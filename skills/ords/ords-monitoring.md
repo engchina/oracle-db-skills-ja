@@ -1,82 +1,82 @@
-# ORDS Monitoring, Performance Tuning, and Troubleshooting
+# ORDS のモニタリング、パフォーマンス・チューニング、およびトラブルシューティング
 
-## Overview
+## 概要
 
-Effective ORDS operations require visibility into request patterns, connection pool health, slow queries, and error rates. ORDS provides log files, status endpoints, and database views for monitoring. This guide covers log file interpretation, connection pool monitoring, performance tuning parameters, diagnosing common error patterns, and setting up health checks for load balancers and uptime monitors.
+効率的な ORDS の運用には、リクエスト・パターン、接続プールの状態、スロー・クエリ、およびエラー率の可視化が必要である。ORDS は、モニタリング用にログ・ファイル、ステータス・エンドポイント、およびデータベース・ビューを提供している。このガイドでは、ログ・ファイルの解釈、接続プールの監視、パフォーマンス・チューニング・パラメータ、一般的なエラー・パターンの診断、およびロード・バランサーや稼働監視（アップタイム・モニター）用のヘルス・チェックのセットアップについて説明する。
 
 ---
 
-## ORDS Log File Locations and Configuration
+## ORDS ログ・ファイルの場所と構成
 
-### Log Directory
+### ログ・ディレクトリ
 
-By default, ORDS writes logs to a `logs/` directory inside the ORDS config directory:
+デフォルトでは、ORDS は構成ディレクトリ内の `logs/` ディレクトリにログを書き込む。
 
 ```
 /opt/oracle/ords/config/
 └── logs/
     ├── ords/
-    │   ├── ords_log_2024-01-15.log     # Main application log
-    │   ├── ords_log_2024-01-15.log.1   # Rolled-over log
+    │   ├── ords_log_2024-01-15.log     # メインのアプリケーション・ログ
+    │   ├── ords_log_2024-01-15.log.1   # ロールオーバーされたログ
     │   └── ...
     └── ...
 ```
 
-Configure a custom log path:
+カスタム・ログ・パスを構成する:
 
 ```shell
 ords --config /opt/oracle/ords/config config set log.dir /var/log/ords
 ```
 
-Or specify at startup:
+または開始時に指定する:
 
 ```shell
 ords --config /opt/oracle/ords/config serve \
   --log-folder /var/log/ords
 ```
 
-### Log Levels
+### ログ・レベル
 
-ORDS uses Java Logging (JUL) with configurable levels:
+ORDS は Java Logging (JUL) を使用しており、以下のレベルを構成できる。
 
 ```shell
-# Set global log level
+# グローバルなログ・レベルの設定
 ords --config /opt/oracle/ords/config config set log.level INFO
 
-# Available levels: FINEST, FINER, FINE, CONFIG, INFO, WARNING, SEVERE
-# FINE = debug level, shows individual SQL executions
-# INFO = normal operations
-# WARNING = recoverable errors
-# SEVERE = critical errors
+# 利用可能なレベル: FINEST, FINER, FINE, CONFIG, INFO, WARNING, SEVERE
+# FINE = デバッグ・レベル。個々の SQL 実行を表示
+# INFO = 通常の運用状況
+# WARNING = 回復可能なエラー
+# SEVERE = 致命的なエラー
 ```
 
-For production: `INFO` level. For troubleshooting: `FINE` or `FINER`.
+本番環境では `INFO` レベル、トラブルシューティング時には `FINE` または `FINER` を推奨する。
 
 ---
 
-## Enabling Request Logging
+## リクエスト・ロギングの有効化
 
-Request logging records each HTTP request with URL, method, status code, response time, and client info.
+リクエスト・ロギングは、各 HTTP リクエスト의 URL、メソッド、ステータス・コード、レスポンス時間、およびクライアント情報を記録する。
 
 ```shell
-# Configure external error path via the ORDS CLI
+# ORDS CLI を介して外部エラー・パスを構成
 ords --config /opt/oracle/ords/config config set error.externalPath /var/log/ords/errors
 ```
 
-Configure request logging via the ORDS CLI:
+ORDS CLI を介してリクエスト・ロギングを構成する:
 
 ```shell
-# Enable access/request log
+# アクセス/リクエスト・ログの有効化
 ords --config /opt/oracle/ords/config config set log.logging.requestlog true
 
-# Log format (combined = Apache combined log format)
+# ログ形式 (combined = Apache combined ログ形式)
 ords --config /opt/oracle/ords/config config set log.logging.requestlog.format combined
 
-# Log requests slower than 5000ms as "slow"
+# 5000ミリ秒より遅いリクエストを「slow」としてログ出力する
 ords --config /opt/oracle/ords/config config set log.logging.requestlog.slow 5000
 ```
 
-### Sample Request Log Entry
+### リクエスト・ログのエントリ例
 
 ```
 2024-01-15 14:23:05.123 [INFO] [worker-5] oracle.dbtools.http.ords.RequestLog
@@ -85,17 +85,17 @@ ords --config /opt/oracle/ords/config config set log.logging.requestlog.slow 500
   remote=10.0.1.42 userAgent=MyApp/1.0
 ```
 
-Fields:
-- `elapsed`: Total handler execution time in milliseconds
-- `rows`: Number of result rows returned
-- `pool`: Connection pool name used
-- `user`: Authenticated username (or `oracle` for public requests)
+フィールド名:
+- `elapsed`: ハンドラー実行の合計時間（ミリ秒）
+- `rows`: 返された結果の行数
+- `pool`: 使用された接続プールの名前
+- `user`: 認証されたユーザー名（公開リクエストの場合は `oracle`）
 
 ---
 
-## Interpreting the ORDS Log
+## ORDS ログの解釈
 
-### Startup Messages
+### 起動時のメッセージ
 
 ```
 2024-01-15 09:00:01.001 INFO  Starting Oracle REST Data Services version 24.1.0
@@ -105,51 +105,51 @@ Fields:
 2024-01-15 09:00:02.412 INFO  Listening on port 8443 (HTTPS)
 ```
 
-### Connection Pool Messages
+### 接続プールに関するメッセージ
 
 ```
-# Pool growing (normal under load)
+# プールの拡張 (負荷時の正常な動作)
 2024-01-15 14:25:01.000 INFO  Pool: default - growing pool, connections=8/30
 
-# Pool exhausted (warning: all connections in use)
+# プールの枯渇 (警告: すべての接続が使用中)
 2024-01-15 14:25:30.000 WARNING Pool: default - pool exhausted, waiting for connection
   waitTime=2341ms maxWait=60000ms
 
-# Connection validation failure (DB unreachable or connection stale)
+# 接続検証の失敗 (DB に到達不能、または接続が切断された状態)
 2024-01-15 14:30:00.000 WARNING Pool: default - connection validation failed
   ORA-03114: not connected to ORACLE
 ```
 
-### Authentication Errors
+### 認証エラー
 
 ```
-# Invalid or expired token
+# 無効または期限切れのトークン
 2024-01-15 15:00:01.000 INFO  Authentication failed: invalid_token
   path=/ords/hr/v1/employees/ realm=hr
 
-# Missing token on protected endpoint
+# 保護されたエンドポイントでのトークン不足
 2024-01-15 15:00:02.000 INFO  Authorization required: hr.employees.read
   path=/ords/hr/v1/employees/ client=10.0.1.42
 ```
 
-### SQL Execution Errors
+### SQL 実行エラー
 
 ```
-# ORA-00942: table or view does not exist
+# ORA-00942: 表またはビューが存在しない
 2024-01-15 16:00:01.000 SEVERE SQL execution failed
   path=/ords/hr/v1/employees/ method=GET pool=default
   ORA-00942: table or view does not exist
 
-# ORA-01403: no data found (from collection_item)
+# ORA-01403: データが見つからない (collection_item の場合)
 2024-01-15 16:00:05.000 INFO  Resource not found
   path=/ords/hr/v1/employees/999 → HTTP 404
 ```
 
 ---
 
-## Slow Request Logs
+## スロー・リクエスト・ログ
 
-ORDS logs requests exceeding the slow threshold with additional detail:
+ORDS は、設定された閾値を超えるリクエストを、詳細情報とともにログ出力する。
 
 ```
 2024-01-15 14:50:00.000 WARNING Slow request detected
@@ -158,24 +158,24 @@ ORDS logs requests exceeding the slow threshold with additional detail:
   sql="SELECT ... FROM orders o JOIN ..."
 ```
 
-To investigate slow requests:
-1. Copy the SQL from the log
-2. Run it with `EXPLAIN PLAN` in SQL Developer or SQLcl
-3. Look for full table scans, missing indexes, or Cartesian joins
-4. Add bind variable values from the URL to reproduce exactly
+スロー・リクエストの調査方法:
+1. ログから SQL をコピーする。
+2. SQL Developer または SQLcl で `EXPLAIN PLAN` を使用して実行する。
+3. 全表スキャン、索引の不足、またはデカルト結合がないか確認する。
+4. URL からバインド変数の値を適用し、状況を正確に再現する。
 
 ---
 
-## Connection Pool Monitoring via ORDS Status Endpoint
+## ORDS ステータス・エンドポイントによる接続プールの監視
 
-### ORDS Status and Health Endpoint
+### ORDS ステータスおよびヘルス・エンドポイント
 
 ```http
 GET /ords/_/db-api/stable/database/ HTTP/1.1
 Authorization: Bearer <admin-token>
 ```
 
-Returns:
+レスポンス例:
 
 ```json
 {
@@ -198,10 +198,10 @@ Returns:
 }
 ```
 
-### Monitoring Pool via Database Views
+### データベース・ビューによるプールの監視
 
 ```sql
--- Check ORDS connection activity via V$ views (DBA access required)
+-- V$ ビューを介した ORDS 接続アクティビティの確認 (DBA 権限が必要)
 SELECT s.username, s.status, s.program, s.machine,
        s.sql_id, COUNT(*) AS connection_count
 FROM   v$session s
@@ -210,7 +210,7 @@ WHERE  s.username = 'ORDS_PUBLIC_USER'
 GROUP  BY s.username, s.status, s.program, s.machine, s.sql_id
 ORDER  BY connection_count DESC;
 
--- See active SQL from ORDS connections
+-- ORDS 接続からのアクティブな SQL を表示
 SELECT s.sid, s.username, s.status,
        sq.sql_text, sq.elapsed_time/1000000 AS elapsed_sec
 FROM   v$session s
@@ -222,15 +222,15 @@ ORDER  BY elapsed_sec DESC;
 
 ---
 
-## DBA_ORDS_* Views for Installed Modules
+## インストール済みモジュール用の DBA_ORDS_* ビュー
 
 ```sql
--- View all REST-enabled schemas
+-- REST 有効化されたすべてのスキーマを表示
 SELECT schema, url_mapping_pattern, auto_rest_auth, enabled
 FROM   dba_ords_enabled_schemas
 ORDER  BY schema;
 
--- Count handlers per schema
+-- スキーマごとのハンドラー数をカウント
 SELECT s.schema,
        COUNT(DISTINCT m.id) AS module_count,
        COUNT(DISTINCT t.id) AS template_count,
@@ -242,7 +242,7 @@ LEFT JOIN dba_ords_handlers  h ON h.template_id = t.id
 GROUP  BY s.schema
 ORDER  BY s.schema;
 
--- Find all POST handlers (likely write operations to audit)
+-- すべての POST ハンドラーを検索 (監査すべき書き込み操作)
 SELECT s.schema, m.name AS module, t.uri_template,
        h.method, h.source_type,
        SUBSTR(h.source, 1, 200) AS source_preview
@@ -253,20 +253,20 @@ JOIN   dba_ords_handlers        h ON h.template_id = t.id
 WHERE  h.method IN ('POST', 'PUT', 'DELETE')
 ORDER  BY s.schema, m.name, t.uri_template;
 
--- User-scope views (current schema only)
+-- ユーザー・スコープのビュー (現在のスキーマのみ)
 SELECT m.name, t.uri_template, h.method, h.source_type
 FROM   user_ords_modules   m
 JOIN   user_ords_templates t ON t.module_id = m.id
 JOIN   user_ords_handlers  h ON h.template_id = t.id
 ORDER  BY m.name, t.uri_template, h.method;
 
--- Check AutoREST-enabled objects
+-- AutoREST 有効化されたオブジェクトの確認
 SELECT object_name, object_type, object_alias,
        auto_rest_auth, enabled
 FROM   user_ords_enabled_objects
 ORDER  BY object_type, object_name;
 
--- View OAuth clients and their privileges
+-- OAuth クライアントとその権限を表示
 SELECT c.name, c.grant_type, c.status,
        cp.privilege_name
 FROM   user_ords_clients   c
@@ -276,35 +276,35 @@ ORDER  BY c.name;
 
 ---
 
-## Performance Tuning
+## パフォーマンス・チューニング
 
-### Connection Pool Size
+### 接続プール・サイズ
 
-The most impactful tuning parameter. Tune based on:
-- DB max sessions: `SELECT value FROM v$parameter WHERE name = 'sessions'`
-- Expected concurrent ORDS requests
-- DB CPU cores (don't exceed DB CPU * 10 for pool size)
+最も影響の大きいチューニング・パラメータ。以下に基づいて調整する。
+- DB の最大セッション数: `SELECT value FROM v$parameter WHERE name = 'sessions'`
+- 期待される ORDS の同時リクエスト数
+- DB の CPU コア数 (プール・サイズは、DB の CPU 数 * 10 を超えないようにする)
 
 ```shell
-# Check current pool limits
+# 現在のプール制限の確認
 ords --config /opt/oracle/ords/config config list | grep jdbc
 
-# Recommended starting values for production
+# 本番環境の推奨開始値
 ords --config /opt/oracle/ords/config config set jdbc.InitialLimit 10
 ords --config /opt/oracle/ords/config config set jdbc.MinLimit 10
 ords --config /opt/oracle/ords/config config set jdbc.MaxLimit 50
 ```
 
-### Statement Cache
+### ステートメント・キャッシュ
 
-Caches parsed cursors per connection. Higher values reduce soft parse overhead for repeated queries.
+接続ごとの解析済みカーソルをキャッシュする。高い値を設定すると、繰り返されるクエリのソフト解析オーバーヘッドが削減される。
 
 ```shell
 ords --config /opt/oracle/ords/config config set jdbc.MaxStatementsLimit 10
-# Increase to 20-50 for APIs with many repeated queries
+# 繰り返されるクエリが多い API の場合は 20-50 に増やす
 ```
 
-### ORDS JVM Memory Tuning
+### ORDS JVM メモリのチューニング
 
 ```shell
 # /etc/systemd/system/ords.service
@@ -312,43 +312,43 @@ ords --config /opt/oracle/ords/config config set jdbc.MaxStatementsLimit 10
 Environment="JAVA_OPTS=-Xms512m -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
 ```
 
-- `-Xms512m`: Initial heap (set to avoid initial GC pauses)
-- `-Xmx2g`: Maximum heap (2-4GB typical for busy ORDS instances)
-- `-XX:+UseG1GC`: G1 garbage collector (low-pause, good for server apps)
+- `-Xms512m`: 初期ヒープ (初期の GC 一時停止を避けるために設定)
+- `-Xmx2g`: 最大ヒープ (高負荷な ORDS インスタンスでは 2-4GB が一般的)
+- `-XX:+UseG1GC`: G1 ガベージ・コレクタ (低レイテンシ、サーバー・アプリに適している)
 
-### Request Thread Pool
+### リクエスト・スレッド・プール
 
 ```shell
-# Increase HTTP request threads for high-concurrency (Jetty standalone)
+# 高同時実行環境向けに HTTP リクエスト・スレッドを増やす (Jetty スタンドアロンの場合)
 ords --config /opt/oracle/ords/config config set standalone.threadPoolMax 200
 ```
 
-### Pagination Default
+### ページネーションのデフォルト値
 
-Reduce default page size to lower average response time and DB load:
+ページあたりのデフォルト行数を減らすことで、平均レスポンス時間と DB 負荷を軽減する。
 
 ```shell
-# Default is 25 rows; reduce for mobile/API clients
+# デフォルトは 25 行。モバイルや API クライアント向けには減らすことを検討
 ords --config /opt/oracle/ords/config config set misc.pagination.defaultLimit 10
 ords --config /opt/oracle/ords/config config set misc.pagination.maxRows 500
 ```
 
 ---
 
-## Health Check Endpoint
+## ヘルス・チェック・エンドポイント
 
-Use ORDS's built-in health endpoint for load balancer health checks:
+ロード・バランサーのヘルス・チェックには、ORDS 組み込みのエンドポイントを使用する。
 
 ```http
 GET /ords/ HTTP/1.1
 Host: myserver.example.com
 ```
 
-Returns `200 OK` when ORDS is running. Use this as the health check path in:
+ORDS が動作していれば `200 OK` を返す。以下のヘルス・チェック・パスとして使用する。
 
-- AWS ALB: Target group health check path `/ords/`
-- OCI Load Balancer: Backend set health checker URL `/ords/`
-- Nginx upstream health check: `check interval=3000 rise=2 fall=3 timeout=2000 type=http; check_http_send "GET /ords/ HTTP/1.0\r\n\r\n"; check_http_expect_alive http_2xx;`
+- AWS ALB: ターゲット・グループのヘルス・チェック・パス `/ords/`
+- OCI Load Balancer: バックエンド・セットのヘルス・チェック・プログラム URL `/ords/`
+- Nginx アップストリーム・ヘルス・チェック: `check interval=3000 rise=2 fall=3 timeout=2000 type=http; check_http_send "GET /ords/ HTTP/1.0\r\n\r\n"; check_http_expect_alive http_2xx;`
 - Kubernetes liveness probe:
 
 ```yaml
@@ -361,82 +361,82 @@ livenessProbe:
   failureThreshold: 3
 ```
 
-### DB-Level Health Check
+### DB レベルのヘルス・チェック
 
-For a deeper health check that validates DB connectivity:
+DB 接続性を検証する、より深いヘルス・チェックを行う場合:
 
 ```http
 GET /ords/_/db-api/stable/database/ HTTP/1.1
 Authorization: Bearer <health-check-token>
 ```
 
-Returns connection pool status. A 200 response confirms ORDS + DB connectivity.
+接続プールの状態を返す。200 レスポンスが返れば、ORDS と DB 両方の接続性が確認されたことになる。
 
 ---
 
-## Common Error Codes and Diagnosis
+## 一般的なエラー・コードと診断
 
-### HTTP 401 Unauthorized
+### HTTP 401 Unauthorized (未認証)
 
-Cause: Missing, invalid, or expired Bearer token.
+原因: Bearer トークンの欠落、無効、または期限切れ。
 
 ```
 WWW-Authenticate: Bearer realm="hr",error="invalid_token",
   error_description="The access token expired"
 ```
 
-Diagnosis:
-- Check token expiry: default is 1 hour
-- Verify token endpoint URL matches schema: `/ords/{schema}/oauth/token`
-- Check client privilege assignment: `SELECT * FROM user_ords_client_privileges`
+診断:
+- トークンの有効期限を確認 (デフォルトは 1 時間)
+- トークン・エンドポイントの URL がスキーマと一致しているか確認: `/ords/{schema}/oauth/token`
+- クライアントの権限割り当てを確認: `SELECT * FROM user_ords_client_privileges`
 
-### HTTP 403 Forbidden
+### HTTP 403 Forbidden (禁止)
 
-Cause: Valid token but insufficient privilege or role.
+原因: トークンは有効だが、必要な権限またはロールが不足している。
 
-Diagnosis:
+診断:
 ```sql
--- Check what privileges the client has
+-- クライアントが保持している権限の確認
 SELECT cp.privilege_name, cr.role_name
 FROM   user_ords_client_privileges cp
 JOIN   user_ords_clients c ON c.client_id = cp.client_id
 LEFT JOIN user_ords_client_roles cr ON cr.client_id = c.client_id
 WHERE  c.name = 'my-client';
 
--- Check what roles the privilege requires
+-- 権限が必要とするロールの確認
 SELECT privilege_name, role_name
 FROM   user_ords_privilege_roles
 WHERE  privilege_name = 'hr.employees.read';
 ```
 
-### HTTP 404 Not Found
+### HTTP 404 Not Found (未検出)
 
-Causes:
-1. Schema not REST-enabled
-2. Module not published (`status = NOT_PUBLISHED`)
-3. URL typo (check schema alias, module path, template pattern)
-4. Wrong HTTP method for template
+原因:
+1. スキーマが REST 有効化されていない
+2. モジュールが公開されていない (`status = NOT_PUBLISHED`)
+3. URL の入力ミス (スキーマのエイリアス、モジュールのパス、テンプレートのパターンを確認)
+4. そのテンプレートに対して間違った HTTP メソッドを使用している
 
-Diagnosis:
+診断:
 ```sql
--- Verify schema alias
+-- スキーマ・エイリアスの検証
 SELECT schema, url_mapping_pattern, enabled
 FROM   dba_ords_enabled_schemas WHERE schema = 'HR';
 
--- Verify module
+-- モジュールの検証
 SELECT name, uri_prefix, status FROM user_ords_modules;
 
--- Verify template
+-- テンプレートの検証
 SELECT uri_template FROM user_ords_templates t
 JOIN user_ords_modules m ON m.id = t.module_id
 WHERE m.name = 'hr.employees';
 ```
 
-### HTTP 500 Internal Server Error
+### HTTP 500 Internal Server Error (サーバー内部エラー)
 
-Cause: Unhandled exception in handler SQL/PL/SQL, or DB error.
+原因: ハンドラーの SQL/PL/SQL 内での未処理の例外、または DB エラー。
 
-Diagnosis: Check ORDS log for the full ORA- error:
+診断: ORDS ログで詳細な ORA- エラーを確認する。
 
 ```
 2024-01-15 16:30:00.000 SEVERE Handler error
@@ -444,89 +444,88 @@ Diagnosis: Check ORDS log for the full ORA- error:
   ORA-00001: unique constraint (HR.UK_EMP_EMAIL) violated
 ```
 
-Common ORA- errors in ORDS context:
+ORDS コンテキストにおける一般的な ORA- エラー:
 
-| ORA Error | Cause | Action |
+| ORA エラー | 原因 | 対応策 |
 |---|---|---|
-| ORA-00942 | Table not found (ORDS_PUBLIC_USER lacks access) | Grant SELECT to ORDS_PUBLIC_USER or the executing schema |
-| ORA-01403 | No data found in `collection_item` handler | Expected; returns HTTP 404 automatically |
-| ORA-01400 | NOT NULL constraint violation | Validate required fields in handler |
-| ORA-00001 | Unique constraint violation | Return HTTP 409 Conflict in exception handler |
-| ORA-03114 | Not connected to Oracle | DB down or connection stale; ORDS will reconnect |
-| ORA-12514 | TNS listener cannot find service | Wrong service name in pool config |
-| ORA-28000 | Account locked (ORDS_PUBLIC_USER) | Unlock the account in DB: `ALTER USER ORDS_PUBLIC_USER ACCOUNT UNLOCK` |
+| ORA-00942 | 表が見つからない (ORDS_PUBLIC_USER に権限がない) | ORDS_PUBLIC_USER または実行スキーマに SELECT 権限を付与 |
+| ORA-01403 | `collection_item` ハンドラーでデータが見つからない | 正常な動作。自動的に HTTP 404 を返す |
+| ORA-01400 | NOT NULL 制約違反 | ハンドラー内で必須フィールドの検証を行う |
+| ORA-00001 | 一意制約違反 | 例外ハンドラー内で HTTP 409 Conflict を返す |
+| ORA-03114 | Oracle に接続されていない | DB 停止または接続切断。ORDS が再接続を試みる |
+| ORA-12514 | TNS リスナーがサービスを見つけられない | プール構成のサービス名が間違っている |
+| ORA-28000 | アカウント・ロック (ORDS_PUBLIC_USER) | DB でアカウントをアンロック: `ALTER USER ORDS_PUBLIC_USER ACCOUNT UNLOCK` |
 
-### HTTP 503 Service Unavailable
+### HTTP 503 Service Unavailable (サービス利用不可)
 
-Cause: Connection pool exhausted; all connections busy.
+原因: 接続プールの枯渇。すべての接続が使用中。
 
 ```
 2024-01-15 17:00:00.000 SEVERE Pool exhausted
   pool=default busy=30 max=30 wait=60001ms
 ```
 
-Actions:
-1. Increase `jdbc.MaxLimit` (if DB can handle more connections)
-2. Investigate slow queries holding connections
-3. Add ORDS instances behind a load balancer
-4. Implement query timeout: `ords --config ... config set jdbc.statementTimeout 30`
+対応策:
+1. `jdbc.MaxLimit` を増やす (DB が追加の接続を処理可能な場合)
+2. 接続を保持し続けている遅いクエリを調査する
+3. ロード・バランサーの背後に ORDS インスタンスを追加する
+4. クエリ・タイムアウトを実装する: `ords --config ... config set jdbc.statementTimeout 30`
 
 ---
 
-## ORDS Validation Tool
+## ORDS 検証ツール
 
-Run ORDS self-diagnostics to check configuration before starting:
+開始前に構成を確認するために、ORDS 自己診断を実行する。
 
 ```shell
 ords --config /opt/oracle/ords/config validate
 ```
 
-Output:
+出力例:
 
 ```
 INFO  ORDS validation starting
 INFO  Validating pool 'default' connectivity...
 INFO  Pool 'default': connected successfully (Oracle Database 19c)
 INFO  ORDS schema version: 24.1.0 (matches binary version)
-INFO  Validation complete: 0 errors, 0 warnings
+INFO  Validation complete: 0 errors, 1 warnings
 ```
 
-Common validation failures:
-- `Pool 'default': connection failed` — Wrong hostname, port, or credentials
-- `ORDS schema version 21.4 does not match binary 24.1` — Run `ords install` to upgrade schema
-- `WARNING: feature.sdw enabled but APEX not detected` — Database Actions requires APEX
+一般的な検証失敗の例:
+- `Pool 'default': connection failed` — ホスト名、ポート、または資格証明が正しくない
+- `ORDS schema version 21.4 does not match binary 24.1` — `ords install` を実行してスキーマをアップグレードする
+- `WARNING: feature.sdw enabled but APEX not detected` — Database Actions には APEX が必要
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Set up log rotation**: ORDS log files grow continuously. Configure logrotate or use the built-in rotation settings (`log.maxFileSize`, `log.maxBackupIndex`).
-- **Centralize logs in production**: Ship ORDS logs to a centralized log management system (ELK Stack, OCI Logging, Splunk). Query for error patterns across multiple ORDS instances.
-- **Alert on pool exhaustion**: Pool exhaustion (`503 errors`) indicates capacity problems. Alert when connection wait time exceeds 1 second.
-- **Monitor DB connection count alongside ORDS**: View `v$session` counts to correlate ORDS pool utilization with DB session usage.
-- **Use the `/ords/` health endpoint, not application endpoints**: Health checks should use the lightweight ORDS root endpoint, not actual REST APIs that execute DB queries.
-- **Track slow request trends over time**: A gradual increase in slow requests often precedes complete outages. Set up a dashboard tracking P95/P99 response times.
-- **Run `ords validate` after every configuration change**: Catch pool connectivity issues before traffic hits the instance.
+- **ログ・ローテーションのセットアップ**: ORDS ログ・ファイルは継続的に肥大化する。logrotate を構成するか、組み込みのローテーション設定 (`log.maxFileSize`, `log.maxBackupIndex`) を使用すること。
+- **本番環境でのログ集約**: ORDS ログを集中管理システム (ELK Stack, OCI Logging, Splunk など) に転送する。複数の ORDS インスタンスにわたるエラー・パターンをクエリできるようにする。
+- **プールの枯渇をアラート対象にする**: プールの枯渇 (`503 エラー`) はキャパシティの問題を示している。接続待ち時間が 1 秒を超えた場合にアラートを出すようにする。
+- **ORDS と並行して DB 接続数を監視する**: `v$session` のカウント数を確認し、ORDS のプール使用率と DB セッション使用率を相関させる。
+- **アプリケーション・エンドポイントではなく `/ords/` ヘルス・エンドポイントを使用する**: ヘルス・チェックは、実際に DB クエリを実行する REST API ではなく、軽量な ORDS ルート・エンドポイントを使用すべきである。
+- **スロー・リクエストの傾向を経時的に追跡する**: スロー・リクエストの段階的な増加は、完全な障害の前兆であることが多い。P95/P99 レスポンス時間を追跡するダッシュボードを設定すること。
+- **構成変更のたびに `ords validate` を実行する**: トラフィックが流入する前に、プールの接続性の問題を特定する。
 
-## Common Mistakes
+## よくある間違い
 
-- **Not checking ORDS logs when debugging 404s**: Developers often debug 404 errors by checking the URL and schema configuration in the DB, but miss the definitive error message in the ORDS log.
-- **Ignoring pool exhaustion warnings**: `WARNING Pool: waiting for connection` is often treated as a normal event. It is a leading indicator of capacity problems requiring immediate attention.
-- **Setting `jdbc.MaxLimit` higher than DB `sessions` parameter**: ORDS will successfully open connections up to the DB limit, then connections fail. `jdbc.MaxLimit` should be 20-30% below the DB `sessions` limit.
-- **Running with FINE log level in production**: DEBUG/FINE level logging can produce hundreds of MB of log per hour under load, filling disks and impacting performance.
-- **Not monitoring for ORA-28000 (account locked)**: If ORDS_PUBLIC_USER exceeds failed login attempts (e.g., due to a password rotation not applied to ORDS), the account locks and all ORDS requests fail with 503.
-- **Assuming ORDS health check verifies REST API handlers**: The `/ords/` health check only confirms ORDS is running and can serve HTTP. It does not verify DB connectivity or that REST modules are working. Use `/ords/_/db-api/stable/database/` for full health verification.
+- **404 エラーのデバッグ時に ORDS ログを確認していない**: 開発者は URL や DB 内のスキーマ構成を確認するだけで、ORDS ログにある決定的なエラー・メッセージを見落としがちである。
+- **プールの枯渇警告を無視する**: `WARNING Pool: waiting for connection` は、しばしば「たまに起こる正常なこと」として扱われる。これは、即座の対応が必要なキャパシティ不足の先行指標である。
+- **`jdbc.MaxLimit` を DB の `sessions` パラメータより高く設定している**: ORDS は DB の上限まで接続を開こうとするが、途中で失敗する。`jdbc.MaxLimit` は DB の `sessions` の 20-30% 程度低い値に設定すべきである。
+- **本番環境を FINE ログ・レベルで実行している**: DEBUG/FINE レベルのロギングは、高負荷時に 1 時間あたり数百 MB のログを生成し、ディスクを圧迫し、パフォーマンスに影響を与える。
+- **ORA-28000 (アカウント・ロック) を監視していない**: ORDS_PUBLIC_USER がログイン試行失敗回数を超えた場合（パスワード変更の不備など）、アカウントがロックされ、すべての ORDS リクエストが 503 で失敗する。
+- **ORDS のヘルス・チェックが REST API ハンドラーを検証していると誤解している**: `/ords/` ヘルス・チェックは、ORDS が動作しており HTTP 通信が可能であることを確認するだけである。DB 接続性や REST モジュールの動作までは検証しない。完全な検証には `/ords/_/db-api/stable/database/` を使用すること。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19c に有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。混在環境では 19c 互換の代替手段を維持すること。
+- 19c と 26ai の両方をサポートする環境では、リリース・アップデートによってデフォルトや非推奨が異なる場合があるため、両方のバージョンで構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [ORDS Developer's Guide — Monitoring and Diagnosing Oracle REST Data Services](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/about-oracle-rest-data-services.html)
 - [ORDS Configuration Settings Reference — Logging and Performance](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/ordig/configuration-settings.html)

@@ -1,35 +1,35 @@
-# ORDS AutoREST: Automatic REST Enablement for Tables, Views, and Procedures
+# ORDS AutoREST: 表、ビュー、およびプロシージャの自動 REST 有効化
 
-## Overview
+## 概要
 
-AutoREST is ORDS's zero-code approach to exposing Oracle Database objects as REST endpoints. With a single PL/SQL call, ORDS automatically generates a full set of CRUD endpoints for a table or view, including collection GET (with filtering, pagination, ordering), individual item GET, POST, PUT, and DELETE. AutoREST is ideal for rapid prototyping, internal tooling, and situations where standard CRUD over tables is sufficient. For complex business logic, custom REST APIs (`ORDS.DEFINE_MODULE`) are more appropriate.
+AutoREST は、Oracle Database オブジェクトを REST エンドポイントとして公開するための、ORDS のコード不要（ゼロコード）のアプローチである。単一の PL/SQL 呼び出しを行うだけで、ORDS は表やビューに対して、コレクションの GET（フィルタリング、ページネーション、順序付けを含む）、個別のアイテムの GET、POST、PUT、および DELETE を含む、完全な CRUD エンドポイントを自動的に生成する。AutoREST は、ラピッド・プロトタイピング、内部ツール、および表に対する標準的な CRUD 操作で十分な状況に最適である。複雑なビジネス・ロジックが必要な場合は、カスタム REST API (`ORDS.DEFINE_MODULE`) の方が適している。
 
 ---
 
-## Enabling AutoREST on a Schema
+## スキーマでの AutoREST の有効化
 
-Before any individual objects can be AutoREST-enabled, the schema itself must be REST-enabled. This registers the schema with ORDS and creates the URL alias.
+個々のオブジェクトで AutoREST を有効にする前に、スキーマ自体を REST 有効化する必要がある。これにより、スキーマが ORDS に登録され、URL の別名（エイリアス）が作成される。
 
 ```sql
--- Connect as the schema owner or a DBA
+-- スキーマ所有者または DBA として接続
 BEGIN
   ORDS.ENABLE_SCHEMA(
     p_enabled             => TRUE,
-    p_schema              => 'HR',          -- DB username (case-insensitive)
+    p_schema              => 'HR',          -- DB ユーザー名 (大文字小文字を区別しない)
     p_url_mapping_type    => 'BASE_PATH',
-    p_url_mapping_pattern => 'hr',          -- URL alias: /ords/hr/
-    p_auto_rest_auth       => FALSE         -- FALSE = public by default
+    p_url_mapping_pattern => 'hr',          -- URL の別名: /ords/hr/
+    p_auto_rest_auth       => FALSE         -- FALSE = デフォルトでパブリック(公開)
   );
   COMMIT;
 END;
 /
 ```
 
-Parameters:
-- `p_url_mapping_pattern`: The path segment in the URL. `hr` → `/ords/hr/`.
-- `p_auto_rest_auth`: When TRUE, all AutoREST endpoints require authentication by default. When FALSE, they are public unless a privilege is explicitly attached.
+パラメータ:
+- `p_url_mapping_pattern`: URL 内のパス・セグメント。`hr` の場合、`/ords/hr/` となる。
+- `p_auto_rest_auth`: TRUE の場合、デフォルトですべての AutoREST エンドポイントに認証が必要になる。FALSE の場合、権限が明示的に付与されない限り、エンドポイントは公開される。
 
-To disable a schema:
+スキーマを無効化する場合:
 
 ```sql
 BEGIN
@@ -44,19 +44,19 @@ END;
 
 ---
 
-## Enabling AutoREST on Individual Objects
+## 各オブジェクトでの AutoREST の有効化
 
-### Tables and Views
+### 表とビュー
 
 ```sql
--- Enable AutoREST on the EMPLOYEES table
+-- EMPLOYEES 表で AutoREST を有効化
 BEGIN
   ORDS.ENABLE_OBJECT(
     p_enabled        => TRUE,
     p_schema         => 'HR',
     p_object         => 'EMPLOYEES',
-    p_object_type    => 'TABLE',           -- or 'VIEW'
-    p_object_alias   => 'employees',       -- URL path segment
+    p_object_type    => 'TABLE',           -- または 'VIEW'
+    p_object_alias   => 'employees',       -- URL パス・セグメント
     p_auto_rest_auth => FALSE
   );
   COMMIT;
@@ -64,21 +64,21 @@ END;
 /
 ```
 
-After this call, ORDS immediately serves the following endpoints (assuming schema alias `hr`):
+この呼び出しの後、ORDS は直ちに以下のエンドポイントを提供し始める（スキーマの別名が `hr` の場合）:
 
 ```
-GET    /ords/hr/employees/          → Return collection (paginated)
-GET    /ords/hr/employees/{id}      → Return single item by primary key
-POST   /ords/hr/employees/          → Insert a new row
-PUT    /ords/hr/employees/{id}      → Full update (replace) of a row
-DELETE /ords/hr/employees/{id}      → Delete a row
+GET    /ords/hr/employees/          → コレクションを返す (ページネーションあり)
+GET    /ords/hr/employees/{id}      → 主キーにより単一のアイテムを返す
+POST   /ords/hr/employees/          → 新しい行を挿入する
+PUT    /ords/hr/employees/{id}      → 行の完全な更新 (置換)
+DELETE /ords/hr/employees/{id}      → 行を削除する
 ```
 
-The `{id}` in item URLs maps to the table's primary key column(s). For composite keys, ORDS encodes them in the URL.
+アイテム URL 内の `{id}` は、表の主キー列に対応する。複合主キーの場合、ORDS はそれらを URL 内でエンコードする。
 
-### Views
+### ビュー (Views)
 
-AutoREST on views provides GET (collection and item) endpoints. POST/PUT/DELETE work only if the view is updatable or has INSTEAD OF triggers.
+ビューに対する AutoREST は、GET（コレクションおよびアイテム）エンドポイントを提供する。POST/PUT/DELETE は、そのビューが更新可能であるか、`INSTEAD OF` トリガーが定義されている場合にのみ機能する。
 
 ```sql
 BEGIN
@@ -95,9 +95,9 @@ END;
 /
 ```
 
-### Procedures and Functions
+### プロシージャと関数
 
-AutoREST can expose PL/SQL procedures and functions as REST endpoints:
+AutoREST は、PL/SQL プロシージャや関数を REST エンドポイントとして公開できる。
 
 ```sql
 BEGIN
@@ -114,28 +114,28 @@ END;
 /
 ```
 
-This creates a POST endpoint at `/ords/hr/get-emp-details/` that passes the JSON body as procedure parameters.
+これにより、`/ords/hr/get-emp-details/` に POST エンドポイントが作成され、JSON ボディがプロシージャのパラメータとして渡される。
 
 ---
 
-## Generated Endpoint URL Patterns
+## 生成されるエンドポイントの URL パターン
 
-For a table `HR.EMPLOYEES` with alias `employees` under schema alias `hr`:
+スキーマの別名 `hr` の下で、別名 `employees` が付与された `HR.EMPLOYEES` 表の場合:
 
-| Operation | HTTP Method | URL | Description |
+| 操作 | HTTP メソッド | URL | 説明 |
 |---|---|---|---|
-| List all | GET | `/ords/hr/employees/` | Paginated collection |
-| Get one | GET | `/ords/hr/employees/101` | Single row by PK |
-| Insert | POST | `/ords/hr/employees/` | Create new row |
-| Update | PUT | `/ords/hr/employees/101` | Replace existing row |
-| Delete | DELETE | `/ords/hr/employees/101` | Delete row |
-| Metadata | GET | `/ords/hr/metadata-catalog/employees/` | OpenAPI for this object |
+| 全件取得 | GET | `/ords/hr/employees/` | ページ分けされたコレクション |
+| 1件取得 | GET | `/ords/hr/employees/101` | 主キーによる単一行 |
+| 挿入 | POST | `/ords/hr/employees/` | 新しい行を作成 |
+| 更新 | PUT | `/ords/hr/employees/101` | 既存の行を置換 |
+| 削除 | DELETE | `/ords/hr/employees/101` | 行を削除 |
+| メタデータ | GET | `/ords/hr/metadata-catalog/employees/` | このオブジェクトの OpenAPI 定義 |
 
 ---
 
-## Sample HTTP Requests and Responses
+## HTTP リクエストとレスポンスの例
 
-### GET Collection
+### コレクションの取得 (GET)
 
 ```http
 GET /ords/hr/employees/ HTTP/1.1
@@ -182,7 +182,7 @@ Accept: application/json
 }
 ```
 
-### GET Single Item
+### 単一アイテムの取得 (GET)
 
 ```http
 GET /ords/hr/employees/101 HTTP/1.1
@@ -205,7 +205,7 @@ Host: myserver.example.com
 }
 ```
 
-### POST (Insert)
+### 挿入 (POST)
 
 ```http
 POST /ords/hr/employees/ HTTP/1.1
@@ -236,7 +236,7 @@ Content-Type: application/json
 }
 ```
 
-### PUT (Update)
+### 更新 (PUT)
 
 ```http
 PUT /ords/hr/employees/210 HTTP/1.1
@@ -247,7 +247,7 @@ Content-Type: application/json
 }
 ```
 
-### DELETE
+### 削除 (DELETE)
 
 ```http
 DELETE /ords/hr/employees/210 HTTP/1.1
@@ -259,58 +259,58 @@ HTTP/1.1 200 OK
 
 ---
 
-## Filtering with the `q` Parameter (JSON Filter Syntax)
+## `q` パラメータによるフィルタリング (JSON フィルタ・構文)
 
-AutoREST supports a powerful JSON-based query syntax via the `q` query parameter.
+AutoREST は、`q` クエリ・パラメータを介した、JSON ベースの強力なクエリ構文をサポートしている。
 
-### Basic Equality
+### 基本的な一致 (Equality)
 
 ```http
 GET /ords/hr/employees/?q={"department_id":90}
 ```
 
-URL-encoded:
+URL エンコードした場合:
 
 ```
 /ords/hr/employees/?q=%7B%22department_id%22%3A90%7D
 ```
 
-### Comparison Operators
+### 比較演算子
 
 ```json
-// Greater than
+// より大きい (Greater than)
 {"salary": {"$gt": 10000}}
 
-// Less than or equal
+// 以下 (Less than or equal)
 {"salary": {"$lte": 15000}}
 
-// Not equal
+// 等しくない (Not equal)
 {"job_id": {"$ne": "IT_PROG"}}
 
-// Range (between 10000 and 20000)
+// 範囲指定 (10000 から 20000 の間)
 {"salary": {"$between": [10000, 20000]}}
 ```
 
-### String Matching
+### 文字列一致
 
 ```json
-// LIKE pattern (% wildcard)
+// LIKE パターン (% ワイルドカード)
 {"last_name": {"$like": "K%"}}
 
-// Case-insensitive LIKE
+// 大文字小文字を区別しない LIKE
 {"last_name": {"$ilike": "k%"}}
 
-// IN list
+// IN リスト
 {"department_id": {"$in": [60, 90, 110]}}
 ```
 
-### Logical Operators
+### 論理演算子
 
 ```json
-// AND (default when multiple keys)
+// AND (複数のキーがある場合のデフォルト)
 {"department_id": 60, "salary": {"$gt": 5000}}
 
-// Explicit AND
+// 明示的な AND
 {"$and": [{"department_id": 60}, {"salary": {"$gt": 5000}}]}
 
 // OR
@@ -320,7 +320,7 @@ URL-encoded:
 {"$not": {"job_id": "AD_PRES"}}
 ```
 
-### Example: Complex Filter
+### 例: 複雑なフィルタ
 
 ```http
 GET /ords/hr/employees/?q={"$and":[{"department_id":{"$in":[60,90]}},{"salary":{"$gt":8000}}]}&orderby=salary%20DESC&limit=10
@@ -328,31 +328,31 @@ GET /ords/hr/employees/?q={"$and":[{"department_id":{"$in":[60,90]}},{"salary":{
 
 ---
 
-## Pagination
+## ページネーション (Pagination)
 
-AutoREST uses offset-based pagination with `limit` and `offset` query parameters.
+AutoREST では、`limit` と `offset` クエリ・パラメータを使用したオフセット・ベースのページネーションを使用する。
 
 ```http
-# Page 1: first 10 records
+# ページ 1: 最初の 10 レコード
 GET /ords/hr/employees/?limit=10&offset=0
 
-# Page 2: next 10 records
+# ページ 2: 次の 10 レコード
 GET /ords/hr/employees/?limit=10&offset=10
 
-# Page 3
+# ページ 3
 GET /ords/hr/employees/?limit=10&offset=20
 ```
 
-The response always includes:
-- `"hasMore"`: `true` if more records exist beyond the current page
-- `"count"`: number of items in the current response
-- `"limit"`: the limit applied
-- `"offset"`: the offset applied
-- `"links"`: `self`, `first`, `next` (if hasMore), `prev` (if offset > 0)
+レスポンスには常に以下が含まれる。
+- `"hasMore"`: 現在のページ以降にレコードが存在する場合に `true`
+- `"count"`: 現在のレスポンス内のアイテム数
+- `"limit"`: 適用されたリミット（上限）
+- `"offset"`: 適用されたオフセット（開始位置）
+- `"links"`: `self`、`first`、`next` (`hasMore` が true の場合)、`prev` (`offset` > 0 の場合) へのリンク
 
-Maximum limit: ORDS defaults to 10,000 rows maximum per request. Override in ORDS config if needed.
+最大リミット: ORDS のデフォルトは 1 回のリクエストにつき最大 10,000 行。必要に応じて ORDS 構成で変更可能。
 
-### Pagination Example Response Fragment
+### ページネーション・レスポンスの一部（例）
 
 ```json
 {
@@ -371,37 +371,37 @@ Maximum limit: ORDS defaults to 10,000 rows maximum per request. Override in ORD
 
 ---
 
-## Ordering
+## 並べ替え (Ordering)
 
-Use the `orderby` query parameter to control sort order.
+ソート順を制御するには、`orderby` クエリ・パラメータを使用する。
 
 ```http
-# Single column ascending
+# 単一列の昇順
 GET /ords/hr/employees/?orderby=last_name
 
-# Single column descending
+# 単一列の降順
 GET /ords/hr/employees/?orderby=salary%20DESC
 
-# Multiple columns
+# 複数列の指定
 GET /ords/hr/employees/?orderby=department_id%20ASC,salary%20DESC
 ```
 
 ---
 
-## Controlling Exposed Columns
+## 公開する列の制御
 
-By default, AutoREST exposes ALL columns of the table/view. To restrict columns, there are two options:
+デフォルトでは、AutoREST は表またはビューのすべての列を公開する。列を制限するには、主に 2 つのオプションがある。
 
-### Option 1: Expose a View Instead of the Table
+### オプション 1: 表の代わりにビューを公開する
 
-Create a view with only the desired columns and AutoREST-enable the view:
+必要な列のみを含むビューを作成し、そのビューを AutoREST 有効化する。
 
 ```sql
 CREATE VIEW hr.employees_public AS
   SELECT employee_id, first_name, last_name, email,
          hire_date, job_id, department_id
   FROM hr.employees;
--- salary, commission_pct etc. not included
+-- salary、commission_pct などは含まれない
 
 BEGIN
   ORDS.ENABLE_OBJECT(
@@ -416,54 +416,54 @@ END;
 /
 ```
 
-### Option 2: Custom REST Handler (Preferred for Fine Control)
+### オプション 2: カスタム REST ハンドラー (きめ細かな制御に推奨)
 
-Use `ORDS.DEFINE_HANDLER` with an explicit SELECT list (see `ords-rest-api-design.md`).
-
----
-
-## AutoREST for Object Tables
-
-AutoREST supports object tables (Oracle object-relational types). The JSON representation follows the nested object structure. Deeply nested or complex types may require custom handlers for clean JSON output.
+明示的な SELECT リストを指定して `ORDS.DEFINE_HANDLER` を使用する（詳細は `ords-rest-api-design.md` を参照）。
 
 ---
 
-## Checking AutoREST Status
+## オブジェクト表の AutoREST
+
+AutoREST はオブジェクト表（Oracle のオブジェクト・リレーショナル型）をサポートしている。JSON 表現はネストされたオブジェクト構造に従う。深くネストされた型や複雑な型の場合、クリーンな JSON 出力を得るためにカスタム・ハンドラーが必要になる場合がある。
+
+---
+
+## AutoREST ステータスの確認
 
 ```sql
--- View all AutoREST-enabled objects in the current schema
+-- 現在のスキーマで AutoREST 有効化されているオブジェクトを表示
 SELECT object_name, object_type, object_alias, auto_rest_auth
 FROM user_ords_enabled_objects
 ORDER BY object_name;
 
--- View all REST-enabled schemas (DBA view)
+-- REST 有効化されているスキーマを表示 (DBA ビュー)
 SELECT schema, url_mapping_pattern, auto_rest_auth
 FROM dba_ords_enabled_schemas;
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Use schema aliases that differ from schema names**: Decouples your public URL from internal DB usernames. If the schema is renamed, the URL stays stable.
-- **Enable `p_auto_rest_auth => TRUE`** for any non-public data: Forces authentication on all AutoREST endpoints for the object. Add an ORDS privilege to grant specific access.
-- **Prefer views over direct table exposure**: Views let you control columns, apply row-level filters, join data, and rename columns for cleaner APIs — all without any REST-specific code.
-- **Use AutoREST for internal tooling and prototyping**: For production APIs with custom business logic, validation, or complex transformations, define explicit REST handlers.
-- **Test filter queries in SQL first**: The `q` parameter translates to SQL WHERE clauses. Test the equivalent SQL in your IDE to verify results before implementing in client code.
-- **Set sensible `limit` defaults in client code**: ORDS defaults to 25 items per page. Always handle pagination in clients — never assume all records fit in one response.
+- **スキーマ名と異なるスキーマ別名を使用する**: 公開 URL を内部の DB ユーザー名から切り離すことができる。スキーマ名が変更されても、URL の安定性を維持できる。
+- **公開データ以外では `p_auto_rest_auth => TRUE` を設定する**: オブジェクトに対するすべての AutoREST エンドポイントに認証を強制する。特定のアクセスを許可するには、ORDS 権限を追加する。
+- **表の直接公開よりもビューの使用を優先する**: ビューを使用すると、列の制御、行レベルのフィルタ適用、データの結合、API 用のクリーンな列名への変更などが可能になり、REST 固有のコードを書く必要がない。
+- **内部ツールやプロトタイピングに AutoREST を使用する**: カスタムのビジネス・ロジック、バリデーション（検証）、または複雑な変換を伴う本番用 API には、明示的に REST ハンドラーを定義すること。
+- **フィルタ・クエリは最初に SQL でテストする**: `q` パラメータは内部的に SQL の WHERE 句に変換される。クライアント・コードに実装する前に、IDE で同等の SQL をテストして結果を確認すること。
+- **クライアント・コードで適切な `limit` のデフォルトを設定する**: ORDS のデフォルトは 1 ページあたり 25 アイテムである。クライアント側で常にページネーションを処理し、1 つのレスポンスですべてのレコードが返されると仮定してはならない。
 
-## Common Mistakes
+## よくある間違い
 
-- **Forgetting to commit after `ORDS.ENABLE_OBJECT`**: The ORDS metadata tables are standard DB tables. If you don't commit, the change is rolled back and the endpoint won't appear.
-- **Enabling AutoREST on the table directly when only read access is needed**: This creates POST/PUT/DELETE endpoints that could be exploited. Either use a view (which is typically not updatable), attach privileges, or set `p_auto_rest_auth => TRUE`.
-- **URL-encoding issues with the `q` parameter**: JSON in query strings must be URL-encoded. Curly braces, quotes, and colons are special characters. Always URL-encode the `q` value in client code.
-- **Assuming `{id}` always matches the column name**: The URL segment maps to the primary key, not a column named `id`. If the PK column is `employee_id`, the correct URL is `/employees/101`, not `/employees/?employee_id=101`.
-- **Exposing tables with sensitive columns (passwords, PII) via AutoREST**: All columns are exposed by default. Audit your table structure before enabling AutoREST on any table containing sensitive data.
-- **Not accounting for NULL primary keys**: Rows with NULL primary keys cannot be addressed by item URLs. Ensure your tables have `NOT NULL` primary key constraints.
+- **`ORDS.ENABLE_OBJECT` の後にコミットを忘れる**: ORDS メタデータの表は標準的なデータベースの表である。コミットしない限り、変更はロールバックされ、エンドポイントは表示されない。
+- **読み取りアクセスのみが必要な場合に、表に対して直接 AutoREST を有効化する**: これにより、POST/PUT/DELETE エンドポイントが作成され、脆弱性になる可能性がある。ビュー（通常は更新不可）を使用するか、権限を付与するか、`p_auto_rest_auth => TRUE` を設定すること。
+- **`q` パラメータの URL エンコードの問題**: クエリ文字列内の JSON は URL エンコードされている必要がある。波括弧、引用符、コロンは特殊文字である。クライアント・コードでは常に `q` の値を URL エンコードすること。
+- **`{id}` が常に列名と一致すると仮定する**: URL セグメントは列名の `id` ではなく、主キーの値にマップされる。主キー列が `employee_id` の場合、正しい URL は `/employees/101` であり、`/employees/?employee_id=101` ではない。
+- **AutoREST を介して機密性の高い列 (パスワード、PII など) を含む表を公開する**: デフォルトですべての列が公開される。機密データを含む表で AutoREST を有効化する前に、表の構造を監査すること。
+- **主キーが NULL の場合を考慮していない**: 主キーが NULL の行にはアイテム URL でアクセスできない。表に `NOT NULL` の主キー制約があることを確認すること。
 
 ---
 
-## Sources
+## ソース
 
 - [ORDS Developer's Guide — AutoREST](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orddg/developing-oracle-rest-data-services-applications.html)
 - [Oracle REST Data Services PL/SQL API Reference — ORDS.ENABLE_OBJECT](https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/24.2/orrst/index.html)

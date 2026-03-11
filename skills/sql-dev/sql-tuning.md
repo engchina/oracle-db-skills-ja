@@ -1,21 +1,21 @@
-# SQL Tuning in Oracle
+# OracleにおけるSQLチューニング
 
-## Overview
+## 概要
 
-SQL tuning is the process of improving query performance by understanding how Oracle's Cost-Based Optimizer (CBO) generates and executes query plans. Effective tuning requires reading execution plans, understanding join methods and access paths, managing optimizer statistics, and knowing when and how to influence the optimizer with hints, profiles, or baselines.
+SQLチューニングとは、Oracleのコストベース・オプティマイザ（CBO）がどのように実行計画を生成・実行するかを把握し、クエリのパフォーマンスを向上させるプロセスである。効果的なチューニングには、実行計画の読み取り、結合手法やアクセス・パスの理解、オプティマイザ統計の管理、そしてヒント、プロファイル、またはベースラインを使用してオプティマイザに影響を与えるタイミングと方法を知ることが不可欠である。
 
-Oracle's CBO evaluates candidate execution plans and selects the one with the lowest estimated cost — a function of CPU, I/O, and memory. When the CBO makes poor choices, it is usually because statistics are stale, missing, or misleading, or because the query is structured in a way that prevents efficient access paths.
+OracleのCBOは、候補となる実行計画を評価し、CPU、I/O、およびメモリから算出される「推定コスト」が最も低いものを選択する。CBOが不適切な選択をする主な原因は、統計情報が古かったり、欠落していたり、誤解を招く内容であったりすること、またはクエリの構造が効率的なアクセス・パスを妨げていることである。
 
 ---
 
-## Execution Plans
+## 実行計画
 
-### Generating an Execution Plan
+### 実行計画の生成
 
-The two primary methods are `EXPLAIN PLAN` (estimates only) and `DBMS_XPLAN` (actual or estimated):
+主な方法は2つある。`EXPLAIN PLAN`（推定のみ）と `DBMS_XPLAN`（実測または推定）である。
 
 ```sql
--- Estimate-only plan (no execution)
+-- 推定のみの実行計画（実行は行わない）
 EXPLAIN PLAN FOR
 SELECT e.last_name, d.department_name
 FROM   employees e
@@ -26,7 +26,7 @@ SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY());
 ```
 
 ```sql
--- Actual execution stats via SQL*Plus autotrace
+-- SQL*Plus の autotrace を使用した実際の実行統計
 SET AUTOTRACE ON
 SELECT e.last_name, d.department_name
 FROM   employees e
@@ -35,112 +35,112 @@ WHERE  e.salary > 10000;
 ```
 
 ```sql
--- Best option: get the actual plan from the cursor cache after execution
--- First execute the query, then find its SQL_ID
+-- 推奨：実行後のカーソル・キャッシュから実際の計画を取得する
+-- まずクエリを実行し、その SQL_ID を特定
 SELECT sql_id, sql_text
 FROM   v$sql
 WHERE  sql_text LIKE '%last_name%employees%'
 AND    sql_text NOT LIKE '%v$sql%';
 
--- Then pull the plan with actual row counts
+-- 特定した SQL_ID を使用して、実測行数を含む計画を取得
 SELECT * FROM TABLE(
   DBMS_XPLAN.DISPLAY_CURSOR('abc12345xyz', 0, 'ALLSTATS LAST')
 );
 ```
 
-### Reading the Plan Output
+### 実行計画の読み方
 
-Key columns in a `DBMS_XPLAN` output:
+`DBMS_XPLAN` 出力の主要な列は以下の通り：
 
-| Column | Meaning |
+| 列名 | 意味 |
 |---|---|
-| `Id` | Operation step number; child steps are indented |
-| `Operation` | What Oracle is doing (TABLE ACCESS, INDEX RANGE SCAN, etc.) |
-| `Name` | Object being accessed |
-| `Rows` (E-Rows) | Estimated rows — optimizer's prediction |
-| `A-Rows` | Actual rows returned (requires `ALLSTATS`) |
-| `Bytes` | Estimated data volume |
-| `Cost (%CPU)` | Optimizer cost estimate and CPU fraction |
-| `Time` | Estimated wall-clock time |
-| `Starts` | How many times this step was executed |
+| `Id` | 操作のステップ番号。子ステップはインデントされる |
+| `Operation` | Oracleが何を行っているか（TABLE ACCESS, INDEX RANGE SCAN など） |
+| `Name` | アクセスされているオブジェクト名 |
+| `Rows` (E-Rows) | 推定行数 — オプティマイザによる予測 |
+| `A-Rows` | 実際の返却行数（`ALLSTATS` が必要） |
+| `Bytes` | 推定データ量 |
+| `Cost (%CPU)` | オプティマイザの推定コストとCPUの割合 |
+| `Time` | 推定所要時間 |
+| `Starts` | そのステップが実行された回数 |
 
-A large discrepancy between E-Rows and A-Rows indicates a cardinality estimation problem, which is the root cause of most bad plans.
+E-Rows と A-Rows の間に大きな乖離がある場合、カーディナリティ推定の問題を示唆しており、これが不適切な実行計画の根本原因であることが多い。
 
-### Common Access Paths
+### 一般的なアクセス・パス
 
-- **TABLE ACCESS FULL** — reads every block in the segment. Efficient for large-percentage retrievals; bad for selective queries.
-- **INDEX RANGE SCAN** — traverses the B-tree index for a range of values. Good for selective predicates.
-- **INDEX UNIQUE SCAN** — single probe into a unique index. Most efficient single-row access.
-- **INDEX FAST FULL SCAN** — reads all index blocks using multiblock I/O; useful for index-only queries.
-- **INDEX SKIP SCAN** — used on composite indexes when the leading column is not in the predicate. Usually a sign that a better index is needed.
+- **TABLE ACCESS FULL** — セグメント内のすべてのブロックを読み取る。大量のデータを取得する場合は効率的だが、選択性の高いクエリには不向き。
+- **INDEX RANGE SCAN** — 値の範囲に対してBツリー索引を検索する。選択性の高い述語に適している。
+- **INDEX UNIQUE SCAN** — 一意索引に対する単一のプローブ。最も効率的な単一行アクセス。
+- **INDEX FAST FULL SCAN** — マルチブロックI/Oを使用してすべての索引ブロックを読み取る。索引列のみを使用するクエリに有効。
+- **INDEX SKIP SCAN** — 複合索引において、先頭列が述語に含まれていない場合に使用される。通常は、より適切な索引が必要であることを示す兆候である。
 
 ---
 
-## Join Methods
+## 結合手法
 
-Oracle supports three primary join algorithms. The optimizer chooses based on cardinality, available indexes, and available memory.
+Oracleは主に3つの結合アルゴリズムをサポートしている。オプティマイザは、カーディナリティ、利用可能な索引、および利用可能なメモリに基づいて選択を行う。
 
-### Nested Loops (NL)
+### ネステッド・ループ (NL)
 
-Best when the driving rowset is small and the inner table has a good index.
+駆動行セットが小さく、内部表に適切な索引がある場合に最適。
 
 ```
 NESTED LOOPS
-  TABLE ACCESS FULL   EMPLOYEES      (driving table, small result)
-  INDEX RANGE SCAN    DEPT_ID_IDX    (inner lookup per driving row)
+  TABLE ACCESS FULL   EMPLOYEES      (駆動表、結果が小さい)
+  INDEX RANGE SCAN    DEPT_ID_IDX    (駆動行ごとに内部表を検索)
 ```
 
-- Low memory requirement
-- Scales poorly if the driving set is large
-- Performance degrades linearly with driving row count
+- メモリ消費が少ない
+- 駆動セットが大きいとスケーラビリティが低下する
+- 駆動行数に比例してパフォーマンスが低下する
 
-### Hash Join
+### ハッシュ結合
 
-Best for joining two large sets with no usable index on the join column. The smaller table is hashed into memory; the larger table is probed.
+結合列に利用可能な索引がなく、2つの大きなセットを結合する場合に最適。小さい方の表をメモリ上にハッシュ展開し、大きい方の表をプローブ（照合）する。
 
 ```
 HASH JOIN
-  TABLE ACCESS FULL   DEPARTMENTS    (build side — smaller)
-  TABLE ACCESS FULL   EMPLOYEES      (probe side — larger)
+  TABLE ACCESS FULL   DEPARTMENTS    (ビルド側 — 小さい方)
+  TABLE ACCESS FULL   EMPLOYEES      (プローブ側 — 大きい方)
 ```
 
-- Requires `PGA` memory for the hash table
-- If the build side doesn't fit in PGA, it spills to temp (slow)
-- Only works for equi-joins
+- ハッシュテーブル用に `PGA` メモリが必要
+- ビルド側が PGA に収まらない場合、TEMP へ退避（スローダウン）する
+- 等価結合にのみ機能する
 
-### Sort Merge Join
+### ソート・マージ結合
 
-Both inputs are sorted on the join key and then merged. Used when inputs are already sorted or when a hash join is not viable.
+両方の入力を結合キーでソートし、マージする。入力がすでにソートされている場合や、ハッシュ結合が利用できない場合に使用される。
 
-- Higher memory requirement than hash join
-- Can be faster than hash join if data is pre-sorted by an index
+- ハッシュ結合よりもメモリ要件が高い
+- データが索引によって事前ソートされている場合、ハッシュ結合より速くなることがある
 
 ---
 
-## Optimizer Hints
+## オプティマイザ・ヒント
 
-Hints are directives embedded in SQL comments that instruct the optimizer to use a specific plan element. They should be used sparingly — fix statistics or indexes first.
+ヒントは、SQLコメント内に埋め込まれた指示で、オプティマイザに特定の実行計画要素を使用するよう指示する。ヒントは控えめに使用し、まずは統計情報や索引の修正を優先すべきである。
 
-### Syntax
+### 構文
 
 ```sql
 SELECT /*+ HINT_NAME(parameter) */ col1 FROM table1;
 ```
 
-### Commonly Used Hints
+### よく使われるヒント
 
 ```sql
--- Force index use
+-- 索引の使用を強制
 SELECT /*+ INDEX(e EMP_DEPT_IDX) */ *
 FROM   employees e
 WHERE  department_id = 30;
 
--- Force full table scan (bypass an index)
+-- 全表スキャンを強制（索引をバイパス）
 SELECT /*+ FULL(e) */ *
 FROM   employees e
 WHERE  status = 'A';
 
--- Control join method
+-- 結合手法の制御
 SELECT /*+ USE_NL(e d) */ e.last_name, d.department_name
 FROM   employees e
 JOIN   departments d ON e.department_id = d.department_id;
@@ -149,49 +149,49 @@ SELECT /*+ USE_HASH(e d) */ e.last_name, d.department_name
 FROM   employees e
 JOIN   departments d ON e.department_id = d.department_id;
 
--- Control join order (e is first/driving table)
+-- 結合順序の制御 (e が最初/駆動表になる)
 SELECT /*+ LEADING(e d) USE_NL(d) */ e.last_name, d.department_name
 FROM   employees e
 JOIN   departments d ON e.department_id = d.department_id;
 
--- Parallel execution
+-- パラレル実行
 SELECT /*+ PARALLEL(e, 4) */ COUNT(*) FROM employees e;
 
--- Disable parallel (useful in OLTP)
+-- パラレル無効化 (OLTPで有効)
 SELECT /*+ NO_PARALLEL(e) */ * FROM employees e;
 
--- Cardinality hint (when stats are wrong)
+-- カーディナリティ・ヒント (統計が正しくない場合)
 SELECT /*+ CARDINALITY(e 100) */ *
 FROM   employees e
 WHERE  complex_function(salary) > 5000;
 ```
 
-### When NOT to Use Hints
+### ヒントを使用すべきでないケース
 
-- Hints are brittle — they break when table or index names change
-- They bypass the optimizer's ability to adapt to changing data distributions
-- Prefer fixing the root cause: gather better statistics, add an index, or rewrite the query
-- Use SQL profiles and baselines for production stabilization instead
+- ヒントは壊れやすい — 表名や索引名が変わると機能しなくなる
+- データの分布の変化にオプティマイザが適応する能力を妨げる
+- 根本原因（より良い統計情報の収集、索引の追加、またはクエリの書き換え）の修正を優先すべき
+- 本番環境の安定化には、代わりに SQL プロファイルやベースラインを使用すること
 
 ---
 
-## Gathering and Interpreting Statistics
+## 統計情報の収集と解釈
 
-Oracle's CBO relies on object statistics. Stale or missing statistics are the #1 cause of bad plans.
+OracleのCBOはオブジェクト統計に依存している。古かったり欠落していたりする統計情報は、不適切な実行計画の最大の原因である。
 
-### Gathering Table and Index Statistics
+### 表および索引の統計情報の収集
 
 ```sql
--- Gather stats for a single table (with histograms on all columns)
+-- 単一の表に対して統計情報を収集（すべての列にヒストグラムを作成）
 EXEC DBMS_STATS.GATHER_TABLE_STATS(
   ownname          => 'HR',
   tabname          => 'EMPLOYEES',
   estimate_percent => DBMS_STATS.AUTO_SAMPLE_SIZE,
   method_opt       => 'FOR ALL COLUMNS SIZE AUTO',
-  cascade          => TRUE   -- also gathers index stats
+  cascade          => TRUE   -- 索引の統計情報も収集
 );
 
--- Gather stats for an entire schema
+-- スキーマ全体の統計情報を収集
 EXEC DBMS_STATS.GATHER_SCHEMA_STATS(
   ownname          => 'HR',
   estimate_percent => DBMS_STATS.AUTO_SAMPLE_SIZE,
@@ -200,37 +200,37 @@ EXEC DBMS_STATS.GATHER_SCHEMA_STATS(
 );
 ```
 
-### Viewing Statistics
+### 統計情報の確認
 
 ```sql
--- Table-level stats
+-- 表レベルの統計
 SELECT table_name, num_rows, blocks, avg_row_len, last_analyzed
 FROM   dba_tables
 WHERE  owner = 'HR';
 
--- Column-level stats and histograms
+-- 列レベルの統計とヒストグラム
 SELECT column_name, num_distinct, num_nulls, histogram, num_buckets,
        low_value, high_value, last_analyzed
 FROM   dba_tab_col_statistics
 WHERE  owner = 'HR'
 AND    table_name = 'EMPLOYEES';
 
--- Check for stale stats (more than 10% change since last analyze)
+-- 失効した統計情報のチェック (前回収集から10%以上の変更があったもの)
 SELECT owner, table_name, stale_stats
 FROM   dba_tab_statistics
 WHERE  owner = 'HR'
 AND    stale_stats = 'YES';
 ```
 
-### Histograms
+### ヒストグラム
 
-Histograms describe skewed column distributions and are critical for columns with non-uniform data.
+ヒストグラムは列のデータの偏りを記述するもので、データが不均一な列にとって重要である。
 
 ```sql
--- Frequency histogram (for low-cardinality columns)
--- Oracle automatically creates these with SIZE AUTO when there are <= 254 distinct values
+-- 頻度ヒストグラム (カーディナリティが低い列用)
+-- 一意の値が 254 以下の列に対し、SIZE AUTO を指定すると自動的に作成される
 
--- Viewing histogram buckets
+-- ヒストグラムのバケットを確認
 SELECT endpoint_number, endpoint_value
 FROM   dba_histograms
 WHERE  owner = 'HR'
@@ -239,31 +239,31 @@ AND    column_name = 'DEPARTMENT_ID'
 ORDER BY endpoint_number;
 ```
 
-### Extended Statistics (Multi-Column Correlations)
+### 拡張統計 (複数列の相関)
 
-When columns are correlated (e.g., `city` and `state`), the optimizer may underestimate cardinality. Extended statistics fix this.
+列間に相関がある場合（例：`city` と `state`）、オプティマイザがカーディナリティを過小評価することがある。拡張統計はこの問題を修正する。
 
 ```sql
--- Create extended stats on a column group
+-- 列グループに対して拡張統計を作成
 SELECT DBMS_STATS.CREATE_EXTENDED_STATS(
   ownname => 'HR',
   tabname => 'EMPLOYEES',
   extension => '(DEPARTMENT_ID, JOB_ID)'
 ) FROM dual;
 
--- Then re-gather stats to populate them
+-- その後、統計を再収集して値を反映
 EXEC DBMS_STATS.GATHER_TABLE_STATS('HR', 'EMPLOYEES',
   method_opt => 'FOR ALL COLUMNS SIZE AUTO');
 ```
 
 ---
 
-## Index Usage and Strategy
+## 索引の使用と戦略
 
-### Identifying Missing Indexes
+### 不足している索引の特定
 
 ```sql
--- Find full table scans on large tables from the cursor cache
+-- カーソル・キャッシュから、大きな表に対する全表スキャンを検索
 SELECT s.sql_id, s.executions, p.object_name, p.operation, p.options,
        s.disk_reads / NULLIF(s.executions, 0) AS reads_per_exec
 FROM   v$sql s
@@ -275,45 +275,45 @@ ORDER BY reads_per_exec DESC NULLS LAST
 FETCH FIRST 20 ROWS ONLY;
 ```
 
-### Index Monitoring
+### 索引の監視
 
 ```sql
--- Oracle 12.2+ — check index usage stats
+-- Oracle 12.2以降 — 索引の使用状況統計を確認
 SELECT index_name, table_name, monitoring, used, start_monitoring, end_monitoring
 FROM   v$object_usage
 WHERE  table_name = 'EMPLOYEES';
 
--- Start monitoring an index
+-- 索引の監視を開始
 ALTER INDEX hr.emp_name_idx MONITORING USAGE;
 ```
 
-### Invisible Indexes
+### 不可視索引
 
-Test a new index without affecting production plans until validated:
+検証が終わるまで本番の計画に影響を与えずに、新しい索引をテストできる。
 
 ```sql
--- Create invisible (no plan impact yet)
+-- 不可視索引として作成（プランにはまだ影響しない）
 CREATE INDEX emp_salary_idx ON employees(salary) INVISIBLE;
 
--- Test it in your session only
+-- 自分のセッションのみでテスト
 ALTER SESSION SET optimizer_use_invisible_indexes = TRUE;
 EXPLAIN PLAN FOR SELECT * FROM employees WHERE salary BETWEEN 5000 AND 8000;
 SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
 
--- Make visible when satisfied
+-- 問題なければ可視化
 ALTER INDEX emp_salary_idx VISIBLE;
 ```
 
 ---
 
-## SQL Profiles and SQL Plan Baselines
+## SQL プロファイルおよび SQL 計画ベースライン
 
-### SQL Profiles
+### SQL プロファイル
 
-A SQL profile stores additional statistics or correction factors for a specific query, improving optimizer estimates without locking in a plan.
+SQL プロファイルは、特定のクエリに対して追加の統計情報や補正係数を保持し、計画を固定することなくオプティマイザの推定精度を向上させる。
 
 ```sql
--- Using SQL Tuning Advisor to generate a profile
+-- SQL チューニング・アドバイザを使用してプロファイルを生成
 DECLARE
   l_task_name VARCHAR2(30);
   l_sql_id    VARCHAR2(13) := 'abc12345xyz78';
@@ -328,22 +328,22 @@ BEGIN
 END;
 /
 
--- Review recommendations
+-- 推奨事項を確認
 SELECT DBMS_SQLTUNE.REPORT_TUNING_TASK('tune_task_1') FROM dual;
 
--- Accept the SQL profile if recommended
+-- 推奨された場合、SQL プロファイルを適用
 EXEC DBMS_SQLTUNE.ACCEPT_SQL_PROFILE(
   task_name    => 'tune_task_1',
   replace      => TRUE
 );
 ```
 
-### SQL Plan Baselines (SPM)
+### SQL 計画ベースライン (SPM)
 
-SQL Plan Management (SPM) captures known-good plans and prevents plan regression.
+SQL 計画管理 (SPM) は、既知の良好な計画を把握し、実行計画の「退行（劣化）」を防ぐ。
 
 ```sql
--- Capture baseline from cursor cache for a specific SQL_ID
+-- 既存の SQL_ID に基づき、カーソル・キャッシュからベースラインを取得
 DECLARE
   l_count PLS_INTEGER;
 BEGIN
@@ -354,12 +354,12 @@ BEGIN
 END;
 /
 
--- View existing baselines
+-- 既存のベースラインを確認
 SELECT sql_handle, plan_name, enabled, accepted, fixed, origin
 FROM   dba_sql_plan_baselines
 ORDER BY created DESC;
 
--- Evolve non-accepted plans (test and promote better plans)
+-- 未承認の計画の進化（テストを行い、より良い計画を昇格させる）
 DECLARE
   l_report CLOB;
 BEGIN
@@ -376,49 +376,48 @@ END;
 
 ---
 
-## Best Practices
+## ベストプラクティス
 
-- **Always check actual vs. estimated rows.** A cardinality mismatch of 10x or more almost always produces a bad plan.
-- **Gather statistics regularly on volatile tables.** Use a stats job or `DBMS_SCHEDULER` for nightly collection on high-DML tables.
-- **Use `AUTO_SAMPLE_SIZE`.** It provides near-100% accuracy with Oracle's incremental statistics algorithm at a fraction of the cost.
-- **Avoid function calls on indexed columns in WHERE clauses.** Use function-based indexes when necessary.
-- **Parameterize queries.** Literal values prevent plan sharing and flood the shared pool with hard parses.
-- **Validate plan changes before production.** Use invisible indexes and SPM baselines to test without risk.
-- **Avoid `SELECT *`.** Retrieve only needed columns; wide projections block index-only access paths.
+- **常に実測行数 (Actual) と推定行数 (Estimated) を比較する。** 10倍以上の乖離がある場合、ほぼ確実に不適切な計画が生成される。
+- **データ変化の激しい表では定期的に統計情報を収集する。** 大量にDMLが発生する表については、夜間ジョブ等で収集を行う。
+- **`AUTO_SAMPLE_SIZE` を使用する。** Oracleのインクリメンタル統計アルゴリズムにより、低コストで100%に近い精度を得られる。
+- **WHERE 句内の索引列に対して関数呼び出しを行わない。** 必要に応じて関数ベース索引を使用する。
+- **クエリをパラメータ化する。** リテラル値を使用すると、実行計画の共有が妨げられ、共有プールがハード解析によって圧迫される。
+- **本番環境に適用する前に、計画変更を検証する。** 不可視索引や SPM ベースラインを使用して、リスクなしでテストを行う。
+- **`SELECT *` を避ける。** 必要な列のみを取得するようにする。不要な列を取得すると、索引のみを使用したアクセス・パス（カバリング・インデックス）が妨げられる。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Problem | Fix |
+| 間違い | 問題点 | 解決策 |
 |---|---|---|
-| Calling functions on indexed columns: `WHERE UPPER(name) = 'SMITH'` | Invalidates the index | Create a function-based index: `CREATE INDEX ... ON t(UPPER(name))` |
-| Implicit type conversion: `WHERE emp_id = '100'` (emp_id is NUMBER) | Prevents index use | Match data types explicitly |
-| Stale statistics after bulk loads | CBO uses wrong cardinality | Run `GATHER_TABLE_STATS` after large DML |
-| Applying hints in application code | Brittle; breaks on rename | Use SQL profiles/baselines instead |
-| Using `ROWNUM` before `ORDER BY` | Returns unordered rows then filters | Use `FETCH FIRST N ROWS ONLY` or subquery |
-| Over-indexing | Slows DML; wastes space | Monitor index usage; drop unused indexes |
-| Ignoring `TEMP` tablespace spills | Hash/sort spills degrade performance | Increase PGA or rewrite to reduce intermediate sets |
+| 索引列に関数を使用: `WHERE UPPER(name) = 'SMITH'` | 索引が無効化される | 関数ベース索引を作成する: `CREATE INDEX ... ON t(UPPER(name))` |
+| 暗黙の型変換: `WHERE emp_id = '100'` (emp_id が NUMBER の場合) | 索引の使用が妨げられる | データ型を明示的に一致させる |
+| 大量ロード後の失効した統計情報 | CBO が誤ったカーディナリティを使用してしまう | 大量DMLの後は `GATHER_TABLE_STATS` を実行する |
+| アプリケーション・コード内でヒントを多用する | 壊れやすく、オブジェクト名の変更に対応できない | 代わりに SQL プロファイル/ベースラインを使用する |
+| `ORDER BY` の前に `ROWNUM` を使用 | ソートされていない行を返してからフィルタリングしてしまう | `FETCH FIRST N ROWS ONLY` またはサブクエリを使用する |
+| 過剰なインデックス作成 | DMLが遅くなり、領域を浪費する | 索引の使用状況を監視し、未使用の索引を削除する |
+| `TEMP` 表領域への退避を無視する | ハッシュ/ソートの退避はパフォーマンスを著しく低下させる | PGAを増やすか、中間セットを減らすようにクエリを書き換える |
 
 ---
 
-## Oracle-Specific Notes
+## Oracle 固有の考慮事項
 
-- The `OPTIMIZER_ADAPTIVE_PLANS` parameter (default ON in 12c+) allows Oracle to switch join methods mid-execution based on actual row counts. This helps but can cause surprising plan changes.
-- `OPTIMIZER_STATISTICS_ADVISOR` (12.2+) runs automatically during the maintenance window and recommends statistics gathering changes.
-- On Exadata, `CELL_OFFLOAD_PROCESSING` in the plan indicates Smart Scan is active — full scans on Exadata can be very fast due to storage cell processing.
-- The `/*+ GATHER_PLAN_STATISTICS */` hint adds `A-Rows` and `A-Time` to any query without needing autotrace — useful in application code testing.
+- `OPTIMIZER_ADAPTIVE_PLANS` パラメータ (12c以降、デフォルト ON) により、実測行数に基づいて実行中に結合手法を切り替えることができる。これは有効だが、予期せぬ計画変更の原因にもなる。
+- `OPTIMIZER_STATISTICS_ADVISOR` (12.2以降) がメンテナンス中に自動実行され、統計情報収集に関する改善を推奨する。
+- Exadata では、実行計画内の `CELL_OFFLOAD_PROCESSING` は Smart Scan が有効であることを示す。Exadata ではストレージ・セル側で処理が行われるため、全表スキャンが非常に高速になる場合がある。
+- `/*+ GATHER_PLAN_STATISTICS */` ヒントを使用すると、autotrace を使用せずにクエリに `A-Rows` と `A-Time` 情報を追加でき、アプリケーション・コードのテストに非常に有用である。
 
 ---
 
+## Oracle バージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- 本ガイドの基本的な指針は、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または 23ai としてマークされた機能は、Oracle Database 26ai 対応機能として扱う。
+- ハイブリッド環境では、デフォルトや非推奨がリリース更新によって異なる場合があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
-
-## Sources
+## ソース
 
 - [Oracle Database 19c SQL Tuning Guide (TGSQL)](https://docs.oracle.com/en/database/oracle/oracle-database/19/tgsql/)
 - [Oracle Database 19c SQL Language Reference (SQLRF)](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/)

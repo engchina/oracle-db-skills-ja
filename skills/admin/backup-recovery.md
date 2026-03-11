@@ -1,164 +1,165 @@
-# Oracle RMAN Backup and Recovery
+# Oracle RMANのバックアップとリカバリ
 
-## Overview
+## 概要
 
-Recovery Manager (RMAN) is Oracle's primary tool for database backup, restore, and recovery operations. It provides block-level backup integrity checking, compression, encryption, incremental backups, and tight integration with the Oracle database engine. RMAN eliminates the need for manual backup scripting and ensures consistent backups even for an open database.
+Recovery Manager (RMAN)は、Oracleのバックアップ、リストア、およびリカバリ操作のための主要なツールである。ブロック・レベルのバックアップ整合性チェック、圧縮、暗号化、増分バックアップを提供し、Oracleデータベース・エンジンと密接に統合されている。RMANを使用することで、手動のバックアップ・スクリプト作成が不要になり、オープン状態のデータベースでも一貫性のあるバックアップを確保できる。
 
-Understanding backup and recovery is the single most critical skill for any Oracle DBA. A database that cannot be recovered is a database that cannot be trusted.
+バックアップとリカバリの理解は、Oracle DBAにとって最も重要なスキルである。リカバリできないデータベースは、信頼に値しない。
 
 ---
 
-## RMAN Architecture
+## RMANのアーキテクチャ
 
-### Core Components
+### コア・コンポーネント
 
-**RMAN Executable**
-The `rman` binary that connects to the target database and optionally a recovery catalog. It interprets RMAN commands, communicates with the target database server processes, and manages backup metadata.
+**RMAN実行ファイル**
+ターゲット・データベース、およびオプションでリカバリ・カタログに接続する`rman`バイナリ。RMANコマンドを解釈し、ターゲット・データベースのサーバー・プロセスと通信して、バックアップのメタデータを管理する。
 
-**Target Database**
-The database being backed up or recovered. RMAN connects using a dedicated server process and reads backup metadata from the control file or recovery catalog.
+**ターゲット・データベース**
+バックアップまたはリカバリの対象となるデータベース。RMANは専用のサーバー・プロセスを使用して接続し、制御ファイルまたはリカバリ・カタログからバックアップ・メタデータを読み取る。
 
-**Recovery Catalog**
-An optional but recommended separate Oracle schema that stores RMAN metadata (backup history, datafile information, archived log history). Without a catalog, metadata is stored only in the target's control file. A catalog enables cross-database reporting, stored scripts, and longer retention of backup history than the control file alone.
+**リカバリ・カタログ**
+RMANのメタデータ（バックアップ履歴、データファイル情報、アーカイブ・ログ履歴）を格納する、オプションだが推奨される別のOracleスキーマ。カタログがない場合、メタデータはターゲットの制御ファイルにのみ格納される。カタログを使用すると、クロス・データベース・レポート、格納デポジトリ・スクリプト、および制御ファイル単体よりも長いバックアップ履歴の保持が可能になる。
 
-**Media Management Layer (MML)**
-An optional third-party interface (e.g., Oracle Secure Backup, Veritas NetBackup, Commvault) that allows RMAN to write backups directly to tape libraries. RMAN communicates with the MML via the SBT (System Backup to Tape) channel type.
+**メディア管理レイヤー (MML)**
+RMANがバックアップをテープ・ライブラリに直接書き込めるようにするための、オプションのサードパーティ・インターフェース（例：Oracle Secure Backup、Veritas NetBackup、Commvault）。RMANはSBT（System Backup to Tape）チャネル・タイプを介してMMLと通信する。
 
-**Channels**
-Channels are server processes that perform the actual I/O. Each channel maps to one backup stream. RMAN supports automatic channels (configured via `CONFIGURE`) or manually allocated channels within a `RUN` block.
+**チャネル**
+実際にI/Oを実行するサーバー・プロセス。各チャネルは1つのバックアップ・ストリームに対応する。RMANは、自動チャネル（`CONFIGURE`で構成）または`RUN`ブロック内で手動で割り当てられたチャネルをサポートする。
 
 ```
-RMAN Architecture:
+RMANアーキテクチャ:
 ┌─────────────┐       ┌──────────────────────┐
-│  RMAN Client│──────▶│  Target Database      │
-│  (rman exe) │       │  (server process)     │
-└─────────────┘       │  reads: control file  │
-        │             └──────────────────────┘
+│  RMANクライアント│──────▶│  ターゲット・データベース    │
+│  (rman exe) │       │  (サーバー・プロセス)       │
+│             │       │  読み取り: 制御ファイル     │
+└─────────────┘       └──────────────────────┘
         │                        │
-        ▼                        ▼
-┌──────────────────┐    ┌─────────────────────┐
-│ Recovery Catalog │    │   Backup Pieces /    │
-│ (separate DB)    │    │   Image Copies on    │
-│ RMAN schema      │    │   Disk or Tape       │
-└──────────────────┘    └─────────────────────┘
+        │                        ▼
+        ▼               ┌─────────────────────┐
+┌──────────────────┐    │ バックアップ・ピース /    │
+│ リカバリ・カタログ    │    │ ディスクまたはテープ上の  │
+│ (別のDB)          │    │ イメージ・コピー         │
+│ RMANスキーマ      │    └─────────────────────┘
+└──────────────────┘
 ```
 
 ---
 
-## Backup Sets vs Image Copies
+## バックアップ・セット vs イメージ・コピー
 
-### Backup Sets
+### バックアップ・セット
 
-A backup set is RMAN's proprietary backup format. It consists of one or more **backup pieces** (physical files). RMAN reads used blocks from datafiles and packs them into backup pieces, skipping unused blocks by default. This makes backup sets smaller than image copies.
+バックアップ・セットはRMAN独自のバックアップ形式である。1つ以上の**バックアップ・ピース**（物理ファイル）で構成される。RMANはデータファイルから使用済みブロックを読み取り、それらをバックアップ・ピースにまとめ、デフォルトで未使用ブロックをスキップする。これにより、バックアップ・セットはイメージ・コピーよりもサイズが小さくなる。
 
-- Supports compression (BASIC, LOW, MEDIUM, HIGH via `AS COMPRESSED BACKUPSET`)
-- Supports encryption
-- Supports incremental backups natively
-- Required for tape (SBT) backups
-- Cannot be used directly by Oracle without RMAN restore; must be restored before use
+- 圧縮をサポート（`AS COMPRESSED BACKUPSET`によるBASIC, LOW, MEDIUM, HIGH）
+- 暗号化をサポート
+- 増分バックアップをネイティブにサポート
+- テープ（SBT）バックアップに必須
+- RMANのリストアなしではOracleで直接使用できない（使用前にリストアが必要）
 
 ```sql
--- Create a full backup set of the database
+-- データベースの完全バックアップ・セットを作成
 BACKUP DATABASE;
 
--- Create a compressed backup set
+-- 圧縮されたバックアップ・セットを作成
 BACKUP AS COMPRESSED BACKUPSET DATABASE;
 
--- Backup a specific tablespace as a backup set
+-- 特定の表領域をバックアップ・セットとしてバックアップ
 BACKUP TABLESPACE users;
 ```
 
-### Image Copies
+### イメージ・コピー
 
-An image copy is a bit-for-bit copy of a datafile, archived log, or control file — identical in format to the original. It can be used directly by Oracle (e.g., placed in the correct location and recovered without a restore step).
+イメージ・コピーは、データファイル、アーカイブ・ログ、または制御ファイルのビット単位のコピーであり、元のファイルと形式が同一である。Oracleで直接使用できる（例：正しい場所に配置し、リストア・ステップなしでリカバリする）。
 
-- Faster recovery: no restore step needed, just switch and recover
-- Larger on disk: copies all blocks including unused ones
-- Can be incrementally updated with `RECOVER COPY` (rolling forward an image copy with incremental backups)
-- Cannot be written to tape via SBT without conversion
+- 高速なリカバリ：リストア・ステップが不要で、スイッチしてリカバリするだけ
+- ディスク上のサイズが大きい：未使用ブロックを含むすべてのブロックをコピーする
+- `RECOVER COPY`（増分バックアップを使用してイメージ・コピーをロールフォワードする）により増分更新が可能
+- 変換なしではSBT経由でテープに書き込めない
 
 ```sql
--- Create image copies of all datafiles
+-- すべてのデータファイルのイメージ・コピーを作成
 BACKUP AS COPY DATABASE;
 
--- Create an image copy of a specific datafile
+-- 特定のデータファイルのイメージ・コピーを作成
 BACKUP AS COPY DATAFILE '/oradata/users01.dbf';
 ```
 
-### Backup Sets vs Image Copies: When to Use Each
+### バックアップ・セット vs イメージ・コピー：使い分け
 
-| Factor | Backup Set | Image Copy |
+| 要因 | バックアップ・セット | イメージ・コピー |
 |---|---|---|
-| Disk space | Smaller (skips empty blocks) | Larger (full copy) |
-| Backup time | Slower (compression overhead possible) | Faster |
-| Recovery time | Slower (restore + recover) | Faster (switch + recover) |
-| Tape support | Yes | No (directly) |
-| Incrementally updatable | Yes (incremental backups) | Yes (RECOVER COPY) |
-| Direct use without RMAN | No | Yes |
+| ディスク領域 | 小さい（空きブロックをスキップ） | 大きい（完全なコピー） |
+| バックアップ時間 | 遅い（圧縮のオーバーヘッドの可能性あり） | 速い |
+| リカバリ時間 | 遅い（リストア + リカバリ） | 速い（スイッチ + リカバリ） |
+| テープ・サポート | あり | なし（直接は不可） |
+| 増分更新の可否 | あり（増分バックアップ） | あり（RECOVER COPY） |
+| RMANなしでの直接使用 | 不可 | 可 |
 
 ---
 
-## Incremental Backups (Level 0 and Level 1)
+## 増分バックアップ (レベル0とレベル1)
 
-Incremental backups copy only blocks that have changed since a previous backup. RMAN tracks changed blocks using the **Block Change Tracking (BCT)** file, which dramatically speeds up incremental backups by avoiding full datafile scans.
+増分バックアップは、前回のバックアップ以降に変更されたブロックのみをコピーする。RMANは、**ブロック変更トラッキング (BCT)**ファイルを使用して変更されたブロックを追跡する。これにより、データファイル全体のスキャンを回避し、増分バックアップを劇的に高速化できる。
 
-### Level 0
+### レベル0
 
-A level 0 incremental backup is the baseline — it copies all used blocks, exactly like a full backup, but it is tagged as an incremental baseline. A subsequent level 1 backup can be taken against it.
+レベル0増分バックアップはベースラインであり、フル・バックアップと同様に使用済みブロックをすべてコピーするが、増分ベースラインとしてタグ付けされる。後続のレベル1バックアップはこのレベル0に対して取得される。
 
 ```sql
--- Full incremental baseline (Level 0)
+-- フル増分ベースライン (レベル0)
 BACKUP INCREMENTAL LEVEL 0 DATABASE;
 ```
 
-### Level 1
+### レベル1
 
-A level 1 incremental backup copies only blocks changed since the most recent level 0 or level 1 backup. There are two types:
+レベル1増分バックアップは、直近のレベル0またはレベル1バックアップ以降に変更されたブロックのみをコピーする。以下の2つのタイプがある：
 
-- **Differential** (default): copies blocks changed since the last level 0 or level 1
-- **Cumulative**: copies blocks changed since the last level 0 only
+- **差分 (Differential)**（デフォルト）：前回のレベル0またはレベル1以降に変更されたブロックをコピーする
+- **累積 (Cumulative)**：前回のレベル0以降に変更されたすべてのブロックをコピーする
 
 ```sql
--- Differential incremental (default) — backs up changes since last level 0 or 1
+-- 差分増分（デフォルト） — 前回のレベル0または1以降の変更をバックアップ
 BACKUP INCREMENTAL LEVEL 1 DATABASE;
 
--- Cumulative incremental — backs up all changes since last level 0
+-- 累積増分 — 前回のレベル0以降のすべての変更をバックアップ
 BACKUP INCREMENTAL LEVEL 1 CUMULATIVE DATABASE;
 ```
 
-### Typical Weekly Incremental Strategy
+### 一般的な週次増分戦略
 
 ```
-Sunday:    BACKUP INCREMENTAL LEVEL 0 DATABASE;   -- full baseline
-Monday:    BACKUP INCREMENTAL LEVEL 1 DATABASE;   -- Mon changes
-Tuesday:   BACKUP INCREMENTAL LEVEL 1 DATABASE;   -- Tue changes
-Wednesday: BACKUP INCREMENTAL LEVEL 1 DATABASE;   -- Wed changes
+日曜日: BACKUP INCREMENTAL LEVEL 0 DATABASE;   -- フル・ベースライン
+月曜日: BACKUP INCREMENTAL LEVEL 1 DATABASE;   -- 月曜日の変更
+火曜日: BACKUP INCREMENTAL LEVEL 1 DATABASE;   -- 火曜日の変更
+水曜日: BACKUP INCREMENTAL LEVEL 1 DATABASE;   -- 水曜日の変更
 ...
-Saturday:  BACKUP INCREMENTAL LEVEL 1 DATABASE;   -- Sat changes
+土曜日: BACKUP INCREMENTAL LEVEL 1 DATABASE;   -- 土曜日の変更
 ```
 
-### Block Change Tracking
+### ブロック変更トラッキング
 
-Enable BCT to avoid full datafile scan during incremental backups:
+増分バックアップ中のフル・データファイル・スキャンを避けるためにBCTを有効にする：
 
 ```sql
--- Enable block change tracking (requires Enterprise Edition)
+-- ブロック変更トラッキングを有効化 (Enterprise Editionが必要)
 ALTER DATABASE ENABLE BLOCK CHANGE TRACKING
   USING FILE '/oradata/bct/change_tracking.bct';
 
--- Verify
+-- 確認
 SELECT status, filename FROM v$block_change_tracking;
 ```
 
-### Incrementally Updated Image Copies (Merge Strategy)
+### 増分更新バックアップ (マージ戦略)
 
-A powerful technique that combines image copies with incremental backups to maintain a "rolling" image copy that is always current to the previous day, allowing very fast recovery.
+バックアップ・コピー（イメージ・コピー）と増分バックアップを組み合わせて、常に前日の状態に保たれたイメージ・コピーを維持する強力なテクニックであり、非常に高速なリカバリが可能になる。
 
 ```sql
--- Day 1: Create level 0 image copy baseline
+-- 1日目: レベル0イメージ・コピー・ベースラインを作成
 BACKUP INCREMENTAL LEVEL 0 AS COPY DATABASE;
 
--- Daily: Roll forward the image copy with yesterday's changes
+-- 毎日: イメージ・コピーを昨日の変更でロールフォワードする
 RECOVER COPY OF DATABASE WITH TAG 'daily_copy'
   UNTIL TIME 'SYSDATE - 1';
 BACKUP INCREMENTAL LEVEL 1 FOR RECOVER OF COPY
@@ -167,70 +168,70 @@ BACKUP INCREMENTAL LEVEL 1 FOR RECOVER OF COPY
 
 ---
 
-## Backup Retention Policies
+## バックアップ保持ポリシー
 
-RMAN retention policies define how long backups are kept before being considered obsolete.
+RMAN保持ポリシーは、バックアップが「不要（obsolete）」と見なされるまでどのくらいの期間保持するかを定義する。
 
-### Retention by Recovery Window
+### リカバリ・ウィンドウによる保持
 
-Keeps enough backups to satisfy recovery to any point within the specified window:
+指定されたウィンドウ内の任意の時点へのリカバリを可能にするのに十分なバックアップを保持する：
 
 ```sql
--- Keep backups needed to recover to any point in the last 7 days
+-- 過去7日間の任意の時点にリカバリするために必要なバックアップを保持
 CONFIGURE RETENTION POLICY TO RECOVERY WINDOW OF 7 DAYS;
 ```
 
-### Retention by Redundancy
+### 冗長性による保持
 
-Keeps a fixed number of backup copies:
+特定の数のバックアップ・コピーを保持する：
 
 ```sql
--- Keep 2 full copies of each datafile
+-- 各データファイルのフル・コピーを2つ保持
 CONFIGURE RETENTION POLICY TO REDUNDANCY 2;
 ```
 
-### Clearing the Retention Policy
+### 保持ポリシーのクリア
 
 ```sql
--- No retention policy (keep everything — not recommended without external management)
+-- 保持ポリシーなし（すべて保持 — 外部管理がない場合は非推奨）
 CONFIGURE RETENTION POLICY TO NONE;
 ```
 
-### Deleting Obsolete Backups
+### 不要なバックアップの削除
 
-After a retention policy is set, obsolete backups can be removed:
+保持ポリシーを設定した後、不要なバックアップ（obsolete）を削除できる：
 
 ```sql
--- List what would be deleted
+-- 削除される対象をリスト
 REPORT OBSOLETE;
 
--- Delete obsolete backup pieces
+-- 不要なバックアップ・ピースを削除
 DELETE OBSOLETE;
 
--- Delete all expired backup records (pieces not found in expected location)
+-- すべての期限切れ（expired）バックアップ・レコードを削除（期待される場所にファイルがないもの）
 CROSSCHECK BACKUP;
 DELETE EXPIRED BACKUP;
 ```
 
 ---
 
-## RMAN Catalog Setup
+## RMANカタログのセットアップ
 
-### Why Use a Recovery Catalog
+### リカバリ・カタログを使用する理由
 
-- Stores backup history beyond what fits in the control file's `CONTROL_FILE_RECORD_KEEP_TIME`
-- Enables stored RMAN scripts shared across databases
-- Supports reporting on backups across multiple target databases
-- Required for RMAN virtual private catalog (VPC) for delegated access
+- 制御ファイルの`CONTROL_FILE_RECORD_KEEP_TIME`に収まる期間を超えてバックアップ履歴を保存できる
+- 複数のデータベース間で共有される格納RMANスクリプトを使用できる
+- 複数のターゲット・データベースにわたるバックアップのレポートをサポートする
+- アクセス権限を委譲するためのRMAN仮想プライベート・カタログ(VPC)に必要
 
-### Creating the Catalog
+### カタログの作成
 
 ```sql
--- 1. Create a dedicated tablespace in the catalog database
+-- 1. カタログ・データベースに専用の表領域を作成
 CREATE TABLESPACE rman_cat
   DATAFILE '/oradata/rmancat/rman_cat01.dbf' SIZE 500M AUTOEXTEND ON;
 
--- 2. Create the catalog owner
+-- 2. カタログ所有者ユーザーを作成
 CREATE USER rman_owner
   IDENTIFIED BY <password>
   DEFAULT TABLESPACE rman_cat
@@ -240,62 +241,62 @@ GRANT RECOVERY_CATALOG_OWNER TO rman_owner;
 ```
 
 ```bash
-# 3. Connect to RMAN and create the catalog schema
+# 3. RMANに接続してカタログ・スキーマを作成
 rman catalog rman_owner/<password>@catdb
 RMAN> CREATE CATALOG;
 ```
 
-### Registering a Target Database
+### ターゲット・データベースの登録
 
 ```bash
 rman target sys/<password>@proddb catalog rman_owner/<password>@catdb
 RMAN> REGISTER DATABASE;
 ```
 
-### Resync the Catalog
+### カタログの再同期
 
 ```sql
--- Synchronize catalog with the target's control file
+-- カタログをターゲットの制御ファイルと同期する
 RESYNC CATALOG;
 
--- Full resync (more thorough)
+-- フル再同期（より徹底的）
 RESYNC CATALOG FROM CONTROLFILECOPY '/path/to/ctl_copy';
 ```
 
 ---
 
-## Recovery Scenarios
+## リカバリ・シナリオ
 
-### Connecting to RMAN
+### RMANへの接続
 
 ```bash
-# Connect to target only (uses control file for metadata)
+# ターゲットのみに接続（メタデータに制御ファイルを使用）
 rman target sys/<password>@proddb
 
-# Connect with recovery catalog
+# リカバリ・カタログを使用して接続
 rman target sys/<password>@proddb catalog rman_owner/<password>@catdb
 
-# Connect as SYSDBA with OS authentication (local)
+# OS認証を使用してSYSDBAとして接続（ローカル）
 rman target /
 ```
 
-### Complete Recovery
+### 完全リカバリ
 
-Complete recovery recovers the database to the current point in time (no data loss). Requires all archived logs from after the backup through the current SCN.
+完全リカバリは、データベースを現在の時点までリカバリする（データ損失なし）。バックアップ以降から現在のSCNまでのすべてのアーカイブ・ログが必要。
 
 ```sql
--- Database is mounted (not open), restore and recover
+-- データベースをマウント（オープンではない）し、リストアとリカバリを行う
 STARTUP MOUNT;
 RESTORE DATABASE;
 RECOVER DATABASE;
 ALTER DATABASE OPEN;
 ```
 
-### Incomplete Recovery (Point-in-Time Recovery)
+### 不完全リカバリ (Point-in-Time Recovery)
 
-Used when you need to recover to a point before the current time — for example, to undo an accidental table drop or corruption event.
+誤ったテーブル削除や破損が発生する前など、現在より前の時点までリカバリする必要がある場合に使用する。
 
-**By SCN:**
+**SCNによる指定:**
 ```sql
 STARTUP MOUNT;
 RESTORE DATABASE UNTIL SCN 5432100;
@@ -303,7 +304,7 @@ RECOVER DATABASE UNTIL SCN 5432100;
 ALTER DATABASE OPEN RESETLOGS;
 ```
 
-**By Time:**
+**時間による指定:**
 ```sql
 STARTUP MOUNT;
 RESTORE DATABASE UNTIL TIME "TO_DATE('2025-12-01 14:30:00','YYYY-MM-DD HH24:MI:SS')";
@@ -311,7 +312,7 @@ RECOVER DATABASE UNTIL TIME "TO_DATE('2025-12-01 14:30:00','YYYY-MM-DD HH24:MI:S
 ALTER DATABASE OPEN RESETLOGS;
 ```
 
-**By Sequence:**
+**順序番号(Sequence)による指定:**
 ```sql
 STARTUP MOUNT;
 RESTORE DATABASE UNTIL SEQUENCE 1450 THREAD 1;
@@ -319,41 +320,41 @@ RECOVER DATABASE UNTIL SEQUENCE 1450 THREAD 1;
 ALTER DATABASE OPEN RESETLOGS;
 ```
 
-Note: `RESETLOGS` is required after incomplete recovery. It resets the log sequence and creates a new incarnation.
+注：不完全リカバリの後には`RESETLOGS`が必要である。これによりログ・シーケンスがリセットされ、新しいインカーネーションが作成される。
 
-### Tablespace Point-in-Time Recovery (TSPITR)
+### 表領域のポイント・イン・タイム・リカバリ (TSPITR)
 
-Recovers a single tablespace to a point in the past while the rest of the database continues running. Uses an auxiliary instance automatically.
+データベースの他の部分は実行したまま、単一の表領域を過去の時点にリカバリする。自動的に補助インスタンスを使用する。
 
 ```sql
--- Recover the USERS tablespace to 2 hours ago
+-- USERS表領域を2時間前の状態にリカバリ
 RECOVER TABLESPACE users
   UNTIL TIME 'SYSDATE - 2/24'
   AUXILIARY DESTINATION '/tmp/tspitr_aux';
 ```
 
-### Datafile Recovery
+### データファイルのリカバリ
 
-When a single datafile is lost or corrupted:
+単一のデータファイルが紛失または破損した場合：
 
 ```sql
--- Take the datafile offline
+-- データファイルをオフラインにする
 ALTER DATABASE DATAFILE '/oradata/users01.dbf' OFFLINE;
 
--- Restore just the missing datafile
+-- 切断されたデータファイルのみをリストア
 RESTORE DATAFILE '/oradata/users01.dbf';
 
--- Apply archived logs to bring it current
+-- アーカイブ・ログを適用して最新の状態にする
 RECOVER DATAFILE '/oradata/users01.dbf';
 
--- Bring the datafile back online
+-- データファイルをオンラインに戻す
 ALTER DATABASE DATAFILE '/oradata/users01.dbf' ONLINE;
 ```
 
-### Control File Recovery
+### 制御ファイルのリカバリ
 
 ```sql
--- Restore control file from autobackup
+-- 自動バックアップから制御ファイルをリストア
 STARTUP NOMOUNT;
 RESTORE CONTROLFILE FROM AUTOBACKUP;
 ALTER DATABASE MOUNT;
@@ -363,83 +364,83 @@ ALTER DATABASE OPEN RESETLOGS;
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- **Enable control file autobackup** — ensures RMAN can recover the control file even without a catalog. Note: autobackup is `ON` by default for databases with `COMPATIBLE` set to 12.2 or higher; verify the setting in older-compatibility databases.
+- **制御ファイルの自動バックアップを有効にする** — カタログがなくてもRMANが制御ファイルを確実にリカバリできるようにする。注：`COMPATIBLE`が12.2以上に設定されているデータベースでは、自動バックアップはデフォルトで「ON」になっているが、古い互換モードの場合は設定を確認すること。
   ```sql
   CONFIGURE CONTROLFILE AUTOBACKUP ON;
   CONFIGURE CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE DISK TO '/backup/ctl_%F';
   ```
 
-- **Always back up archived logs** — database backups without archived logs cannot be recovered to a consistent state.
+- **常にアーカイブ・ログをバックアップする** — アーカイブ・ログのないデータベース・バックアップは、一貫性のある状態にリカバリできない。
   ```sql
   BACKUP DATABASE PLUS ARCHIVELOG DELETE INPUT;
   ```
 
-- **Test your backups regularly** — validate that backup pieces are intact and restorable.
+- **定期的にバックアップをテストする** — バックアップ・ピースが完全であり、リストア可能であることを検証する。
   ```sql
   RESTORE DATABASE VALIDATE;
   RESTORE TABLESPACE users VALIDATE;
   ```
 
-- **Use a recovery catalog** for any production database — the control file alone is insufficient for long-term history.
+- **本番環境ではリカバリ・カタログを使用する** — 長期的な履歴を保持するには制御ファイルだけでは不十分である。
 
-- **Enable Block Change Tracking** on Enterprise Edition to speed up incremental backups.
+- **Enterprise Editionではブロック変更トラッキングを有効にする** — 増分バックアップを高速化するため。
 
-- **Store backups off-host** — on-host disk backups are useless if the server is lost. Use NFS, ASM, Object Storage, or tape.
+- **バックアップをホスト外に保存する** — サーバー自体が紛失した場合、ホスト上のディスク・バックアップは役に立たない。NFS、ASM、オブジェクト・ストレージ、またはテープを使用すること。
 
-- **Document and test your recovery runbooks** at least annually. A backup strategy that has never been tested is not a strategy.
+- **リカバリ手順書を作成し、少なくとも年に1回はテストする** — テストされていないバックアップ戦略は、戦略とは言えない。
 
-- **Back up before and after significant changes** (schema migrations, major patches, upgrades).
+- **大きな変更（スキーマ変更、大規模パッチ、アップグレードなど）の前後でバックアップを取得する。**
 
 ---
 
-## Common Mistakes and How to Avoid Them
+## よくある間違いと回避策
 
-**Backing up to the same disk as the database**
-If the disk fails, both the database and backups are lost. Always write backups to a separate storage tier.
+**データベースと同じディスクへのバックアップ**
+ディスクが故障すると、データベースとバックアップの両方が失われる。バックアップは必ず別のストレージ層に書き込むこと。
 
-**Never testing restores**
-Untested backups are assumptions, not guarantees. Schedule quarterly restore tests to a separate server.
+**リストアを一度もテストしない**
+テストされていないバックアップは想定であり、保証ではない。四半期ごとに別のサーバーへのリストア・テストをスケジュールすること。
 
-**Ignoring RMAN alerts in the alert log**
-Failed backup jobs often write errors to the alert log and the RMAN log but do not page anyone. Set up monitoring for RMAN job status via `V$RMAN_STATUS`.
+**アラートログ内のRMANアラートの無視**
+失敗したバックアップ・ジョブはアラートログやRMANログにエラーを書き込むが、通知されないことが多い。`V$RMAN_STATUS`を使用してRMANジョブのステータス監視を設定すること。
 
 ```sql
--- Check recent RMAN job status
+-- 最近のRMANジョブのステータスを確認
 SELECT start_time, end_time, status, input_bytes_display, output_bytes_display
 FROM v$rman_backup_job_details
 ORDER BY start_time DESC
 FETCH FIRST 10 ROWS ONLY;
 ```
 
-**Not backing up the control file and SPFILE separately**
+**制御ファイルとSPFILEを個別にバックアップしない**
 ```sql
--- Explicit control file and SPFILE backup
+-- 制御ファイルとSPFILEの明示的なバックアップ
 BACKUP CURRENT CONTROLFILE;
 BACKUP SPFILE;
 ```
 
-**Letting archived logs fill the FRA**
+**アーカイブ・ログによるFRAの圧迫**
 ```sql
--- Check FRA usage
+-- FRAの使用状況を確認
 SELECT name, space_limit/1048576 limit_mb,
        space_used/1048576 used_mb,
        space_reclaimable/1048576 reclaimable_mb
 FROM v$recovery_file_dest;
 
--- Delete archived logs already backed up at least once
+-- 少なくとも1回はバックアップ済みのアーカイブ・ログを削除
 DELETE ARCHIVELOG ALL BACKED UP 1 TIMES TO DEVICE TYPE DISK;
 ```
 
-**Using NOARCHIVELOG mode for anything other than dev/test**
-NOARCHIVELOG mode means you can only recover to the last full backup — all transactions after that backup are permanently lost on media failure. Always use ARCHIVELOG mode for production.
+**開発/テスト以外でのNOARCHIVELOGモードの使用**
+NOARCHIVELOGモードでは、最後のフル・バックアップまでしかリカバリできない。メディア障害が発生すると、それ以降のすべてのトランザクションが永久に失われる。本番環境では必ずARCHIVELOGモードを使用すること。
 
 ```sql
--- Check archivelog mode
+-- アーカイブログ・モードの確認
 SELECT log_mode FROM v$database;
 
--- Enable archivelog mode
+-- アーカイブログ・モードの有効化
 SHUTDOWN IMMEDIATE;
 STARTUP MOUNT;
 ALTER DATABASE ARCHIVELOG;
@@ -448,16 +449,15 @@ ALTER DATABASE OPEN;
 
 ---
 
+## Oracleバージョンに関する注意 (19c vs 26ai)
 
-## Oracle Version Notes (19c vs 26ai)
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c、23c、または23aiとしてマークされた機能は、Oracle Database 26ai対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 両方のバージョンをサポートする環境では、リリースの更新によってデフォルトや非推奨が異なる可能性があるため、19cと26aiの両方で構文とパッケージの動作をテストすること。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+## ソース
 
-## Sources
-
-- [Oracle Database 19c Backup and Recovery User's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/19/bradv/)
-- [Oracle Database 19c RMAN Reference — BACKUP command](https://docs.oracle.com/en/database/oracle/oracle-database/19/rcmrf/BACKUP.html)
-- [Oracle Database 19c RMAN Reference — CONFIGURE command](https://docs.oracle.com/en/database/oracle/oracle-database/19/rcmrf/CONFIGURE.html)
-- [Oracle Database 19c Reference — CONTROL_FILE_RECORD_KEEP_TIME](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/CONTROL_FILE_RECORD_KEEP_TIME.html)
+- [Oracle Database 19c バックアップおよびリカバリ・ユーザーズ・ガイド](https://docs.oracle.com/en/database/oracle/oracle-database/19/bradv/)
+- [Oracle Database 19c RMANリファレンス — BACKUPコマンド](https://docs.oracle.com/en/database/oracle/oracle-database/19/rcmrf/BACKUP.html)
+- [Oracle Database 19c RMANリファレンス — CONFIGUREコマンド](https://docs.oracle.com/en/database/oracle/oracle-database/19/rcmrf/CONFIGURE.html)
+- [Oracle Database 19c リファレンス — CONTROL_FILE_RECORD_KEEP_TIME](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/CONTROL_FILE_RECORD_KEEP_TIME.html)

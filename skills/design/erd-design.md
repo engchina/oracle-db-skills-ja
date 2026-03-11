@@ -1,44 +1,44 @@
-# ERD Design & Normalization for Oracle Database
+# Oracle DatabaseのERD設計と正規化
 
-## Overview
+## 概要
 
-Entity Relationship Design (ERD) is the foundational step in building a well-structured relational database. In Oracle environments, a well-designed ERD translates directly into maintainable schemas, efficient queries, and predictable growth. This guide covers the full spectrum of ERD design: entity and relationship modeling, normalization through all normal forms, Oracle-specific naming rules, and cardinality modeling best practices.
+実体関連設計 (ERD: Entity Relationship Design) は、適切に構造化されたリレーショナル・データベースを構築するための基礎となるステップである。Oracle 環境において適切に設計された ERD は、保守性の高いスキーマ、効率的なクエリ、および予測可能な拡張性に直結する。このガイドでは、エンティティとリレーションシップのモデリング、すべての正規形による正規化、Oracle 固有の命名規則、およびカーディナリティ・モデリングのベスト・プラクティスなど、ERD 設計の全範囲を網羅する。
 
 ---
 
-## 1. Core ERD Concepts
+## 1. ERD のコア概念
 
-### Entities
+### エンティティ (Entities)
 
-An **entity** represents a distinct object or concept about which data is stored. In Oracle, each entity typically maps to a table. Entities fall into two categories:
+**エンティティ**とは、データが格納される対象となる、明確に区別できるオブジェクト（実体）または概念を表す。Oracle では、通常、各エンティティは 1 つのテーブルに対応する。エンティティは以下の 2 つのカテゴリに分類される：
 
-- **Strong entities**: Exist independently (e.g., `CUSTOMER`, `PRODUCT`).
-- **Weak entities**: Depend on a strong entity for their existence (e.g., `ORDER_ITEM` depends on `ORDER`).
+- **強実体 (Strong entities)**: 独立して存在する（例：`CUSTOMER`, `PRODUCT`）。
+- **弱実体 (Weak entities)**: 存在が強実体に依存する（例：`ORDER_ITEM` は `ORDER` に依存する）。
 
-### Attributes
+### 属性 (Attributes)
 
-Attributes describe properties of an entity. Oracle-specific considerations:
+属性は、エンティティのプロパティ（性質）を表す。Oracle 固有の考慮事項は以下の通り：
 
-| Attribute Type | Description | Oracle Mapping |
+| 属性タイプ | 説明 | Oracle でのマッピング |
 |---|---|---|
-| Simple | Single-valued, atomic | Standard column |
-| Composite | Can be broken into sub-parts (e.g., full name) | Multiple columns preferred |
-| Derived | Computed from other data | Virtual column or view |
-| Multi-valued | Can hold multiple values | Child table (avoid arrays) |
+| 単一 (Simple) | 単一の値、不可分 | 標準的な列 |
+| 複合 (Composite) | 部分に分割可能（例：フルネーム） | 複数の列に分けることが推奨される |
+| 誘導 (Derived) | 他のデータから計算される | 仮想列 (Virtual column) またはビュー |
+| 多値 (Multi-valued) | 複数の値を保持できる | 子テーブル（配列は避ける） |
 
-### Relationships
+### リレーションシップ (Relationships)
 
-Relationships define how entities associate with one another. Oracle enforces relationships through **foreign key constraints**, **check constraints**, and **triggers**.
+リレーションシップは、エンティティ同士がどのように関連し合うかを定義する。Oracle では、**外部キー制約**、**チェック制約**、および**トリガー**を使用してリレーションシップを適用する。
 
 ---
 
-## 2. Relationship Cardinality
+## 2. リレーションシップのカーディナリティ (多重度)
 
-Cardinality defines the numeric nature of a relationship between two entities.
+カーディナリティは、2 つのエンティティ間の関係の「数」を定義する。
 
-### One-to-One (1:1)
+### 1 対 1 (1:1)
 
-Rare in practice; often indicates a candidate for table merging or a security-based split.
+実務では稀である。多くの場合、テーブルの統合が検討されるべきか、あるいはセキュリティ上の理由で分割されていることを示す。
 
 ```sql
 CREATE TABLE EMPLOYEE (
@@ -58,9 +58,9 @@ CREATE TABLE EMPLOYEE_SECURITY (
 );
 ```
 
-### One-to-Many (1:N)
+### 1 対 多 (1:N)
 
-The most common relationship type. The "many" side holds the foreign key.
+最も一般的なリレーションシップ・タイプ。「多」側に外部キーを持たせる。
 
 ```sql
 CREATE TABLE DEPARTMENT (
@@ -80,9 +80,9 @@ CREATE TABLE EMPLOYEE (
 );
 ```
 
-### Many-to-Many (M:N)
+### 多 対 多 (M:N)
 
-Resolved through an **associative (junction) table**, which itself often carries attributes.
+**関連表 (associative table / junction table)** を介して解消される。関連表自体が属性を持つことも多い。
 
 ```sql
 CREATE TABLE STUDENT (
@@ -97,7 +97,7 @@ CREATE TABLE COURSE (
     CONSTRAINT pk_course PRIMARY KEY (course_id)
 );
 
--- Junction table with its own attributes
+-- 独自の属性を持つ関連表 (中間表)
 CREATE TABLE ENROLLMENT (
     student_id    NUMBER(10) NOT NULL,
     course_id     NUMBER(6)  NOT NULL,
@@ -109,25 +109,25 @@ CREATE TABLE ENROLLMENT (
 );
 ```
 
-### Self-Referencing (Recursive) Relationships
+### 自己参照 (再帰) リレーションシップ
 
-Common for hierarchical data (org charts, bill of materials).
+組織図や部品構成表 (BOM) などの階層データに一般的である。
 
 ```sql
 CREATE TABLE CATEGORY (
     category_id        NUMBER(10)    NOT NULL,
     category_name      VARCHAR2(100) NOT NULL,
-    parent_category_id NUMBER(10),              -- NULL for root nodes
+    parent_category_id NUMBER(10),              -- ルート・ノードの場合は NULL
     CONSTRAINT pk_category     PRIMARY KEY (category_id),
     CONSTRAINT fk_cat_parent   FOREIGN KEY (parent_category_id)
                                REFERENCES CATEGORY (category_id)
 );
 ```
 
-Traversing this hierarchy in Oracle uses `CONNECT BY` or recursive CTEs (11g R2+):
+Oracle でこの階層をトラバース（巡回）するには、`CONNECT BY` または再帰的 CTE (11g R2 以降) を使用する：
 
 ```sql
--- Oracle hierarchical query
+-- Oracle 階層クエリ
 SELECT category_id, category_name, LEVEL AS depth,
        SYS_CONNECT_BY_PATH(category_name, ' > ') AS full_path
 FROM   CATEGORY
@@ -138,25 +138,25 @@ ORDER  SIBLINGS BY category_name;
 
 ---
 
-## 3. Normalization
+## 3. 正規化 (Normalization)
 
-Normalization reduces data redundancy and improves data integrity by organizing data into well-structured tables. Each normal form builds on the previous.
+正規化は、データを適切に構造化されたテーブルに整理することで、データの冗長性を削減し、データ整合性を向上させる。各正規形は前のステップの上に成り立つ。
 
-### First Normal Form (1NF)
+### 第 1 正規形 (1NF)
 
-**Rules:**
-- All column values must be atomic (indivisible).
-- No repeating groups or arrays.
-- Each row must be uniquely identifiable (primary key exists).
+**ルール:**
+- すべての列の値は原子性 (不可分) を持たなければならない。
+- 繰り返しグループや配列を持ってはいけない。
+- 各行は一意に識別可能（主キーが存在する）でなければならない。
 
-**Violation example:**
+**違反例:**
 
 ```
-CUSTOMER(customer_id, name, phone1, phone2, phone3)  -- repeating groups
-CUSTOMER(customer_id, name, "555-1234, 555-5678")    -- non-atomic value
+CUSTOMER(customer_id, name, phone1, phone2, phone3)  -- 繰り返しグループ
+CUSTOMER(customer_id, name, "555-1234, 555-5678")    -- 非原子的な値
 ```
 
-**1NF resolution:**
+**1NF での解決:**
 
 ```sql
 CREATE TABLE CUSTOMER (
@@ -175,20 +175,20 @@ CREATE TABLE CUSTOMER_PHONE (
 );
 ```
 
-### Second Normal Form (2NF)
+### 第 2 正規形 (2NF)
 
-**Rules:**
-- Must be in 1NF.
-- Every non-key attribute must be fully functionally dependent on the **entire** primary key (no partial dependencies — only relevant when PK is composite).
+**ルール:**
+- 1NF であること。
+- すべての非キー属性は、主キーの**全体**に対して完全に関数従属していなければならない（部分従属があってはいけない。主キーが複合キーの場合にのみ関係する）。
 
-**Violation example** (composite PK: `order_id + product_id`):
+**違反例** (複合主キー: `order_id + product_id`):
 
 ```
 ORDER_ITEM(order_id, product_id, quantity, product_name, product_price)
--- product_name and product_price depend only on product_id, not the full key
+-- product_name と product_price は product_id のみに従属しており、全キーには従属していない
 ```
 
-**2NF resolution:**
+**2NF での解決:**
 
 ```sql
 CREATE TABLE PRODUCT (
@@ -202,42 +202,42 @@ CREATE TABLE ORDER_ITEM (
     order_id    NUMBER(10) NOT NULL,
     product_id  NUMBER(10) NOT NULL,
     quantity    NUMBER(8)  NOT NULL,
-    unit_price  NUMBER(12,2) NOT NULL,  -- captured at time of order (snapshot)
+    unit_price  NUMBER(12,2) NOT NULL,  -- 注文時の価格（スナップショット）として保持
     CONSTRAINT pk_order_item  PRIMARY KEY (order_id, product_id),
     CONSTRAINT fk_oi_product  FOREIGN KEY (product_id) REFERENCES PRODUCT (product_id)
 );
 ```
 
-### Third Normal Form (3NF)
+### 第 3 正規形 (3NF)
 
-**Rules:**
-- Must be in 2NF.
-- No transitive dependencies: non-key attributes must not depend on other non-key attributes.
+**ルール:**
+- 2NF であること。
+- 推移的従属がないこと：非キー属性は他の非キー属性に従属してはならない。
 
-**Violation example:**
+**違反例:**
 
 ```
 EMPLOYEE(employee_id, name, department_id, department_name, department_location)
--- department_name and department_location depend on department_id, not employee_id
+-- department_name と department_location は employee_id ではなく department_id に従属している
 ```
 
-**3NF resolution:** Extract `DEPARTMENT` as a separate table (already shown in earlier examples).
+**3NF での解決:** `DEPARTMENT` を別のテーブルとして抽出する（既出の例を参照）。
 
-### Boyce-Codd Normal Form (BCNF)
+### ボイス・コッド正規形 (BCNF)
 
-A stricter version of 3NF. Every determinant must be a candidate key. Violations occur when a table has multiple overlapping candidate keys.
+3NF のより厳格なバージョン。すべての決定子が候補キーである必要がある。テーブルに複数の重複する候補キーがある場合に違反が発生する。
 
 ```sql
--- Violation: TEACHING(student, subject, teacher)
--- where each teacher teaches only one subject, but a student can have multiple teachers
--- Determinants: (student, subject) -> teacher  AND  (student, teacher) -> subject
--- teacher -> subject (teacher is not a candidate key)
+-- 違反例: TEACHING(student, subject, teacher)
+-- 1人の講師は1つの科目を教えるが、1人の生徒は複数の講師を持つことができる場合
+-- 決定子: (student, subject) -> teacher および (student, teacher) -> subject
+-- teacher -> subject (teacher は候補キーではない)
 
--- Resolution: split into two tables
+-- 解決策: 2つのテーブルに分割
 CREATE TABLE TEACHER_SUBJECT (
     teacher_id  NUMBER(10) NOT NULL,
     subject_id  NUMBER(10) NOT NULL,
-    CONSTRAINT pk_teacher_subj PRIMARY KEY (teacher_id),  -- each teacher one subject
+    CONSTRAINT pk_teacher_subj PRIMARY KEY (teacher_id),  -- 各講師は1つの科目
     CONSTRAINT fk_ts_subject   FOREIGN KEY (subject_id) REFERENCES SUBJECT (subject_id)
 );
 
@@ -248,20 +248,20 @@ CREATE TABLE STUDENT_TEACHER (
 );
 ```
 
-### Fourth Normal Form (4NF)
+### 第 4 正規形 (4NF)
 
-**Rules:**
-- Must be in BCNF.
-- No multi-valued dependencies (two or more independent multi-valued facts about an entity in the same table).
+**ルール:**
+- BCNF であること。
+- 多値従属がないこと（1つのエンティティに関して、2つ以上の独立した多値の事実を同一テーブルに持たない）。
 
-**Violation:**
+**違反例:**
 
 ```
 EMPLOYEE_SKILLS_LANGUAGES(employee_id, skill, language)
--- skills and languages are independent multi-valued facts about an employee
+-- スキルと使用言語は、従業員に関する独立した多値の事実である
 ```
 
-**4NF resolution:**
+**4NF での解決:**
 
 ```sql
 CREATE TABLE EMPLOYEE_SKILL (
@@ -277,46 +277,46 @@ CREATE TABLE EMPLOYEE_LANGUAGE (
 );
 ```
 
-### Fifth Normal Form (5NF)
+### 第 5 正規形 (5NF)
 
-**Rules:**
-- Must be in 4NF.
-- No join dependencies that are not implied by candidate keys (no lossless decomposition into smaller tables can represent the original table's semantics better).
+**ルール:**
+- 4NF であること。
+- 候補キーによって暗示されない結合従属性がないこと（より小さなテーブルに無損失分解することで、元のテーブルの意味をより適切に表現できることがないこと）。
 
-5NF is primarily theoretical and rarely encountered in practice. It applies when a fact can only be represented by the combination of three or more entities simultaneously.
+5NF は主に理論的なものであり、実務で遭遇することは稀である。ある事実が 3 つ以上のエンティティの同時組み合わせによってのみ表現できる場合に適用される。
 
 ---
 
-## 4. Oracle Naming Conventions
+## 4. Oracle の命名規則
 
-Oracle has strict naming rules and reserved words that must be respected during ERD-to-DDL translation.
+Oracle には、ERD から DDL への変換時に遵守すべき厳格な命名規則と予約語がある。
 
-### Hard Rules (Oracle Enforced)
+### ハード・ルール (Oracle による強制)
 
-- Object names: **1–128 bytes** (Oracle 12.2+); **1–30 bytes** in earlier versions.
-- Must start with a letter (unless quoted).
-- Can contain: letters, digits, `_`, `$`, `#`.
-- Case-insensitive **unless** double-quoted.
-- **Avoid double-quoting**: it creates case-sensitive names that require quoting everywhere.
+- オブジェクト名: **1～128 バイト** (Oracle 12.2 以降)。以前のバージョンでは **1～30 バイト**。
+- 文字で始まる必要がある（引用符で囲まない限り）。
+- 使用可能な文字: 文字、数字、`_`, `$`, `#`。
+- 二重引用符 (`"`) で囲まない限り、大文字小文字は区別されない。
+- **二重引用符での囲みは避ける**: オブジェクト名が常に引用符を必要とするようになり、大文字小文字が区別されてしまうため。
 
-### Recommended Naming Standards
+### 推奨される命名標準
 
-| Object | Convention | Example |
+| オブジェクト | 規則 | 例 |
 |---|---|---|
-| Table | Plural noun, UPPER_SNAKE_CASE | `CUSTOMERS`, `ORDER_ITEMS` |
-| Column | Descriptive noun, UPPER_SNAKE_CASE | `CUSTOMER_ID`, `CREATED_AT` |
-| Primary Key | `PK_<table>` | `PK_CUSTOMERS` |
-| Foreign Key | `FK_<child>_<parent>` | `FK_ORDERS_CUSTOMERS` |
-| Unique Constraint | `UQ_<table>_<column(s)>` | `UQ_CUSTOMERS_EMAIL` |
-| Check Constraint | `CK_<table>_<column>` | `CK_EMPLOYEES_SALARY` |
-| Index | `IX_<table>_<column(s)>` | `IX_ORDERS_ORDER_DATE` |
-| Sequence | `SEQ_<table>` | `SEQ_CUSTOMERS` |
-| View | `V_<name>` or `VW_<name>` | `V_ACTIVE_ORDERS` |
-| Trigger | `TRG_<table>_<timing>_<event>` | `TRG_ORDERS_BI_INSERT` |
+| テーブル | 複数形の名詞、UPPER_SNAKE_CASE | `CUSTOMERS`, `ORDER_ITEMS` |
+| 列 | 記述的名詞、UPPER_SNAKE_CASE | `CUSTOMER_ID`, `CREATED_AT` |
+| 主キー | `PK_<table>` | `PK_CUSTOMERS` |
+| 外部キー | `FK_<child>_<parent>` | `FK_ORDERS_CUSTOMERS` |
+| 一意制約 | `UQ_<table>_<columns>` | `UQ_CUSTOMERS_EMAIL` |
+| チェック制約 | `CK_<table>_<column>` | `CK_EMPLOYEES_SALARY` |
+| 索引 (インデックス) | `IX_<table>_<columns>` | `IX_ORDERS_ORDER_DATE` |
+| シーケンス | `SEQ_<table>` | `SEQ_CUSTOMERS` |
+| ビュー | `V_<name>` または `VW_<name>` | `V_ACTIVE_ORDERS` |
+| トリガー | `TRG_<table>_<timing>_<event>` | `TRG_ORDERS_BI_INSERT` |
 
-### Oracle Reserved Words to Avoid as Identifiers
+### 識別子として避けるべき Oracle 予約語
 
-The following are commonly misused Oracle reserved words — never use these as table or column names without quoting:
+以下は、テーブル名や列名として誤用されやすい主要な Oracle 予約語である。これらを（引用符なしで）使用してはいけない：
 
 ```
 ACCESS      ADD         ALL         ALTER       AND
@@ -343,17 +343,17 @@ USER        VALIDATE    VALUES      VARCHAR     VARCHAR2
 VIEW        WHENEVER    WHERE       WITH
 ```
 
-**Problematic column name examples and replacements:**
+**問題のある列名の例と修正案:**
 
 ```sql
--- BAD: uses reserved words
+-- 悪い例: 予約語を使用している
 CREATE TABLE ORDERS (
     order_id  NUMBER,
-    date      DATE,        -- DATE is a reserved word
-    comment   VARCHAR2(500) -- COMMENT is a reserved word
+    date      DATE,        -- DATE は予約語
+    comment   VARCHAR2(500) -- COMMENT は予約語
 );
 
--- GOOD: descriptive alternatives
+-- 良い例: 記述的な代替名
 CREATE TABLE ORDERS (
     order_id      NUMBER,
     order_date    DATE,
@@ -363,14 +363,14 @@ CREATE TABLE ORDERS (
 
 ---
 
-## 5. Oracle-Specific ERD Considerations
+## 5. Oracle 固有の ERD 考慮事項
 
-### Surrogate vs. Natural Keys
+### サロゲート・キー vs ナチュラル・キー
 
-Oracle strongly supports surrogate primary keys via **sequences** and **identity columns** (12c+).
+Oracle は、**シーケンス**および **Identity 列 (ID 列)** (12c 以降) を通じてサロゲート主キー（代替キー）を強力にサポートしている。
 
 ```sql
--- Oracle 12c+ identity column (recommended for new development)
+-- Oracle 12c 以降の Identity 列 (新規開発に推奨)
 CREATE TABLE CUSTOMER (
     customer_id   NUMBER        GENERATED ALWAYS AS IDENTITY,
     email         VARCHAR2(255) NOT NULL,
@@ -379,7 +379,7 @@ CREATE TABLE CUSTOMER (
     CONSTRAINT uq_cust_email UNIQUE (email)
 );
 
--- Pre-12c pattern using sequence + trigger
+-- 12c 以前のシーケンス + トリガー・パターン
 CREATE SEQUENCE SEQ_CUSTOMER START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
 
 CREATE OR REPLACE TRIGGER TRG_CUSTOMER_BI
@@ -393,21 +393,21 @@ END;
 /
 ```
 
-### Constraint Deferability
+### 制約の遅延可能性 (Deferrable Constraints)
 
-Oracle supports **deferrable constraints**, which is critical when dealing with circular foreign keys or bulk load operations.
+Oracle は**遅延可能制約**をサポートしている。これは、循環的な外部キーや一括ロード操作を扱う際に重要になる。
 
 ```sql
--- Deferrable FK — useful for batch inserts where parent/child order is uncertain
+-- 遅延可能外部キー — 親子の挿入順序が不確かなバッチ挿入に有用
 ALTER TABLE ORDER_ITEM
     ADD CONSTRAINT fk_oi_order
         FOREIGN KEY (order_id) REFERENCES ORDERS (order_id)
         DEFERRABLE INITIALLY DEFERRED;
 ```
 
-### Virtual Columns as Derived Attributes
+### 誘導属性としての仮想列
 
-Instead of storing computed values, Oracle virtual columns keep data consistent without application logic.
+計算値を保存する代わりに、Oracle の仮想列 (Virtual column) を使用することで、アプリケーション・ロジックなしでデータの一貫性を保つことができる。
 
 ```sql
 CREATE TABLE PRODUCT (
@@ -419,9 +419,9 @@ CREATE TABLE PRODUCT (
 );
 ```
 
-### Invisible Columns (12c+)
+### 不可視列 (Invisible Columns: 12c 以降)
 
-Useful during schema migrations — add new columns without breaking existing `SELECT *` queries.
+スキーマ移行中に有用。既存の `SELECT *` クエリを壊すことなく新しい列を追加できる。
 
 ```sql
 ALTER TABLE CUSTOMER ADD (
@@ -431,36 +431,36 @@ ALTER TABLE CUSTOMER ADD (
 
 ---
 
-## 6. Best Practices
+## 6. ベスト・プラクティス
 
-- **Always define primary keys** on every table. Oracle will create a unique index automatically.
-- **Name all constraints explicitly.** Anonymous constraints receive system-generated names (e.g., `SYS_C001234`) that make maintenance, error messages, and migrations extremely difficult.
-- **Enforce NOT NULL at the database level**, not just the application layer, for mandatory attributes.
-- **Use `DATE` for date-only data and `TIMESTAMP WITH TIME ZONE` for datetime data** that crosses time zones. Avoid storing dates as `VARCHAR2`.
-- **Model optional relationships carefully.** A nullable foreign key is appropriate; a mandatory relationship should enforce `NOT NULL` on the FK column.
-- **Keep junction tables thin.** The junction table's purpose is to resolve the M:N — business attributes naturally appearing on the relationship (date, quantity, status) belong there, but avoid over-loading them.
-- **Document ERDs with business context.** Column comments in Oracle are part of the schema and are invaluable for future developers.
+- **すべてのテーブルに主キーを定義すること。** Oracle は自動的に一意索引を作成する。
+- **すべての制約に明示的な名前を付けること。** 名前を付けない制約にはシステム生成名（例：`SYS_C001234`）が付けられ、保守、エラー・メッセージの理解、および移行が極めて困難になる。
+- **必須属性にはデータベース・レベルで NOT NULL を適用すること。** アプリケーション・レイヤーだけに頼ってはいけない。
+- **日付のみのデータには `DATE` を、タイムゾーンをまたぐ日時データには `TIMESTAMP WITH TIME ZONE` を使用すること。** 日付を `VARCHAR2` として保存してはいけない。
+- **任意のリレーションシップを慎重にモデリングすること。** Null 許容の外部キーは適切だが、必須のリレーションシップでは外部キー列に `NOT NULL` を適用すべきである。
+- **関連表（中間表）はシンプルに保つこと。** 関連表の目的は M:N の解消である。リレーションシップに付随するビジネス属性（日付、数量、ステータスなど）を含めるのは適切だが、過剰な負荷をかけないようにすること。
+- **ビジネス・コンテキストとともに ERD を文書化すること。** Oracle の列コメントはスキーマの一部であり、将来の開発者にとって非常に貴重である。
 
 ```sql
-COMMENT ON TABLE  CUSTOMER IS 'Registered customers who have completed account creation.';
-COMMENT ON COLUMN CUSTOMER.customer_id IS 'Surrogate primary key, generated by identity column.';
-COMMENT ON COLUMN CUSTOMER.email       IS 'Unique login email address. Lowercased before storage.';
+COMMENT ON TABLE  CUSTOMER IS 'アカウント作成を完了した登録済み顧客';
+COMMENT ON COLUMN CUSTOMER.customer_id IS 'Identity列によって生成されるサロゲート主キー';
+COMMENT ON COLUMN CUSTOMER.email       IS '一意のログイン用メールアドレス。保存前に小文字化される。';
 ```
 
 ---
 
-## 7. Common Mistakes and How to Avoid Them
+## 7. よくある間違いとその回避方法
 
-### Mistake 1: Storing Multiple Values in a Single Column
+### 間違い 1: 1 つの列に複数の値を格納する
 
 ```sql
--- BAD: CSV in a column
+-- 悪い例: カンマ区切り値 (CSV) を列に格納
 CREATE TABLE PROJECT (
     project_id   NUMBER,
-    team_members VARCHAR2(4000)  -- "101,102,103" — unqueryable, unmaintainable
+    team_members VARCHAR2(4000)  -- "101,102,103" — 検索も保守も不可能
 );
 
--- GOOD: proper child table
+-- 良い例: 正確な子テーブル（交差表）の作成
 CREATE TABLE PROJECT_MEMBER (
     project_id   NUMBER NOT NULL,
     employee_id  NUMBER NOT NULL,
@@ -468,67 +468,67 @@ CREATE TABLE PROJECT_MEMBER (
 );
 ```
 
-### Mistake 2: Using ROWNUM or ROWID as a Primary Key
+### 間違い 2: ROWNUM または ROWID を主キーとして使用する
 
-`ROWNUM` and `ROWID` are pseudo-columns — they change on bulk operations, partition moves, and table reorganizations. Always use a proper surrogate or natural key.
+`ROWNUM` と `ROWID` は擬似列である。一括操作、パーティションの移動、テーブルの再編成などによって変化する。常に適切なサロゲート・キーまたはナチュラル・キーを使用すること。
 
-### Mistake 3: Skipping Foreign Key Indexes
+### 間違い 3: 外部キー索引を忘れる
 
-Oracle does **not** automatically create indexes on foreign key columns. Without these indexes, lock escalation and full table scans occur on the child table during parent-row deletes.
+Oracle は**外部キー列に索引を自動作成しない**。これらの索引がないと、親行の削除時に子テーブルでロックのエスカレーションや全表スキャンが発生する。
 
 ```sql
--- After creating the FK, always add an index on the FK column(s)
+-- 外部キー作成後、常に外部キー列に索引を追加すること
 CREATE INDEX IX_ORDER_ITEMS_ORDER_ID ON ORDER_ITEMS (order_id);
 CREATE INDEX IX_ORDER_ITEMS_PRODUCT_ID ON ORDER_ITEMS (product_id);
 ```
 
-### Mistake 4: Over-Normalizing for Performance-Critical OLTP
+### 間違い 4: パフォーマンス重視の OLTP での過度な正規化
 
-While 3NF is the target for OLTP, over-normalizing into dozens of tiny tables can create query-time joins that hurt performance. Profile before splitting further than 3NF.
+OLTP の目標は 3NF だが、数十個の小さなテーブルに過度に正規化すると、クエリ実行時の結合が増え、パフォーマンス低下の要因になる場合がある。3NF を超えて分割する前にパフォーマンステストを行うこと。
 
-### Mistake 5: Ignoring NULL Semantics in Unique Constraints
+### 間違い 5: 一意制約における NULL セマンティクスを無視する
 
-Oracle treats `NULL` as distinct from all values **including other NULLs** in unique constraints. Multiple rows can have `NULL` in a unique-constrained column. If you need "unique or null" behavior with explicit NULL handling, use a unique function-based index.
+Oracle では、一意制約において `NULL` は**他の NULL も含め、すべての値と異なる**ものとして扱われる。そのため、一意制約のある列でも複数の行に `NULL` を入れることができる。「一意または NULL」の動作で明示的な NULL 管理が必要な場合は、一意のファンクション索引を使用すること。
 
 ```sql
--- Allow multiple NULLs but enforce uniqueness for non-NULL values
+-- 複数の NULL を許可しつつ、非 NULL 値の一意性を強制する
 CREATE UNIQUE INDEX UX_EMP_NATIONAL_ID
     ON EMPLOYEE (CASE WHEN national_id IS NOT NULL THEN national_id END);
 ```
 
-### Mistake 6: Using VARCHAR2 for Fixed-Format Codes
+### 間違い 6: 固定フォーマットのコードに VARCHAR2 を使用する
 
-Use `CHAR` for truly fixed-length codes (ISO country codes, state abbreviations) to save storage and ensure consistent comparisons.
+ISO 国コードや州の略称など、真に固定長のコードには `CHAR` を使用して、ストレージを節約し一貫した比較を保証する。
 
 ```sql
-country_code  CHAR(2)      NOT NULL,  -- 'US', 'GB', 'AU'
+country_code  CHAR(2)      NOT NULL,  -- 'US', 'JP', 'GB'
 status_code   CHAR(1)      NOT NULL   -- 'A'ctive, 'I'nactive, 'S'uspended
 ```
 
 ---
 
-## 8. Oracle Version Notes (19c vs 26ai)
+## 8. Oracle バージョンに関する注意 (19c vs 26ai)
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features listed from 21c/23c generations are Oracle Database 26ai-capable; keep 19c alternatives for mixed-version estates.
-- Validate defaults and behavior in your exact RU level when running both 19c and 26ai.
+- このファイルの基本的なガイダンスは、より新しい最小バージョンが明記されていない限り、Oracle Database 19cに有効。
+- 21c/23c 世代以降の機能は、Oracle Database 26ai 対応機能として扱う。混在バージョン構成の場合は、19c互換の代替案を保持すること。
+- 19c と 26ai の両方を運用する場合は、正確な RU (Release Update) レベルでのデフォルト動作を検証すること。
 
-| Feature | Version Introduced |
+| 機能 | 導入バージョン |
 |---|---|
-| Identity columns | 12c (12.1) |
-| Invisible columns | 12c (12.1) |
-| In-memory column store | 12c (12.1.0.2 patchset) |
-| Polymorphic table functions | 18c |
-| Automatic indexing | 19c |
-| Blockchain tables | 21c (20c was preview only; backported to 19.10+) |
-| Object name length 128 bytes | 12.2 |
-| `WITH FUNCTION` inline SQL functions | 12c (12.1) |
+| Identity 列 | 12c (12.1) |
+| 不可視列 (Invisible columns) | 12c (12.1) |
+| インメモリー列ストア | 12c (12.1.0.2) |
+| 多相表関数 (Polymorphic table functions) | 18c |
+| 自動索引作成 | 19c |
+| ブロックチェーン表 | 21c (19.10以降にバックポート) |
+| オブジェクト名 128バイト | 12.2 |
+| `WITH FUNCTION` インライン SQL 関数 | 12c (12.1) |
 
-For pre-12c systems, replace identity columns with sequences and before-insert triggers, and keep object names to 30 characters maximum.
+12c より前のシステムでは、Identity 列をシーケンス + BEFORE INSERT トリガーに置き換え、オブジェクト名は最大 30 文字に制限すること。
 
 ---
 
-## Sources
+## ソース
 
 - [Oracle Database 23ai SQL Language Reference — Database Object Names and Qualifiers](https://docs.oracle.com/en/database/oracle/oracle-database/23/sqlrf/Database-Object-Names-and-Qualifiers.html)
 - [Oracle Database 23ai Concepts — Tables and Table Clusters](https://docs.oracle.com/en/database/oracle/oracle-database/23/cncpt/tables-and-table-clusters.html)

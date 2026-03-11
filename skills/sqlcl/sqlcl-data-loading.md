@@ -1,455 +1,227 @@
-# SQLcl Data Loading
+# SQLclによるデータ・ローディング
 
-## Overview
+## 概要
 
-SQLcl includes a built-in `LOAD` command that enables direct ingestion of CSV and JSON data into Oracle tables without requiring SQL*Loader, external tables, or any additional tools. The `LOAD` command is designed for interactive and scripted data imports, developer workflows, and moderate-volume data loading scenarios.
+SQLclは、外部ツール（SQL*Loaderなど）や複雑な外部表の構成を必要とせずに、CSVおよびJSONデータをOracle表に直接インポートするための強力な組み込み `LOAD` コマンドを提供します。`LOAD` コマンドはクライアント・ベースであり、SQLcl内で実行されます。つまり、ネットワーク経由でデータをストリーミングし、内部でJDBCバッチ・インサートを使用するため、アドホックなインポート、CI/CD環境でのデータ・シーディング、および開発者のワークフローに非常に便利です。
 
-The `LOAD` command is best suited for:
-- Loading reference/seed data during development or testing
-- Importing CSV exports from spreadsheets or other databases
-- Ingesting JSON documents into Oracle tables (including JSON columns)
-- Quick data fixes and one-time imports in a DevOps context
-- Automated data loading as part of CI/CD pipelines
-
-For very high-volume production loads (hundreds of millions of rows), SQL*Loader's direct-path load mode or Oracle Data Pump remain the appropriate tools. The `LOAD` command is a general-purpose, high-convenience tool for the majority of development and operational data loading needs.
-
----
-
-## Basic LOAD Command Syntax
-
-```sql
-LOAD [options] table_name file_path
-```
-
-Or the more explicit form:
-
-```sql
-LOAD DATA INFILE 'file.csv' INTO TABLE my_table [options]
-```
-
-The simplest form, using defaults:
-
-```sql
--- Load a CSV file where the first row contains column headers matching table column names
-LOAD employees_import /tmp/employees.csv
-```
-
-SQLcl will:
-1. Open the file
-2. Read the first row as column names
-3. Match column names to the target table's columns (case-insensitive)
-4. Insert each subsequent row
-5. Commit at the end
+このガイドでは以下を扱います：
+- `LOAD` コマンドの基本構文とオプション
+- CSVデータのインポート
+- JSONデータのインポート
+- エラー処理、バッチ・サイズ、および日付フォーマット
+- `load.xml` による高度な構成
+- SQL*Loaderや外部表との比較
 
 ---
 
-## LOAD Options
+## LOAD コマンド
 
-Options are specified as keyword arguments after the table name and file path:
+`LOAD` コマンドは、あらかじめ定義された表に対してファイルのデータをマップしようとします。
+
+### 基本構文
 
 ```sql
-LOAD table_name file_path [option value] [option value] ...
+LOAD [schema.]table_name data_file_name [options]
 ```
 
-### Key Options
+### 主要なオプション
 
-| Option | Values | Description |
-|---|---|---|
-| `SKIP` | integer | Skip N rows from the top of the file (in addition to the header row) |
-| `HEADER` | ON / OFF | Whether the first row contains column headers (default ON) |
-| `COLUMNS` | column list | Explicit column mapping when headers are absent or differ |
-| `DELIMITER` | character | Field delimiter character (default comma) |
-| `ENCLOSURE` | character | Quote character for enclosed fields (default double-quote) |
-| `BATCHSIZE` | integer | Number of rows per commit batch (default 50) |
-| `DATEFORMAT` | format string | Oracle date format mask for date columns |
-| `TIMESTAMPFORMAT` | format string | Oracle timestamp format mask |
-| `NULLIF` | string | Treat this string value as NULL (e.g., `NULLIF 'N/A'`) |
-| `ERRORS` | integer | Maximum number of errors before aborting (default 50) |
-| `ERROR_LOG` | file path | Write rejected rows to this file |
-| `TRUNCATE` | ON / OFF | Truncate the table before loading |
-| `REPLACE` | ON / OFF | Delete all rows before loading |
-| `APPEND` | ON / OFF | Append to existing rows (default behavior) |
+| オプション | 説明 |
+|---|---|
+| `-skip <n>` | ファイルの先頭からスキップする行数 |
+| `-batch <n>` | 1回のコミットあたりの行数 |
+| `-date <fmt>` | 日付列に使用する日付フォーマット（例：`YYYY-MM-DD`） |
+| `-del <char>` | CSVのデリミタ（デフォルトはカンマ） |
+| `-enc <charset>` | ファイルのエンコーディング（例：`UTF-8`） |
+| `-err <file>` | 個別のエラーを記録するファイル |
+| `-head <on/off>` | ファイルの最初の行にヘッダー（列名）が含まれているかどうか（デフォルトはON） |
+| `-json` | ファイルがJSONフォーマットであることを指定 |
 
 ---
 
-## CSV Loading Examples
+## 基本的なCSVのロード
 
-### Basic Load with Header Row
-
-File: `/tmp/departments.csv`
-```
-DEPARTMENT_ID,DEPARTMENT_NAME,MANAGER_ID,LOCATION_ID
-10,Administration,200,1700
-20,Marketing,201,1800
-30,Purchasing,114,1700
-```
-
-```sql
-LOAD departments /tmp/departments.csv
-```
-
-### Load with No Header Row (Explicit Column Mapping)
-
-File: `/tmp/jobs_noheader.csv`
-```
-AD_PRES,President,20000,40000
-AD_VP,Administration Vice President,15000,30000
-```
-
-```sql
-LOAD jobs /tmp/jobs_noheader.csv HEADER OFF COLUMNS JOB_ID,JOB_TITLE,MIN_SALARY,MAX_SALARY
-```
-
-### Custom Delimiter
-
-Pipe-delimited file:
-```
-100|Steven|King|SKING|515.123.4567|17-JUN-03|AD_PRES|24000|||(null)|90
-```
-
-```sql
-LOAD employees /tmp/employees_pipe.csv DELIMITER |
-```
-
-### Semicolon-delimited with NULLIF
-
-```sql
-LOAD employees /tmp/employees_semi.csv DELIMITER ; NULLIF "(null)"
-```
-
-### Date Format Specification
-
-File with ISO dates:
-```
-EMPLOYEE_ID,FIRST_NAME,LAST_NAME,HIRE_DATE
-200,Jennifer,Whalen,1987-09-17
-201,Michael,Hartstein,1996-02-17
-```
-
-```sql
-LOAD employees /tmp/employees_isodate.csv DATEFORMAT YYYY-MM-DD
-```
-
-Common date format patterns:
-
-```sql
--- ISO date
-DATEFORMAT YYYY-MM-DD
-
--- US format
-DATEFORMAT MM/DD/YYYY
-
--- Oracle default (requires careful match)
-DATEFORMAT DD-MON-RR
-
--- With time
-DATEFORMAT YYYY-MM-DD HH24:MI:SS
-TIMESTAMPFORMAT YYYY-MM-DD HH24:MI:SS.FF
-```
-
-### Batch Size and Commit Frequency
-
-```sql
--- Commit every 1000 rows (good for large files)
-LOAD big_table /tmp/bigdata.csv BATCHSIZE 1000
-```
-
-### Truncate Before Load
-
-```sql
--- Clear table first, then load
-LOAD departments /tmp/departments.csv TRUNCATE ON
-```
-
-### Skip Rows
-
-```sql
--- Skip the first 5 rows (e.g., file has comment rows before headers)
-LOAD departments /tmp/departments.csv SKIP 5
-```
-
-### Error Logging
-
-```sql
--- Allow up to 100 errors and log rejected rows
-LOAD employees /tmp/employees.csv ERRORS 100 ERROR_LOG /tmp/load_errors.csv
-```
-
-The error log file records:
-- The rejected row content
-- The error message for each failure
-
----
-
-## JSON Loading
-
-SQLcl `LOAD` also handles JSON input. The JSON file should contain an array of objects:
-
-```json
-[
-  {"EMPLOYEE_ID": 300, "FIRST_NAME": "Alice", "LAST_NAME": "Johnson", "SALARY": 55000},
-  {"EMPLOYEE_ID": 301, "FIRST_NAME": "Bob",   "LAST_NAME": "Williams","SALARY": 62000}
-]
-```
-
-```sql
-LOAD employees /tmp/new_employees.json
-```
-
-SQLcl detects JSON format automatically based on the file extension (`.json`). Field names in the JSON objects are matched to column names case-insensitively.
-
-### Loading JSON into a JSON Column
-
-For tables with Oracle JSON columns (Oracle 21c+ native JSON type or `CLOB` with `IS JSON` constraint):
-
-```sql
--- Table with a JSON column
-CREATE TABLE product_docs (
-    id     NUMBER PRIMARY KEY,
-    doc    JSON
-);
-
--- The LOAD command can populate JSON column values directly
--- Include the JSON content as a string value in the CSV
-```
-
-For complex JSON-to-relational loading scenarios, consider using `INSERT ... SELECT` with `JSON_VALUE` and `JSON_TABLE` instead of `LOAD`.
-
----
-
-## Full Example: End-to-End CSV Import Workflow
-
-### Step 1: Prepare the Target Table
+### 準備
 
 ```sql
 CREATE TABLE staging_employees (
-    employee_id   NUMBER(6),
-    first_name    VARCHAR2(20),
-    last_name     VARCHAR2(25),
-    email         VARCHAR2(25),
-    hire_date     DATE,
-    job_id        VARCHAR2(10),
-    salary        NUMBER(8,2),
-    department_id NUMBER(4)
+    employee_id NUMBER(10),
+    first_name  VARCHAR2(50),
+    last_name   VARCHAR2(50),
+    hire_date   DATE,
+    salary      NUMBER(10,2)
 );
 ```
 
-### Step 2: Verify the CSV Structure
+### デフォルト・インポート
+
+ヘッダーがあり、日付がデータベースのデフォルトNLSフォーマットに従っているCSVの場合：
 
 ```sql
--- Preview what LOAD will do without actually loading
--- (SQLcl does not have a dry-run flag, so test with a small file subset)
-LOAD staging_employees /tmp/employees_sample.csv
+LOAD staging_employees employees.csv
 ```
 
-### Step 3: Load the Full File
+### カスタマイズ・インポート
+
+ヘッダーがなく、タブ区切りで、特定の日付フォーマットを持つファイルの場合：
 
 ```sql
-LOAD staging_employees /tmp/employees_full.csv
-  BATCHSIZE 500
-  DATEFORMAT YYYY-MM-DD
-  ERRORS 50
-  ERROR_LOG /tmp/emp_load_errors.csv
-  TRUNCATE ON
+LOAD staging_employees employees.tsv -head off -del \t -date YYYY-MM-DD
 ```
 
-### Step 4: Verify and Validate
+### パフォーマンス制御付きのインポート
 
 ```sql
--- Check row counts
-SELECT COUNT(*) FROM staging_employees;
-
--- Check for NULLs in critical columns
-SELECT COUNT(*) FROM staging_employees WHERE last_name IS NULL OR email IS NULL;
-
--- Review the error log
--- (If errors occurred, review /tmp/emp_load_errors.csv)
+LOAD staging_employees employees.csv -batch 5000 -skip 1
 ```
 
-### Step 5: Promote to Production Table
+これにより、最初の行がスキップされ、5,000行ごとにコミットされます。
+
+---
+
+## JSONデータのロード
+
+JSONをロードするには、ファイルがJSONの配列（各オブジェクトが1つの行を表す）である必要があります。
+
+### 準備
 
 ```sql
--- Merge or insert from staging to production
-MERGE INTO employees e
-USING staging_employees s
-ON (e.employee_id = s.employee_id)
-WHEN MATCHED THEN
-    UPDATE SET e.salary = s.salary, e.job_id = s.job_id
-WHEN NOT MATCHED THEN
-    INSERT (employee_id, first_name, last_name, email, hire_date, job_id, salary, department_id)
-    VALUES (s.employee_id, s.first_name, s.last_name, s.email, s.hire_date, s.job_id, s.salary, s.department_id);
+CREATE TABLE customers_json (
+    cust_id    NUMBER,
+    cust_name  VARCHAR2(100),
+    email      VARCHAR2(100)
+);
+```
 
-COMMIT;
+### インポート
+
+```sql
+LOAD customers_json data.json -json
 ```
 
 ---
 
-## Comparison: LOAD vs SQL*Loader vs External Tables
+## エラー処理とロギング
 
-| Feature | SQLcl LOAD | SQL*Loader | External Tables |
+インポート中にデータ型の不一致や制約違反が発生した場合、SQLclはエラーを表示し、オプションでログを記録できます。
+
+### エラーの追跡
+
+```sql
+SET LOAD ERRORS_LOG ON
+SET LOAD ERRORS_MAX 100
+LOAD staging_employees employees.csv -err employees_errors.log
+```
+
+- `ERRORS_LOG` — 失敗した行を画面に表示します。
+- `ERRORS_MAX` — 中断するまでに許容する最大エラー数。
+- `-err` — ロードに失敗した実際の行を含むファイル。このファイルを修正して再度ロードすることができます（SQL*Loaderのバッド・ファイルと同様）。
+
+### エラー時のロールバック
+
+`WHENEVER SQLERROR` は `LOAD` コマンドのエラーもキャプチャするため、CI/CDにおいて非常に有効です。
+
+```sql
+WHENEVER SQLERROR EXIT 1 ROLLBACK;
+LOAD my_table data.csv;
+```
+
+---
+
+## 高度なオプション
+
+### 列の明示的なマッピング
+
+ファイル内の列の順序が表の順序と異なる場合は、`-column` オプションを使用します。
+
+```sql
+-- 表の列(ID, NAME)に対してファイルの第2列と第3列をマッピング
+LOAD my_table my_data.csv -column 2,3
+```
+
+### NULLの処理
+
+```sql
+SET LOAD NULL_INDICATOR "[NULL]"
+```
+
+ファイル内で特定の値（`[NULL]` など）が出現した場合、それを実際のSQL NULLとして扱うように指定します。
+
+### データのエンコーディング
+
+UTF-16など、デフォルト以外のエンコーディングのファイルを扱う場合に指定します。
+
+```sql
+LOAD target_table data.csv -enc UTF-16
+```
+
+---
+
+## 他のツールとの比較
+
+| 機能 | SQLcl `LOAD` | SQL*Loader | 外部表（External Tables） |
 |---|---|---|---|
-| Requires separate tool | No (built-in) | Yes (`sqlldr`) | No (Oracle feature) |
-| Setup complexity | Minimal | Control file needed | DDL for ext table needed |
-| Performance (large volumes) | Good (conventional path) | Excellent (direct-path option) | Good (parallel capable) |
-| Direct-path load | No | Yes | Yes |
-| Parallel load | No | Yes (with options) | Yes |
-| Character set handling | JVM-based | Configurable | Configurable |
-| Date format control | Yes | Yes (fine-grained) | Yes |
-| Error logging | Basic | Full BAD/DISCARD files | Via Oracle error logging |
-| LOB column support | Limited | Full | Full |
-| JSON input | Yes | Limited | Limited |
-| In-database scheduling | No | Via OS scheduler | Via DBMS_SCHEDULER |
-| Ideal for | Dev/test/CI loads | High-volume production | Ongoing external data access |
-| Max practical row count | Millions | Billions | Depends on file system |
+| 必要条件 | SQLclのみ | Oracle Client/Instant Client | DBサーバーへのファイル・アクセス |
+| 速度 | 高速（JDBCバッチ） | 最速（ダイレクト・パス対応） | 非常に高速（パラレル対応） |
+| 複雑さ | 非常に低い（単一コマンド） | 中（コントロール・ファイルが必要） | 高（ディレクトリ・オブジェクトが必要） |
+| JSON対応 | 組み込み | 複雑（SQL変換が必要） | 良好（Oracle 19c以降） |
+| リモート・ロード | 良好（クライアントから実行） | 良好 | 不可（ファイルはサーバー側に必要） |
+| 推奨ユースケース | 開発、小〜中規摸データ、CI/CD | 大規模データ、レガシー自動化 | ETL、DB内での大容量データ処理 |
 
 ---
 
-## Comparing LOAD to External Tables
+## 構成ファイル (load.xml)
 
-External tables are better when:
-- The source file is large and will be loaded repeatedly
-- You need SELECT-based transformation during load
-- You want Oracle to manage parallel data access
+非常に複雑なロード（特定の列を無視したり、固定長のファイルを扱ったりする場合、SQL*Loaderのような細かい制御が必要になります）では、SQLclは `load.xml` 構成ファイルを生成・使用できます。
+
+### 構成の生成
 
 ```sql
--- External table approach (for repeated or parallel access)
-CREATE TABLE ext_employees (
-    employee_id   NUMBER(6),
-    first_name    VARCHAR2(20),
-    last_name     VARCHAR2(25),
-    hire_date     DATE,
-    salary        NUMBER(8,2)
-)
-ORGANIZATION EXTERNAL (
-    TYPE oracle_loader
-    DEFAULT DIRECTORY ext_data_dir
-    ACCESS PARAMETERS (
-        RECORDS DELIMITED BY NEWLINE
-        FIELDS TERMINATED BY ','
-        OPTIONALLY ENCLOSED BY '"'
-        DATE FORMAT DATE MASK "YYYY-MM-DD"
-        MISSING FIELD VALUES ARE NULL
-        (employee_id, first_name, last_name, hire_date, salary)
-    )
-    LOCATION ('employees.csv')
-)
-REJECT LIMIT UNLIMITED;
-
--- Then load into heap table
-INSERT INTO employees SELECT * FROM ext_employees;
-COMMIT;
+LOAD my_table data.csv -save
 ```
 
-SQLcl `LOAD` is simpler and does not require Oracle directory objects or DBA involvement.
+これにより、列のマッピング、日付フォーマット、およびデリミタを含む `load.xml`（または `my_table.xml`）が生成されます。
 
----
-
-## Scripting LOAD in a CI/CD Pipeline
-
-### Shell Script with SQLcl LOAD
-
-```shell
-#!/bin/bash
-# load_reference_data.sh
-
-set -e
-
-export TNS_ADMIN=/path/to/wallet
-DATA_DIR="/opt/app/reference-data"
-
-sql -S "${DB_USER}/${DB_PASSWORD}@${DB_SERVICE}" <<EOF
--- Load reference tables
-LOAD countries ${DATA_DIR}/countries.csv TRUNCATE ON BATCHSIZE 200
-LOAD regions   ${DATA_DIR}/regions.csv   TRUNCATE ON BATCHSIZE 200
-LOAD jobs      ${DATA_DIR}/jobs.csv      TRUNCATE ON BATCHSIZE 200
-
--- Verify
-SELECT 'countries' AS tbl, COUNT(*) AS cnt FROM countries
-UNION ALL SELECT 'regions', COUNT(*) FROM regions
-UNION ALL SELECT 'jobs',    COUNT(*) FROM jobs;
-
-EXIT
-EOF
-
-if [ $? -eq 0 ]; then
-    echo "Reference data loaded successfully"
-else
-    echo "ERROR: Data load failed"
-    exit 1
-fi
-```
-
-### SQL Wrapper for Multiple CSV Files
+### 構成の使用
 
 ```sql
--- load_all_reference.sql
-SET FEEDBACK ON
-SET ECHO ON
-
-LOAD countries  /opt/data/countries.csv  TRUNCATE ON
-LOAD regions    /opt/data/regions.csv    TRUNCATE ON
-LOAD locations  /opt/data/locations.csv  TRUNCATE ON DATEFORMAT YYYY-MM-DD
-LOAD departments /opt/data/departments.csv TRUNCATE ON
-LOAD jobs       /opt/data/jobs.csv       TRUNCATE ON
-
--- Verify counts
-SELECT table_name, num_rows
-FROM user_tables
-WHERE table_name IN ('COUNTRIES','REGIONS','LOCATIONS','DEPARTMENTS','JOBS')
-ORDER BY table_name;
-
-EXIT
-```
-
-```shell
-sql -S user/pass@service @load_all_reference.sql
+LOAD my_table data.csv -conf load.xml
 ```
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- Always load into a **staging table** first rather than directly into production tables. Validate the data in the staging table before merging or inserting into production, so errors can be corrected without affecting live data.
-- Set `ERRORS 0` in production load scripts to abort immediately on the first error rather than silently skipping bad rows. Use a non-zero value only when partial loads with rejection logging are acceptable.
-- Always specify `DATEFORMAT` explicitly when loading date columns. Do not rely on the session NLS_DATE_FORMAT, which can vary between environments and users.
-- Use `BATCHSIZE 500` or `BATCHSIZE 1000` for large files to reduce individual commit sizes and improve recoverability. If the load fails halfway through, you lose at most one batch rather than all progress.
-- Test the load against a small representative sample (50–100 rows) before running the full file to catch column mapping errors, date format mismatches, and data type issues early.
-- For production reference data loads, check the row count after loading and fail the pipeline if the count differs from an expected value.
-
----
-
-## Common Mistakes and How to Avoid Them
-
-**Mistake: Column name case mismatch between CSV header and table columns**
-SQLcl `LOAD` matches column names case-insensitively. A CSV header `employee_id` will match the Oracle column `EMPLOYEE_ID`. However, be aware that quoted column names in Oracle that are mixed-case (created with double quotes) will not match unless the case is exact.
-
-**Mistake: Loading dates without specifying DATEFORMAT**
-Oracle's default date format is locale-dependent. A CSV with `2025-01-15` will fail to load without `DATEFORMAT YYYY-MM-DD`. Always specify the format explicitly.
-
-**Mistake: Silent truncation of numeric values**
-If a CSV contains a value like `999999999999` for a `NUMBER(6)` column, the LOAD will generate an error for that row (not truncate the value). Review your ERROR_LOG to catch precision mismatches.
-
-**Mistake: Encoding issues with non-ASCII characters**
-SQLcl reads CSV files using the JVM's default file encoding. If your CSV contains UTF-8 characters and the JVM is using a different charset, characters will be corrupted. Set `JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8"` before starting SQLcl when loading international data.
-
-**Mistake: Loading into a table with foreign key constraints active**
-If the target table has foreign key constraints pointing to tables not yet populated, all rows will be rejected. Either load parent tables first, temporarily disable constraints (`ALTER TABLE ... DISABLE CONSTRAINT`), or use a staging table approach.
-
-**Mistake: Not specifying TRUNCATE or APPEND explicitly for repeated loads**
-The default behavior is APPEND. Running a load script twice will create duplicate rows. For idempotent loads (safe to run multiple times), use `TRUNCATE ON` to clear the table first, or use a staging-plus-merge pattern with a unique key.
+- `LOAD` コマンドで本番用の表に直接インポートするのではなく、必ず一時的なステージング表を最初に使用してください。これにより、クレンジングやマージの前にデータを検証（重複、NULL、データ型など）できます。
+- 中規摸から大規模なロード（10万行以上）の場合は、デフォルトよりも大きいバッチ・サイズ（例：`-batch 5000` または `10000`）を使用して、ネットワークの往復回数とコミット・オーバーヘッドを削減してください。
+- インポートに失敗して不完全なデータが残るのを防ぐため、CI/CDパイプライン内でのロードには常に `WHENEVER SQLERROR EXIT ... ROLLBACK` を使用してください。
+- UTF-8エンコーディングを使用し、インポート・コマンドで `-enc UTF-8` を明示的に指定することで、特に多言語データを扱う際の文字化けの問題を回避してください。
+- 列の順序やフォーマットが時間の経過とともに変化する可能性がある自動化されたジョブには、コマンドライン・オプションに頼るのではなく、`-save` で生成された `load.xml` 構成ファイルを使用してください。
 
 ---
 
+## よくある間違いと回避策
 
-## Oracle Version Notes (19c vs 26ai)
+**間違い：日付フォーマットの不一致によるエラー**
+CSVの日付が `MM/DD/YYYY` で、データベースのNLSフォーマットが `DD-MON-RR` の場合、ロードは失敗します。常に `-date YYYY-MM-DD` オプションを使用して、ファイルの内容に合わせてフォーマットを明示してください。
 
-- Baseline guidance in this file is valid for Oracle Database 19c unless a newer minimum version is explicitly called out.
-- Features marked as 21c, 23c, or 23ai should be treated as Oracle Database 26ai-capable features; keep 19c-compatible alternatives for mixed-version estates.
-- For dual-support environments, test syntax and package behavior in both 19c and 26ai because defaults and deprecations can differ by release update.
+**間違い：大規模なロードでのバッチ・サイズが小さすぎる**
+デフォルトのバッチ・サイズ（バージョンによって異なりますが、通常、50か100）で数百万行をロードすると、非常に時間がかかります。`-batch 5000` 以上を設定してパフォーマンスを向上させてください。
 
-## Sources
+**間違い：ファイルのヘッダー行をデータとしてインポートしてしまう**
+ファイルにヘッダー（列名）が含まれている場合、SQLclは自動的にその認識を試みますが、失敗して「Invalid Number」などのエラーが発生することがあります。手動で制御するには `-head on` または `-head off` を指定し、必要に応じて行をスキップするために `-skip 1` を組み合わせてください。
 
-- [Loading a File — Oracle SQLcl Docs](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/23.1/sqcug/loading-file.html)
-- [Oracle SQLcl 25.2 User's Guide](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/oracle-sqlcl-users-guide.pdf)
-- [SQLcl: Unload and Load Table Data — ORACLE-BASE](https://oracle-base.com/articles/misc/sqlcl-unload-and-load-table-data)
-- [Loading Data into Oracle with SQLcl — ThatJeffSmith](https://www.thatjeffsmith.com/archive/2020/08/loading-data-into-oracle-with-sqlcl/)
+**間違い：Windows/Linux間でのエンコーディングや改行の問題**
+Windowsで作成されたファイルにはBOM（Byte Order Mark）が含まれている場合があり、これがインポートを妨げることがあります。ファイルをUTF-8（BOMなし）で保存するか、SQLclの `-enc` オプションを使用してエンコーディングを正しく指定してください。
+
+**間違い：ロードに失敗してもスクリプトが続行されてしまう**
+`LOAD` はSQLコマンドのように動作しますが、失敗してもSQLclプロセスが停止しない場合があります。CI/CD環境では、必ずスクリプトの先頭でエラー時の終了設定を有効にしてください。
+
+---
+
+## 参考資料
+
+- [Oracle SQLcl 25.2 ユーザーズ・ガイド](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/25.2/sqcug/oracle-sqlcl-users-guide.pdf)
+- [SQLclのLOADコマンドによるデータ・インポート — ThatJeffSmith](https://www.thatjeffsmith.com/archive/2019/08/sqldeveloper-sqlcl-quick-tip-bulk-load-your-csvs-with-a-single-command/)
+- [SQLcl リリース・ノート 25.2](https://www.oracle.com/tools/sqlcl/sqlcl-relnotes-25.2.html)
+- [Oracle SQLcl リリース・インデックス](https://docs.oracle.com/en/database/oracle/sql-developer-command-line/index.html)

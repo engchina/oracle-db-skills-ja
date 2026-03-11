@@ -1,45 +1,45 @@
-# PL/SQL Unit Testing with utPLSQL
+# utPLSQL による PL/SQL ユニット・テスト (Unit Testing)
 
-## Overview
+## 概要
 
-utPLSQL is the de facto standard unit testing framework for Oracle PL/SQL. It follows xUnit conventions (like JUnit for Java) and integrates with CI/CD pipelines, producing JUnit XML output and code coverage reports. This guide covers installation, test structure, the full assertion API, and integration patterns.
+utPLSQL は、Oracle PL/SQL におけるデファクト・スタンダードのユニット・テスト・フレームワークです。Java の JUnit のような xUnit の規約に従っており、CI/CD パイプラインとの統合、JUnit XML 形式の出力、およびコード・カバレッジ・レポートの作成が可能です。このガイドでは、インストール、テストの構造、フル・アサーション API、および統合パターンについて説明します。
 
 ---
 
-## Installation and Configuration
+## インストールと構成
 
-### Installation
+### インストール
 
 ```bash
-# Download the latest release from GitHub
+# GitHub から最新のリリースをダウンロード
 # https://github.com/utPLSQL/utPLSQL/releases
 
-# Connect as SYS or a user with DBA privilege
+# SYS または DBA 権限を持つユーザーで接続
 sqlplus sys/password@database as sysdba
 
-# Run the installation script (installs into the UT3 schema by default)
+# インストール・スクリプトを実行 (デフォルトでは UT3 スキーマにインストール)
 @install.sql UT3 UT3_TABLESPACE
 
-# Grant access to developers and application schemas
+# 開発者およびアプリケーション・スキーマにアクセス権を付与
 GRANT EXECUTE ON ut3.ut TO my_test_user;
 GRANT SELECT ON ut3.ut_annotation_manager TO my_test_user;
 
--- Or use the convenience package alias
--- utPLSQL creates public synonyms by default
+-- または便利なパッケージ・エイリアスを使用
+-- デフォルトでパブリック・シノニムが作成されます
 ```
 
-### Post-Installation Verification
+### インストール後の確認
 
 ```sql
--- Verify installation
+-- インストールの確認
 SELECT object_name, object_type, status
 FROM   all_objects
 WHERE  owner = 'UT3'
   AND  object_type IN ('PACKAGE', 'TYPE')
   AND  status = 'INVALID';
 
--- Should return no rows
--- Run self-test:
+-- 行が返されないことを確認
+-- セルフテストの実行:
 BEGIN
   ut.run();
 END;
@@ -48,14 +48,14 @@ END;
 
 ---
 
-## Test Package Structure
+## テスト・パッケージの構造
 
-A utPLSQL test suite is a PL/SQL package with special annotation comments (`-- %suite`, `-- %test`, etc.).
+utPLSQL のテスト・スイートは、特別なアノテーション・コメント（`-- %suite`, `-- %test` など）を含む PL/SQL パッケージです。
 
 ```sql
--- Test package specification
+-- テスト・パッケージ仕様部
 CREATE OR REPLACE PACKAGE test_order_mgmt_pkg AS
-  -- %suite(Order Management Tests)
+  -- %suite(注文管理テスト)
   -- %suitepath(myapp.orders)
 
   -- %beforeall
@@ -70,25 +70,25 @@ CREATE OR REPLACE PACKAGE test_order_mgmt_pkg AS
   -- %aftereach
   PROCEDURE verify_no_side_effects;
 
-  -- %test(Create order with valid customer)
+  -- %test(有効な顧客による注文作成)
   PROCEDURE test_create_order_valid;
 
-  -- %test(Create order with null customer raises exception)
+  -- %test(顧客が NULL の場合の注文作成で例外が発生すること)
   -- %throws(-20001)
   PROCEDURE test_create_order_null_customer;
 
-  -- %test(Cancel shipped order raises exception)
+  -- %test(出荷済み注文のキャンセルで例外が発生すること)
   -- %throws(-20010)
   PROCEDURE test_cancel_shipped_order;
 
-  -- %test(Get order status for known order)
+  -- %test(既知の注文に対する注文ステータスの取得)
   PROCEDURE test_get_order_status;
 
-  -- %test(Get order status returns NULL for unknown order)
+  -- %test(未知の注文に対して NULL が返されること)
   PROCEDURE test_get_status_unknown_order;
 
   -- %disabled
-  -- %test(Integration test - skip in unit test run)
+  -- %test(統合テスト - ユニット・テスト実行時はスキップ)
   PROCEDURE test_full_order_workflow;
 
 END test_order_mgmt_pkg;
@@ -96,112 +96,82 @@ END test_order_mgmt_pkg;
 ```
 
 ```sql
--- Test package body
+-- テスト・パッケージ本体
 CREATE OR REPLACE PACKAGE BODY test_order_mgmt_pkg AS
 
-  -- Package-level variables for test data
+  -- テスト・データ用のパッケージ変数
   g_test_customer_id  NUMBER;
   g_test_order_id     NUMBER;
 
-  -- %beforeall: runs once before all tests in this suite
+  -- %beforeall: スイート内のすべてのテストの前に一度だけ実行
   PROCEDURE setup_test_data IS
   BEGIN
-    -- Insert test customer (will be rolled back at end of all tests)
+    -- テスト用顧客の挿入 (テスト終了後にロールバック可能)
     INSERT INTO customers (customer_id, customer_name, status)
     VALUES (99999, 'TEST CUSTOMER', 'ACTIVE')
     RETURNING customer_id INTO g_test_customer_id;
   END setup_test_data;
 
-  -- %afterall: runs once after all tests in this suite
+  -- %afterall: すべてのテストの後に一度だけ実行
   PROCEDURE cleanup_test_data IS
   BEGIN
     DELETE FROM customers WHERE customer_id = 99999;
   END cleanup_test_data;
 
-  -- %beforeeach: runs before EACH test
+  -- %beforeeach: 各テストの前に実行
   PROCEDURE reset_state IS
   BEGIN
-    -- Ensure we start each test with a clean order state
+    -- 各テストをクリーンな注文状態で開始
     DELETE FROM orders WHERE customer_id = 99999;
     g_test_order_id := NULL;
   END reset_state;
 
-  -- %aftereach: runs after EACH test
+  -- %aftereach: 各テストの後に実行
   PROCEDURE verify_no_side_effects IS
   BEGIN
-    -- Verify the test didn't commit unexpected data
+    -- テストが予期しないデータをコミットしていないか確認
     ut.expect(
       (SELECT COUNT(*) FROM orders WHERE customer_id = 99999 AND status = 'SHIPPED')
     ).to_equal(0);
   END verify_no_side_effects;
 
-  -- %test(Create order with valid customer)
+  -- %test(有効な顧客による注文作成)
   PROCEDURE test_create_order_valid IS
     l_new_order_id NUMBER;
   BEGIN
-    -- Act
+    -- Act (実行)
     order_mgmt_pkg.create_order(
       p_customer_id => g_test_customer_id,
       p_order_id    => l_new_order_id
     );
 
-    -- Assert: order was created
+    -- Assert (検証): 注文が作成されたこと
     ut.expect(l_new_order_id).not_to_be_null();
 
-    -- Assert: order has correct status
+    -- Assert: 正しいステータスであること
     ut.expect(order_mgmt_pkg.get_order_status(l_new_order_id))
       .to_equal('PENDING');
 
-    -- Assert: order exists in table
+    -- Assert: 表内に存在すること
     ut.expect(
       (SELECT COUNT(*) FROM orders WHERE order_id = l_new_order_id)
     ).to_equal(1);
   END test_create_order_valid;
 
-  -- %test(Create order with null customer raises exception)
+  -- %test(顧客が NULL の場合の注文作成で例外が発生すること)
   -- %throws(-20001)
   PROCEDURE test_create_order_null_customer IS
     l_order_id NUMBER;
   BEGIN
-    -- When NULL is passed, should raise ORA-20001
+    -- NULL を渡した際、ORA-20001 が発生すべき
     order_mgmt_pkg.create_order(
       p_customer_id => NULL,
       p_order_id    => l_order_id
     );
-    -- utPLSQL catches the exception and verifies it matches %throws
+    -- utPLSQL が例外を捕捉し、%throws と一致するか検証する
   END test_create_order_null_customer;
 
-  -- %test(Get order status for known order)
-  PROCEDURE test_get_order_status IS
-    l_order_id NUMBER;
-    l_status   VARCHAR2(20);
-  BEGIN
-    -- Arrange: create order
-    INSERT INTO orders (customer_id, status, created_at)
-    VALUES (g_test_customer_id, 'PENDING', SYSDATE)
-    RETURNING order_id INTO l_order_id;
-
-    -- Act
-    l_status := order_mgmt_pkg.get_order_status(l_order_id);
-
-    -- Assert
-    ut.expect(l_status).to_equal('PENDING');
-  END test_get_order_status;
-
-  -- %test(Get order status returns NULL for unknown order)
-  PROCEDURE test_get_status_unknown_order IS
-    l_status VARCHAR2(20);
-  BEGIN
-    l_status := order_mgmt_pkg.get_order_status(-999);
-    ut.expect(l_status).to_be_null();
-  END test_get_status_unknown_order;
-
-  -- %disabled
-  -- %test(Integration test - skip in unit test run)
-  PROCEDURE test_full_order_workflow IS
-  BEGIN
-    NULL;  -- disabled, won't run
-  END test_full_order_workflow;
+  -- ... 他のテストの実装 ...
 
 END test_order_mgmt_pkg;
 /
@@ -209,35 +179,35 @@ END test_order_mgmt_pkg;
 
 ---
 
-## Annotations Reference
+## アノテーション・リファレンス
 
-| Annotation | Location | Description |
+| アノテーション | 記述場所 | 説明 |
 |---|---|---|
-| `-- %suite` | Package spec | Marks as test suite; optional display name in parentheses |
-| `-- %suitepath(path)` | Package spec | Hierarchical path for organizing suites (e.g., `myapp.orders`) |
-| `-- %test` | Procedure spec | Marks as a test; optional display name |
-| `-- %beforeall` | Procedure spec | Runs once before all tests in suite |
-| `-- %afterall` | Procedure spec | Runs once after all tests in suite |
-| `-- %beforeeach` | Procedure spec | Runs before each test in suite |
-| `-- %aftereach` | Procedure spec | Runs after each test in suite |
-| `-- %throws(error_code)` | Test procedure | Expected exception; test passes if this error is raised |
-| `-- %disabled` | Procedure spec | Skip this test in test runs |
-| `-- %context(name)` | Inline | Groups tests within a suite into sub-contexts |
-| `-- %endcontext` | Inline | Ends a context group |
-| `-- %tags(tag1,tag2)` | Test/Suite | Tag for selective test running |
+| `-- %suite` | パッケージ仕様部 | テスト・スイートとしてマーク。括弧内に表示名を指定可能 |
+| `-- %suitepath(path)` | パッケージ仕様部 | スイートを整理するための階層パス (例: `myapp.orders`) |
+| `-- %test` | プロシージャ仕様部 | テスト・メソッドとしてマーク。括弧内に表示名を指定可能 |
+| `-- %beforeall` | プロシージャ仕様部 | スイート内の全テストの前に 1 回実行 |
+| `-- %afterall` | プロシージャ仕様部 | スイート内の全テストの後に 1 回実行 |
+| `-- %beforeeach` | プロシージャ仕様部 | 各テストの前に実行 |
+| `-- %aftereach` | プロシージャ仕様部 | 各テストの後に実行 |
+| `-- %throws(error_code)` | テスト・プロシージャ | 期待される例外。このエラーが発生すればテスト成功 |
+| `-- %disabled` | プロシージャ仕様部 | テスト実行時にこのテストをスキップ |
+| `-- %context(name)` | インライン | スイート内のテストをサブコンテキストにグループ化 |
+| `-- %endcontext` | インライン | コンテキスト・グループの終了 |
+| `-- %tags(tag1,tag2)` | テスト/スイート | テストを選択的に実行するためのタグ |
 
 ---
 
-## Full Assertion API
+## フル・アサーション API
 
-### Basic Expectations
+### 基本的な期待値 (Expectations)
 
 ```sql
--- Equality
+-- 等価性
 ut.expect(actual_value).to_equal(expected_value);
 ut.expect(actual_value).not_to_equal(expected_value);
 
--- NULL checks
+-- NULL チェック
 ut.expect(l_var).to_be_null();
 ut.expect(l_var).not_to_be_null();
 
@@ -245,34 +215,34 @@ ut.expect(l_var).not_to_be_null();
 ut.expect(l_flag).to_be_true();
 ut.expect(l_flag).to_be_false();
 
--- Numeric comparisons
+-- 数値比較
 ut.expect(l_count).to_be_greater_than(0);
 ut.expect(l_count).to_be_greater_or_equal(1);
 ut.expect(l_count).to_be_less_than(100);
 ut.expect(l_count).to_be_less_or_equal(99);
 ut.expect(l_count).to_be_between(1, 99);
 
--- Like pattern
+-- LIKE パターン
 ut.expect(l_message).to_be_like('%ERROR%');
 ut.expect(l_message).not_to_be_like('%SUCCESS%');
 
--- Case insensitive match
+-- 大文字小文字を区別しない一致
 ut.expect(l_name).to_be_like_ignoring_case('%smith%');
 ```
 
-### Collection and Cursor Assertions
+### コレクションとカーソルのアサーション
 
 ```sql
--- Comparing result sets (most powerful assertion)
+-- 結果セットの比較 (最も強力なアサーション)
 DECLARE
   l_actual   SYS_REFCURSOR;
   l_expected SYS_REFCURSOR;
 BEGIN
-  -- Open actual results cursor
+  -- 実際の値を取得するカーソル
   OPEN l_actual FOR
     SELECT * FROM orders WHERE customer_id = 99999 ORDER BY order_id;
 
-  -- Open expected results cursor
+  -- 期待される値のカーソル
   OPEN l_expected FOR
     SELECT * FROM (
       VALUES ROW(1001, 99999, 'PENDING', SYSDATE),
@@ -283,39 +253,39 @@ BEGIN
   ut.expect(l_actual).to_equal(l_expected);
 END;
 
--- Cursor with column exclusions (ignore timestamps in comparison)
+-- 一部の列を除外した比較 (タイムスタンプなどを無視する場合に便利)
 ut.expect(l_actual).to_equal(l_expected)
   .exclude_columns(ut_varchar2_list('created_at', 'updated_at'));
 
--- Cursor unordered comparison
+-- 順序を問わない比較
 ut.expect(l_actual).to_equal(l_expected).unordered;
 
--- Collection assertion
+-- コレクションのアサーション
 DECLARE
   l_actual   ut_varchar2_list;
   l_expected ut_varchar2_list;
 BEGIN
-  -- ... populate l_actual from function under test ...
+  -- ... l_actual にテスト対象の出力を投入 ...
   l_expected := ut_varchar2_list('Alice', 'Bob', 'Carol');
 
   ut.expect(l_actual).to_equal(l_expected);
 END;
 ```
 
-### Exception Testing
+### 例外のテスト
 
 ```sql
--- Method 1: %throws annotation (cleanest for single expected exception)
+-- 方法 1: %throws アノテーション (単一の例外を期待する場合に最もシンプル)
 -- %throws(-20001)
 PROCEDURE test_invalid_input IS
 BEGIN
-  validate_customer(NULL);  -- should raise ORA-20001
+  validate_customer(NULL);  -- ORA-20001 が発生するはず
 END;
 
--- Method 2: Inline exception test with ut.expect().to_throw()
+-- 方法 2: ut.expect().to_throw() によるインライン・テスト
 PROCEDURE test_multiple_exception_cases IS
 BEGIN
-  -- Test that procedure raises when called with bad data
+  -- 無効なデータで呼び出した際に例外が発生することをテスト
   ut.expect(
     PROCEDURE() IS BEGIN validate_customer(NULL); END;
   ).to_throw(-20001);
@@ -328,28 +298,28 @@ END;
 
 ---
 
-## Test Data Isolation Strategies
+## テスト・データの分離戦略
 
-### Strategy 1: Rollback via Savepoints (Default utPLSQL Behavior)
+### 戦略 1: セーブポイントによるロールバック (utPLSQL のデフォルト動作)
 
-utPLSQL wraps each test in a transaction. By default it does NOT rollback — your tests must manage transactions.
+utPLSQL は各テストをトランザクションで囲みます。デフォルトでは**ロールバックされません**。テスト内でトランザクションを管理する必要があります。
 
 ```sql
--- Best practice: don't commit in tests
--- Use ROLLBACK or rely on test cleanup procedures
+-- ベスト・プラクティス: テスト内ではコミットしない
+-- ROLLBACK を使用するか、テスト・クリーンアップ・プロシージャに任せる
 
 -- %beforeeach
 PROCEDURE reset_state IS
 BEGIN
-  ROLLBACK;  -- undo anything from previous test
+  ROLLBACK;  -- 前のテストの影響を元に戻す
   DELETE FROM orders WHERE customer_id = 99999;
 END reset_state;
 ```
 
-### Strategy 2: Autonomous Transaction for Test Data
+### 戦略 2: テスト・データ用の自律型トランザクション
 
 ```sql
--- Insert test data that survives the test transaction context
+-- テストのトランザクション・コンテキストに依存しないテスト・データの挿入
 -- %beforeall
 PROCEDURE setup_test_data IS
   PRAGMA AUTONOMOUS_TRANSACTION;
@@ -367,34 +337,34 @@ BEGIN
 END cleanup_test_data;
 ```
 
-### Strategy 3: Dedicated Test Schema
+### 戦略 3: 専用テスト・スキーマ
 
-Run tests in a schema that mirrors production, populated with known test data. Reset the schema between test runs using a schema refresh script.
+本番環境のコピーであるテスト専用スキーマを使用します。テスト実行の合間に、リフレッシュ・スクリプト等を使用してスキーマをリセットします。
 
 ---
 
-## Running Tests
+## テストの実行
 
-### From SQL*Plus or SQLcl
+### SQL*Plus または SQLcl から
 
 ```sql
--- Run all tests visible to current user
+-- 現在のユーザーに見えるすべてのテストを実行
 BEGIN ut.run(); END;
 /
 
--- Run specific suite
+-- 特定のスイートを実行
 BEGIN ut.run('test_order_mgmt_pkg'); END;
 /
 
--- Run tests by path
+-- パス指定で実行
 BEGIN ut.run('myapp.orders'); END;
 /
 
--- Run specific test
+-- 特定のテスト・メソッドを実行
 BEGIN ut.run('test_order_mgmt_pkg.test_create_order_valid'); END;
 /
 
--- Run with specific reporter
+-- 特定のリポーターを指定して実行
 BEGIN
   ut.run(
     a_paths    => ut_varchar2_list(':myapp'),
@@ -404,59 +374,36 @@ END;
 /
 ```
 
-### JUnit XML Output (for CI/CD)
+### JUnit XML 出力 (CI/CD 用)
 
 ```bash
-# Using the utPLSQL CLI (recommended for CI/CD)
+# utPLSQL CLI を使用 (CI/CD に推奨)
 # https://github.com/utPLSQL/utPLSQL-cli
 
 utplsql run user/password@//host:1521/service \
   -p=':myapp' \
   -f=ut_junit_reporter \
   -o=test-results.xml \
-  -c  # enable color output
+  -c  # カラー出力を有効化
 ```
 
-```sql
--- From SQL, generate JUnit XML to a file
-DECLARE
-  l_reporter  ut_junit_reporter := ut_junit_reporter();
-  l_file      UTL_FILE.FILE_TYPE;
-BEGIN
-  ut.run(
-    a_paths    => ut_varchar2_list(':myapp'),
-    a_reporter => l_reporter
-  );
+### 利用可能なリポーター
 
-  -- Write XML output to file
-  l_file := UTL_FILE.FOPEN('TEST_OUTPUT_DIR', 'results.xml', 'w', 32767);
-  FOR line IN (
-    SELECT column_value FROM TABLE(l_reporter.get_lines())
-  ) LOOP
-    UTL_FILE.PUT_LINE(l_file, line.column_value);
-  END LOOP;
-  UTL_FILE.FCLOSE(l_file);
-END;
-/
-```
-
-### Available Reporters
-
-| Reporter | Output Format | Use Case |
+| リポーター | 出力形式 | 主な用途 |
 |---|---|---|
-| `ut_documentation_reporter` | Human-readable text | Local development |
+| `ut_documentation_reporter` | 人間が読みやすいテキスト | ローカル開発 |
 | `ut_junit_reporter` | JUnit XML | CI/CD (Jenkins, GitLab CI, GitHub Actions) |
-| `ut_sonar_test_reporter` | SonarQube format | SonarQube integration |
-| `ut_teamcity_reporter` | TeamCity format | JetBrains TeamCity |
-| `ut_tap_reporter` | TAP (Test Anything Protocol) | Generic CI tools |
-| `ut_coveralls_reporter` | Coveralls JSON | Coveralls code coverage service |
+| `ut_sonar_test_reporter` | SonarQube 形式 | SonarQube 連携 |
+| `ut_teamcity_reporter` | TeamCity 形式 | JetBrains TeamCity |
+| `ut_tap_reporter` | TAP (Test Anything Protocol) | 汎用 CI ツール |
+| `ut_coveralls_reporter` | Coveralls JSON | Coveralls コード・カバレッジ・サービス |
 
 ---
 
-## Code Coverage Reporting
+## コード・カバレッジ・レポート
 
 ```sql
--- Enable coverage collection during test run
+-- テスト実行中にカバレッジ収集を有効化
 BEGIN
   ut.run(
     a_paths              => ut_varchar2_list(':myapp'),
@@ -467,7 +414,7 @@ BEGIN
 END;
 /
 
--- View coverage results
+-- カバレッジ結果の確認
 SELECT object_name, object_type,
        covered_lines,
        total_lines,
@@ -478,29 +425,29 @@ ORDER BY pct_covered;
 
 ---
 
-## Mocking with utPLSQL
+## モック (Mocking)
 
-utPLSQL supports procedure/function mocking through the `ut_mock` API (available in utPLSQL v3.1+).
+utPLSQL は `ut_mock` API を通じてプロシージャ/ファンクションのモックをサポートしています（utPLSQL v3.1+ ）。
 
 ```sql
--- Simple mock: stub a dependency
--- The code under test calls external_service_pkg.send_email()
--- We mock it so tests don't actually send emails
+-- 指定した依存関係をスタックする（モック化する）
+-- テスト対象コードが external_service_pkg.send_email() を呼び出すとする
+-- 実際にメールを送信しないようにモック化する
 
--- %test(Order confirmation email is triggered)
+-- %test(注文完了メールが送信されること)
 PROCEDURE test_order_email_sent IS
 BEGIN
-  -- Set up mock: record calls to send_email
+  -- モック設定: send_email の呼び出しを記録し、常に TRUE を返すようにする
   ut_mock.set_mock(
     a_object_name  => 'external_service_pkg',
     a_method_name  => 'send_email',
     a_return_value => TRUE
   );
 
-  -- Act: process order (which internally calls send_email)
+  -- Act: 注文処理 (内部で send_email が呼ばれる)
   order_mgmt_pkg.create_order(p_customer_id => 99999, p_order_id => l_id);
 
-  -- Assert: send_email was called exactly once
+  -- Assert: send_email が正確に 1 回呼ばれたことを検証
   ut_mock.verify_call_count(
     a_object_name => 'external_service_pkg',
     a_method_name => 'send_email',
@@ -511,9 +458,9 @@ END test_order_email_sent;
 
 ---
 
-## CI/CD Integration
+## CI/CD 統合
 
-### GitHub Actions Example
+### GitHub Actions の例
 
 ```yaml
 name: PL/SQL Tests
@@ -549,37 +496,37 @@ jobs:
 
 ---
 
-## Best Practices
+## ベスト・プラクティス
 
-- Write tests before or alongside the code (TDD or parallel development).
-- Each test procedure should test exactly ONE behavior or scenario.
-- Use `%beforeeach` for state that changes per test; use `%beforeall` for expensive setup that can be shared.
-- Never use hardcoded IDs that might conflict with existing data — use sequences or known-safe ranges.
-- Test both the happy path AND error conditions (`%throws`).
-- Cursor assertions are the most powerful way to test data-returning functions — use them instead of COUNT(*) checks.
-- Use `.exclude_columns()` to ignore non-deterministic columns like `created_at` in cursor comparisons.
-- Aim for > 80% code coverage as a minimum; focus on branch coverage, not just line coverage.
-- Integrate tests into CI/CD pipelines — run on every commit.
-- Use `-- %tags` to separate fast unit tests from slow integration tests.
+- コードを書く前、または同時にテストを書く（TDD または並行開発）。
+- 各テスト・プロシージャは、正確に** 1 つの** 振る舞いやシナリオをテストすべきである。
+- 各テストで変わる状態には `%beforeeach` を使用し、テスト間で共有できる高コストなセットアップには `%beforeall` を使用する。
+- 既存データと衝突する可能性のある ID をハードコードしない。シーケンスや既知の安全な範囲を使用する。
+- 正常系（ハッピー・パス）だけでなく、異常系（`%throws`）もテストする。
+- カーソル・アサーションはデータを返す機能をテストする最も強力な方法であり、単純な `COUNT(*)` よりも推奨される。
+- `.exclude_columns()` を使用して、比較時に `created_at` などの非決定的な列を無視する。
+- 最低 80% 以上のカバレッジを目指し、単なる行カバレッジではなく分岐カバレッジを重視する。
+- テストを CI/CD パイプラインに統合し、コミットごとに実行する。
+- `-- %tags` を使用して、高速なユニット・テストと低速な統合テストを分ける。
 
 ---
 
-## Common Mistakes
+## よくある間違い
 
-| Mistake | Problem | Fix |
+| 間違い | 問題点 | 解決策 |
 |---|---|---|
-| Committing in test procedures | Leaves permanent test data in DB | Use `ROLLBACK` in `%aftereach` or avoid commits |
-| Testing implementation details (not behavior) | Tests break on refactor | Test via the public API only |
-| No teardown | Test data accumulates, causing future test failures | Always have `%afterall` cleanup |
-| Hardcoded IDs in test data | Conflicts with other data | Use sequences, or known-safe negative/large IDs |
-| Using `WHEN OTHERS THEN NULL` in tests | Test always passes even when code throws | Never swallow exceptions in test procedures |
-| Asserting only COUNT(*) | Doesn't validate actual data values | Use cursor assertions for full content validation |
-| Not testing edge cases | Happy-path-only coverage | Add tests for NULL inputs, empty sets, boundary values |
+| テスト内でコミットする | データベースにテスト・データが永続的に残る | `%aftereach` で `ROLLBACK` するかコミットを避ける |
+| 実装の詳細をテストする | リファクタリング時にテストが壊れる | 公開 API の振る舞いのみをテストする |
+| 後片付け (Teardown) を行わない | テスト・データが蓄移し、将来のテスト失敗の原因になる | 常に `%afterall` でクリーンアップを行う |
+| テスト・データに ID をハードコードする | 他のデータと衝突する | シーケンスを使用するか、既知の安全な ID 範囲を使用する |
+| テスト内で `WHEN OTHERS THEN NULL` を使う | エラーが発生してもテストが成功してしまう | テスト・メソッド内で例外を握りつぶさない |
+| `COUNT(*)` だけを検証する | 実際のデータ内容が正しいか検証できない | フル・コンテンツ検証にはカーソル・アサーションを使用する |
+| 境界値テストを行わない | 正常系しかカバーされない | NULL 入力、空セット、境界値のテストを追加する |
 
 ---
 
-## Sources
+## ソース
 
-- [utPLSQL Documentation](https://utplsql.org/utPLSQL/latest/) — annotations, assertion API, reporters, coverage, mocking
-- [utPLSQL GitHub Repository](https://github.com/utPLSQL/utPLSQL) — installation, v3.x release notes
-- [utPLSQL-cli GitHub Repository](https://github.com/utPLSQL/utPLSQL-cli) — CLI runner, JUnit XML output
+- [utPLSQL ドキュメント](https://utplsql.org/utPLSQL/latest/) — アノテーション、アサーション API、リポーター、カバレッジ、モック
+- [utPLSQL GitHub ワークスペース](https://github.com/utPLSQL/utPLSQL) — インストール、v3.x リリース・ノート
+- [utPLSQL-cli GitHub ワークスペース](https://github.com/utPLSQL/utPLSQL-cli) — CLI ランナー、JUnit XML 出力
